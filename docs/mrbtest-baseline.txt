@@ -1,0 +1,117 @@
+file                   asserts     OK    KO  Crash  Syntax  Skip  Warn TopErr   pass%  status
+argumenterror.rb             4      0     2      1       1     0     0      0    0.0%  
+array.rb                    64     29     5     17      13     0     0      0   45.3%  
+basicobject.rb               5      2     0      2       1     0     0      0   40.0%  
+bs_block.rb                 46     25     0      0      21     0     0      0   54.3%  
+bs_literal.rb                9      9     0      0       0     0     0      0  100.0%  
+class.rb                    49     16     4      4      25     0     0      0   32.7%  
+codegen.rb                  22      6     0      3      13     0     0      1   27.3%  
+comparable.rb                7      6     0      1       0     0     0      0   85.7%  
+ensure.rb                    6      1     1      0       3     0     0      0   16.7%  
+enumerable.rb               23     17     0      3       3     0     0      0   73.9%  
+env.rb                       8      0     0      8       0     0     0      0    0.0%  
+exception.rb                39     10     6     13      10     0     0      0   25.6%  
+false.rb                     6      3     0      0       3     0     0      0   50.0%  
+float.rb                    31      0     0      0       0     0     0      1    0.0%  
+gc.rb                       27      0     0     26       1     0     0      0    0.0%  
+hash.rb                     36      3     0     12      21     0     0      0    8.3%  
+indexerror.rb                1      1     0      0       0     0     0      0  100.0%  
+integer.rb                  45     23     3     16       2     0     0      1   51.1%  
+iterations.rb                4      4     0      0       0     0     0      0  100.0%  
+kernel.rb                   43     14     4     16       9     0     0      4   32.6%  
+lang.rb                      2      2     0      0       0     0     0      0  100.0%  
+literals.rb                 12      2     1      2       7     0     0     25   16.7%  
+localjumperror.rb            1      1     0      0       0     0     0      0  100.0%  
+methods.rb                  12      2     0      5       5     0     0      0   16.7%  
+module.rb                   65      7     1     21      36     0     0      0   10.8%  
+nameerror.rb                 3      1     0      2       0     0     0      0   33.3%  
+nil.rb                       9      4     0      0       5     0     0      0   44.4%  
+nomethoderror.rb             2      1     0      1       0     0     0      0   50.0%  
+numeric.rb                   8      1     0      5       2     0     0      0   12.5%  
+object.rb                    2      2     0      0       0     0     0      0  100.0%  
+platform.rb                  2      0     0      2       0     0     0      0    0.0%  
+proc.rb                     15      1     0      5       9     0     0      0    6.7%  
+range.rb                    22      7     1      6       8     0     0      0   31.8%  
+rangeerror.rb                1      0     0      1       0     0     0      0    0.0%  
+refinement.rb               42      2     4     24      12     0     0     21    4.8%  
+regexperror.rb               0      0     0      0       0     0     0      0    0.0%  
+runtimeerror.rb              1      1     0      0       0     0     0      0  100.0%  
+standarderror.rb             1      1     0      0       0     0     0      0  100.0%  
+string.rb                  104     26    10     33       9     0     0     26   25.0%  
+superclass.rb                1      0     0      0       1     0     0      0    0.0%  
+symbol.rb                   10      6     0      2       2     0     0      0   60.0%  
+syntax.rb                  120      7     4     27      82     0     0      3    5.8%  
+sysfail.rb                   1      0     0      1       0     0     0      0    0.0%  
+true.rb                      6      3     0      0       3     0     0      0   50.0%  
+typeerror.rb                 1      1     0      0       0     0     0      0  100.0%  
+unicode.rb                   3      0     2      0       1     0     0      0    0.0%  
+version.rb                   1      0     0      1       0     0     0      0    0.0%  
+vformat.rb                   1      0     0      0       1     0     0      0    0.0%  
+----------------------------------------------------------------------------------------------------
+TOTAL                      923    247    48    260     309     0     0     82   26.8%
+
+Most common syntax errors (asserts affected):
+     27  class/module name must be a CONSTANT (found Kw(SelfKw))
+     26  unexpected token (found Gt)
+     21  unexpected token (found Star)
+     18  expected 'end' (found Ident("in"))
+     17  unexpected token (found Dot)
+     14  class variables (@@x) are not supported yet
+     14  unexpected token (found Percent)
+     12  expected method name after '.' (found LParen)
+     12  unexpected token (found Comma)
+     10  unexpected token (found Colon2)
+      8  expected 'end' (found Eof)
+      7  unexpected token (found Assign)
+      7  unexpected token (found Dot2)
+      7  unexpected token (found Kw(End))
+      7  unsupported parameter (only `a` and `a = default` for now) (found Ident("args"))
+      7  unsupported parameter (only `a` and `a = default` for now) (found Ident("b"))
+      6  expected method name after '.' (found RBracket)
+      6  unexpected character '~'
+      5  unsupported block parameter (found Ident("b"))
+      5  unsupported block parameter (found Ident("c"))
+
+Most common exceptions inside asserts:
+     40  NoMethodError: undefined method 'new' for class Class
+     28  NoMethodError: undefined method 'const_defined?' for class Object
+     16  NoMethodError: undefined method 'stress' for an instance of Object
+     12  NameError: uninitialized constant GC
+     10  NoMethodError: undefined method 'defined?' for an instance of Object
+      8  NameError: uninitialized constant FrozenError
+      6  NoMethodError: undefined method 'new' for class Module
+      6  NoMethodError: undefined method 'new' for class Proc
+      4  NameError: uninitialized constant TestNotImplement
+      4  NoMethodError: undefined method 'ar_entries' for an instance of Object
+      4  NoMethodError: undefined method 'env_capture' for an instance of Object
+      4  NoMethodError: undefined method 'exception' for class Exception
+      3  NoMethodError: undefined method 'downcase!' for an instance of String
+      3  NoMethodError: undefined method 'message' for nil
+      2  NameError: uninitialized constant MRUBY_PLATFORM
+      2  NameError: uninitialized constant RangeError
+      2  NoMethodError: undefined method '__LINE__' for an instance of Object
+      2  NoMethodError: undefined method 'baz' for an instance of RefTestC
+      2  NoMethodError: undefined method 'capitalize!' for an instance of String
+      2  NoMethodError: undefined method 'class_eval' for class Integer
+
+Most common top-level errors:
+     24  uninitialized constant UTF8STRING (NameError)
+      3  undefined method 'const_defined?' for class Object (NoMethodError)
+      2  undefined method 'c' for an instance of Object (NoMethodError)
+      2  uninitialized constant F (NameError)
+      1  undefined method '__ENCODING__' for an instance of Object (NoMethodError)
+      1  undefined method 'aaa' for an instance of Object (NoMethodError)
+      1  undefined method 'bbb' for an instance of Object (NoMethodError)
+      1  undefined method 'c1' for an instance of Object (NoMethodError)
+      1  undefined method 'd' for an instance of Object (NoMethodError)
+      1  undefined method 'e' for an instance of Object (NoMethodError)
+      1  undefined method 'foo' for an instance of Object (NoMethodError)
+      1  undefined method 'mm1' for an instance of Object (NoMethodError)
+      1  undefined method 'mm2' for an instance of Object (NoMethodError)
+      1  undefined method 'mm3' for an instance of Object (NoMethodError)
+      1  undefined method 'nn1' for an instance of Object (NoMethodError)
+      1  undefined method 'orig_aref' for class Array (NoMethodError)
+      1  undefined method 'prepend' for class RefTestP (NoMethodError)
+      1  undefined method 'prepend' for class RespondToVisibilityPrepender (NoMethodError)
+      1  undefined method 'q' for an instance of Object (NoMethodError)
+      1  undefined method 'qq' for an instance of Object (NoMethodError)
