@@ -1139,9 +1139,13 @@ impl Lexer {
         if matches!(c2, '~' | '-') {
             return id_start(self.peek_at(3)) && (!self.value_before() || spc);
         }
-        (is_ident_start(c2) || c2 == '"' || c2 == '\'')
-            && self.literal_allowed(spc)
-            && !self.value_before()
+        if !self.value_before() {
+            return id_start(c2);
+        }
+        // `write <<EOS` is a command call with a heredoc argument, `a <<b` a
+        // shift: the lexer doesn't know locals, so require an uppercase or
+        // quoted terminator after an identifier
+        (c2.is_ascii_uppercase() || c2 == '"' || c2 == '\'') && self.literal_allowed(spc)
     }
 
     fn heredoc(&mut self) -> Result<Tok, String> {

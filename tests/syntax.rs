@@ -91,11 +91,19 @@ fn literals() {
         p ?a, "\x41\u{42 43}", 0b101, 0o17, 0x1f, 0_10, 1_000
         name = "x"
         p :"sym_#{name}", {"key": 1, name:}
+        def show(s) = p(s)
+        show <<EOS
+__END__
+EOS
+        a = [1]
+        b = 2
+        a <<b
+        p a
     "##;
     assert_eq!(
         run(src),
         "[\"a\", \"b c\"]\n[:x, :y]\n[\"2x\", \"y\"]\n\"indented\\n  more\\n\"\n\"a\"\n\"ABC\"\n5\n15\n31\n8\n1000\n\
-         :sym_x\n{key: 1, name: \"x\"}\n"
+         :sym_x\n{key: 1, name: \"x\"}\n\"__END__\\n\"\n[1, 2]\n"
     );
 }
 
