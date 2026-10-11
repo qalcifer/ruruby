@@ -962,7 +962,9 @@ impl Parser {
         if !self.spc() {
             return false;
         }
-        let next_tight = !self.spc_at(1);
+        // `a -1` is a command call; `a -` at the end of a line continues the expression
+        let next_tight =
+            !self.spc_at(1) && !matches!(self.peek_n(1), Tok::Newline | Tok::Semi | Tok::Eof);
         match self.peek() {
             Tok::Int(_)
             | Tok::Float(_)

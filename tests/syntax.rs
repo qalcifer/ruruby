@@ -204,3 +204,17 @@ fn pattern_matching() {
          true\ntrue\n3\n[\"x\", [7]]\nNoMatchingPatternError\n"
     );
 }
+
+#[test]
+fn line_continuation() {
+    let src = r##"
+        a = [1, 2]
+        x = (a.size +
+          3)
+        p x
+        y = a.size -
+          1
+        p y
+    "##;
+    assert_eq!(run(src), "5\n1\n");
+}
