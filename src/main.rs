@@ -7,6 +7,7 @@ use std::process::ExitCode;
 const USAGE: &str = "\
 Usage: ruruby [options] [programfile] [arguments]
   -e 'code'    run one line of script
+  -c           check syntax only (compile without running)
   --dump       print the compiled bytecode before running (like `mruby -v`)
   --version    print the version
   -h, --help   show this message
@@ -25,6 +26,7 @@ fn main() -> ExitCode {
 
 fn run(args: Vec<String>) -> ExitCode {
     let mut dump = false;
+    let mut check = false;
     let mut code: Option<String> = None;
     let mut file: Option<String> = None;
     let mut it = args.into_iter();
@@ -39,6 +41,7 @@ fn run(args: Vec<String>) -> ExitCode {
                 }
             },
             "--dump" | "-v" => dump = true,
+            "-c" => check = true,
             "--version" => {
                 println!(
                     "ruruby {} (mruby-style Ruby interpreter in Rust)",
@@ -85,6 +88,10 @@ fn run(args: Vec<String>) -> ExitCode {
     let result = interp.compile_file(&src, &name, 1).and_then(|irep| {
         if dump {
             print!("{}", irep.dump(&interp.vm.syms));
+        }
+        if check {
+            println!("Syntax OK");
+            return Ok(Value::Nil);
         }
         let r = interp.run(irep);
         let at_exit = interp.run_at_exit();
