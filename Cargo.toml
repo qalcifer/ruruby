@@ -1,0 +1,13 @@
+[package]
+name = "ruruby"
+version = "0.1.0"
+edition = "2024"
+description = "A Ruby interpreter in Rust, structured after mruby"
+license = "MIT"
+default-run = "ruruby"
+
+[dependencies]
+
+[profile.release]
+codegen-units = 1
+lto = true

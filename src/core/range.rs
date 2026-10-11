@@ -1,0 +1,164 @@
+//! Range. mruby: `src/range.c`, `mrblib/range.rb`, `mruby-range-ext`.
+
+use super::*;
+
+pub fn range_vec(vm: &mut Vm, r: &(Value, Value, bool)) -> Result<Vec<Value>, Unwind> {
+    match (&r.0, &r.1) {
+        (Value::Int(lo), Value::Int(hi)) => {
+            let hi = if r.2 { *hi - 1 } else { *hi };
+            Ok((*lo..=hi).map(Value::Int).collect())
+        }
+        (Value::Str(lo), Value::Str(hi)) => {
+            let (lo, hi) = (lo.borrow().clone(), hi.borrow().clone());
+            let mut out = Vec::new();
+            let mut cur = Value::str(lo);
+            loop {
+                let s = str_of(vm, &cur)?;
+                if s.chars().count() > hi.chars().count() {
+                    break;
+                }
+                if s == hi {
+                    if !r.2 {
+                        out.push(cur);
+                    }
+                    break;
+                }
+                let next = vm.send(&cur, "succ", vec![])?;
+                out.push(cur);
+                cur = next;
+            }
+            Ok(out)
+        }
+        (lo, _) => Err(vm.type_err(format!("can't iterate from {}", vm.class_name(lo)))),
+    }
+}
+
+fn this(vm: &Vm, s: &Value) -> Result<Rc<(Value, Value, bool)>, Unwind> {
+    match s {
+        Value::Range(r) => Ok(r.clone()),
+        _ => Err(vm.type_err("expected a Range")),
+    }
+}
+
+pub fn init(vm: &mut Vm) {
+    let c = vm.c.range.clone();
+    c.includes.borrow_mut().push(vm.c.enumerable.clone());
+    vm.def(&c, "first", |vm, s, a, _| {
+        let r = this(vm, s)?;
+        if a.is_empty() {
+            return Ok(r.0.clone());
+        }
+        let n = int_of(vm, &a[0])?.max(0) as usize;
+        let v = range_vec(vm, &r)?;
+        Ok(Value::array(v.into_iter().take(n).collect()))
+    });
+    vm.def(&c, "begin", |vm, s, _, _| Ok(this(vm, s)?.0.clone()));
+    vm.def(&c, "last", |vm, s, a, _| {
+        let r = this(vm, s)?;
+        if a.is_empty() {
+            return Ok(r.1.clone());
+        }
+        let n = int_of(vm, &a[0])?.max(0) as usize;
+        let v = range_vec(vm, &r)?;
+        Ok(Value::array(v[v.len().saturating_sub(n)..].to_vec()))
+    });
+    vm.def(&c, "end", |vm, s, _, _| Ok(this(vm, s)?.1.clone()));
+    vm.def(&c, "exclude_end?", |vm, s, _, _| {
+        Ok(Value::Bool(this(vm, s)?.2))
+    });
+    vm.def(&c, "each", |vm, s, _, b| {
+        let b = need_block(vm, b)?;
+        let r = this(vm, s)?;
+        if let (Value::Int(lo), Value::Int(hi)) = (&r.0, &r.1) {
+            // no materialization for the common integer case
+            let hi = if r.2 { *hi - 1 } else { *hi };
+            for i in *lo..=hi {
+                vm.call_block(&b, vec![Value::Int(i)])?;
+            }
+        } else {
+            for x in range_vec(vm, &r)? {
+                vm.call_block(&b, vec![x])?;
+            }
+        }
+        Ok(s.clone())
+    });
+    vm.def(&c, "reverse_each", |vm, s, _, b| {
+        let b = need_block(vm, b)?;
+        let r = this(vm, s)?;
+        for x in range_vec(vm, &r)?.into_iter().rev() {
+            vm.call_block(&b, vec![x])?;
+        }
+        Ok(s.clone())
+    });
+    vm.def(&c, "step", |vm, s, a, b| {
+        let b = need_block(vm, b)?;
+        let r = this(vm, s)?;
+        let step = int_of(vm, &arg(a, 0))?;
+        if step <= 0 {
+            return Err(vm.arg_err("step can't be negative or zero"));
+        }
+        let (lo, hi) = (int_of(vm, &r.0)?, int_of(vm, &r.1)?);
+        let mut i = lo;
+        while i < hi || (!r.2 && i == hi) {
+            vm.call_block(&b, vec![Value::Int(i)])?;
+            i += step;
+        }
+        Ok(s.clone())
+    });
+    vm.def(&c, "size", size);
+    vm.def(&c, "count", |vm, s, a, b| {
+        if a.is_empty() && b.is_none() {
+            size(vm, s, a, b)
+        } else {
+            enumerable::count(vm, s, a, b)
+        }
+    });
+    let cover: NativeFn = |vm, s, a, _| {
+        let r = this(vm, s)?;
+        let x = arg(a, 0);
+        let above = compare(vm, &r.0, &x).map(|o| o.is_le()).unwrap_or(false);
+        let below = r.1.is_nil()
+            || compare(vm, &x, &r.1)
+                .map(|o| if r.2 { o.is_lt() } else { o.is_le() })
+                .unwrap_or(false);
+        Ok(Value::Bool(above && below))
+    };
+    for name in ["include?", "member?", "cover?", "==="] {
+        vm.def(&c, name, cover);
+    }
+    vm.def(&c, "to_s", |vm, s, _, _| {
+        let r = this(vm, s)?;
+        Ok(Value::str(format!(
+            "{}{}{}",
+            vm.to_s(&r.0)?,
+            if r.2 { "..." } else { ".." },
+            vm.to_s(&r.1)?
+        )))
+    });
+    vm.def(&c, "inspect", |vm, s, _, _| Ok(Value::str(vm.inspect(s)?)));
+    vm.def(&c, "sum", |vm, s, a, b| {
+        let r = this(vm, s)?;
+        match (&r.0, &r.1, b) {
+            (Value::Int(lo), Value::Int(hi), None) if a.is_empty() => {
+                let hi = if r.2 { hi - 1 } else { *hi };
+                if hi < *lo {
+                    return Ok(Value::Int(0));
+                }
+                let n = (hi - lo + 1) as i128;
+                Ok(Value::Int(((*lo as i128 + hi as i128) * n / 2) as i64))
+            }
+            _ => enumerable::sum(vm, s, a, b),
+        }
+    });
+}
+
+fn size(vm: &mut Vm, s: &Value, _: &[Value], _: Option<&Value>) -> crate::vm::VmResult {
+    let r = this(vm, s)?;
+    match (&r.0, &r.1) {
+        (Value::Int(lo), Value::Int(hi)) => {
+            let hi = if r.2 { hi - 1 } else { *hi };
+            Ok(Value::Int((hi - lo + 1).max(0)))
+        }
+        _ => Ok(Value::Int(range_vec(vm, &r)?.len() as i64)),
+    }
+}
