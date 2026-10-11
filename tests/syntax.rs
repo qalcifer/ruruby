@@ -166,11 +166,15 @@ fn control_flow() {
         p(begin; Proc.new { break }.call; rescue LocalJumpError => e; e.class; end)
         p defined?(foo), defined?(p), defined?(String), defined?(@x), defined?(r), defined?(nil)
         p nil&.length, "ab"&.length
+        n = 2
+        out = []
+        [:a, :b, :c].each { |v| n == 0 ? out << v : n -= 1 }
+        p out, n, (true ? m = 1 : 2), m
     "##;
     assert_eq!(
         run(src),
         "[3, 7]\n3\n3\n[:ok, 3]\n:ensure\n:cleanup\n10\nLocalJumpError\nnil\n\"method\"\n\"constant\"\nnil\n\
-         \"local-variable\"\n\"nil\"\nnil\n2\n"
+         \"local-variable\"\n\"nil\"\nnil\n2\n[:c]\n0\n1\n1\n"
     );
 }
 

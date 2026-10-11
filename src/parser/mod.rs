@@ -689,7 +689,8 @@ impl Parser {
             return Ok(c);
         }
         self.skip_nl();
-        let t = self.parse_ternary()?;
+        // branches are full `arg`s, so they may assign: `c ? a : n -= 1`
+        let t = self.parse_arg()?;
         self.skip_nl();
         // `a ? b :c` lexes `:c` as a symbol; it's really the identifier `c`
         if let Tok::Sym(s) = self.peek().clone()
@@ -706,7 +707,7 @@ impl Parser {
         }
         self.expect(&Tok::Colon)?;
         self.skip_nl();
-        let e = self.parse_ternary()?;
+        let e = self.parse_arg()?;
         Ok(Node::If(b(c), b(t), b(e)))
     }
 
