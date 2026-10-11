@@ -71,10 +71,11 @@ fn multiple_assignment_and_splats() {
         p args(*list, 3, **opts), [*list, *nil, 0], {**opts, y: 2}
         x = 1, 2
         p x
+        p args(0, * %w[a b], ** opts)
     "##;
     assert_eq!(
         run(src),
-        "[1, 2, [3, 4], 5]\n[1, 2]\n3\n{x: 1, y: 2}\n[[1, 2, 3], {z: 1}]\n[1, 2, 0]\n{z: 1, y: 2}\n[1, 2]\n"
+        "[1, 2, [3, 4], 5]\n[1, 2]\n3\n{x: 1, y: 2}\n[[1, 2, 3], {z: 1}]\n[1, 2, 0]\n{z: 1, y: 2}\n[1, 2]\n[[0, \"a\", \"b\"], {z: 1}]\n"
     );
 }
 

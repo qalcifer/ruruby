@@ -1087,7 +1087,9 @@ impl Parser {
                     }));
                     break;
                 }
-                Tok::Star if !self.spc_at(1) || self.arg_ends_at(1) => {
+                // at the start of an argument `*`/`**` can only be a splat,
+                // with or without a space after it
+                Tok::Star => {
                     self.advance();
                     args.push(Node::Splat(b(if self.arg_ends() {
                         Node::LVar("%rest".into())
@@ -1095,7 +1097,7 @@ impl Parser {
                         self.parse_arg()?
                     })));
                 }
-                Tok::Pow if !self.spc_at(1) || self.arg_ends_at(1) => {
+                Tok::Pow => {
                     self.advance();
                     pairs.push(HashItem::Splat(if self.arg_ends() {
                         Node::LVar("%kwrest".into())
