@@ -391,24 +391,28 @@ impl Parser {
             node = replace_assign_value(node, Node::Array(items));
         }
         loop {
-            node = if self.eat_kw(Kw::If) {
-                Node::If(b(self.parse_expr()?), b(node), b(Node::Nil))
-            } else if self.eat_kw(Kw::Unless) {
-                Node::If(b(self.parse_expr()?), b(Node::Nil), b(node))
-            } else if self.at_kw(Kw::While) || self.at_kw(Kw::Until) {
-                let until = self.advance() == Tok::Kw(Kw::Until);
-                let do_while = matches!(node, Node::Begin { .. });
-                Node::While {
-                    cond: b(self.parse_expr()?),
-                    body: b(node),
-                    until,
-                    do_while,
-                }
-            } else if self.eat_kw(Kw::Rescue) {
-                let fallback = self.parse_expr()?;
-                rescue_modifier(node, fallback)
-            } else {
+            let Tok::Kw(kw @ (Kw::If | Kw::Unless | Kw::While | Kw::Until | Kw::Rescue)) =
+                *self.peek()
+            else {
                 return Ok(node);
+            };
+            self.advance();
+            // the condition may start on the next line: `warn "x" if\n  cond`
+            self.skip_nl();
+            let rhs = self.parse_expr()?;
+            node = match kw {
+                Kw::If => Node::If(b(rhs), b(node), b(Node::Nil)),
+                Kw::Unless => Node::If(b(rhs), b(Node::Nil), b(node)),
+                Kw::Rescue => rescue_modifier(node, rhs),
+                _ => {
+                    let do_while = matches!(node, Node::Begin { .. });
+                    Node::While {
+                        cond: b(rhs),
+                        body: b(node),
+                        until: kw == Kw::Until,
+                        do_while,
+                    }
+                }
             };
         }
     }

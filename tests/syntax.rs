@@ -215,6 +215,12 @@ fn line_continuation() {
         y = a.size -
           1
         p y
+        p :mod if
+          y == 1
+        z = 0
+        z += 1 while
+          z < 3
+        p z
     "##;
-    assert_eq!(run(src), "5\n1\n");
+    assert_eq!(run(src), "5\n1\n:mod\n3\n");
 }
