@@ -234,6 +234,34 @@ enum Flow {
     Call(Frame),
 }
 
+/// Arguments of a call: an owned list, or `n` registers of the caller on
+/// the stack starting at `at` (Ruby→Ruby calls bind them without a copy
+/// into a list first).
+enum Args {
+    Owned(Vec<Value>),
+    Stack { at: usize, n: usize },
+}
+
+impl Args {
+    fn len(&self) -> usize {
+        match self {
+            Args::Owned(v) => v.len(),
+            Args::Stack { n, .. } => *n,
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn into_vec(self, vm: &Vm) -> Vec<Value> {
+        match self {
+            Args::Owned(v) => v,
+            Args::Stack { at, n } => vm.stack[at..at + n].to_vec(),
+        }
+    }
+}
+
 /// Bound arguments: the frame's registers plus what the prologue needs.
 struct Bound {
     base: usize,
@@ -928,7 +956,7 @@ impl Vm {
         args: Vec<Value>,
         block: Option<Value>,
     ) -> VmResult {
-        let call = self.start_call(recv.clone(), mid, args, block)?;
+        let call = self.start_call(recv.clone(), mid, Args::Owned(args), block)?;
         self.finish(call)
     }
 
@@ -937,7 +965,7 @@ impl Vm {
         &mut self,
         recv: Value,
         mid: Sym,
-        args: Vec<Value>,
+        args: Args,
         block: Option<Value>,
     ) -> Result<Call, Unwind> {
         match self.lookup(&recv, mid) {
@@ -945,9 +973,9 @@ impl Vm {
             None => {
                 if let Some((m, owner)) = self.lookup(&recv, self.s.method_missing) {
                     let mut margs = vec![Value::Sym(mid)];
-                    margs.extend(args);
+                    margs.extend(args.into_vec(self));
                     let mm = self.s.method_missing;
-                    return self.start_invoke(m, owner, recv, mm, margs, block);
+                    return self.start_invoke(m, owner, recv, mm, Args::Owned(margs), block);
                 }
                 Err(self.no_method(&recv, mid))
             }
@@ -1014,7 +1042,7 @@ impl Vm {
         args: Vec<Value>,
         block: Option<Value>,
     ) -> VmResult {
-        let call = self.start_invoke(m, owner, recv, mid, args, block)?;
+        let call = self.start_invoke(m, owner, recv, mid, Args::Owned(args), block)?;
         self.finish(call)
     }
 
@@ -1026,11 +1054,14 @@ impl Vm {
         owner: Rc<RClass>,
         recv: Value,
         mid: Sym,
-        args: Vec<Value>,
+        args: Args,
         block: Option<Value>,
     ) -> Result<Call, Unwind> {
         let v = match m {
-            Method::Native(f) => f(self, &recv, &args, block.as_ref())?,
+            Method::Native(f) => {
+                let args = args.into_vec(self);
+                f(self, &recv, &args, block.as_ref())?
+            }
             Method::AttrReader(iv) => {
                 if !args.is_empty() {
                     return Err(self.arity_err(args.len(), &ArgSpec::default()));
@@ -1047,7 +1078,7 @@ impl Vm {
                         },
                     ));
                 }
-                let v = args.into_iter().next().unwrap();
+                let v = args.into_vec(self).pop().unwrap();
                 self.ivar_set(&recv, iv, v.clone())?;
                 v
             }
@@ -1103,11 +1134,38 @@ impl Vm {
         &mut self,
         irep: &Irep,
         self_: &Value,
-        mut args: Vec<Value>,
+        args: Args,
         block: &Option<Value>,
         strict: bool,
     ) -> Result<Bound, Unwind> {
         let spec = &irep.spec;
+        // fast path: only required parameters, as many arguments, no keywords
+        if let Args::Stack { at, n } = args
+            && n == spec.req
+            && spec.opt == 0
+            && !spec.rest
+            && spec.post == 0
+            && !spec.takes_kw()
+            && !spec.nokw
+            && !spec.auto_splat
+            && !(n > 0 && matches!(&self.stack[at + n - 1], Value::Hash(h) if self.heap[h].borrow().kw))
+        {
+            let base = self.stack.len();
+            self.stack.resize(base + irep.nregs.max(1 + spec.nparams()), Value::Nil);
+            self.stack[base] = self_.clone();
+            for i in 0..n {
+                self.stack[base + 1 + i] = self.stack[at + i].clone();
+            }
+            if spec.block {
+                self.stack[base + 1 + n] = block.clone().unwrap_or(Value::Nil);
+            }
+            return Ok(Bound {
+                base,
+                opt_filled: 0,
+                kw_mask: 0,
+            });
+        }
+        let mut args = args.into_vec(self);
         // keyword arguments arrive as a trailing Hash marked `kw`
         let mut kwargs: Option<RHash> = None;
         if let Some(Value::Hash(h)) = args.last()
@@ -1246,14 +1304,14 @@ impl Vm {
         block: Option<Value>,
         call: ProcCall,
     ) -> VmResult {
-        let call = self.start_proc(blk, args, block, call)?;
+        let call = self.start_proc(blk, Args::Owned(args), block, call)?;
         self.finish(call)
     }
 
     fn start_proc(
         &mut self,
         blk: &Value,
-        args: Vec<Value>,
+        args: Args,
         block: Option<Value>,
         call: ProcCall,
     ) -> Result<Call, Unwind> {
@@ -1263,13 +1321,14 @@ impl Vm {
         let p = *p;
         match self.heap[p].body.clone() {
             ProcBody::SymCall(sym) => {
-                let mut it = args.into_iter();
+                let mut it = args.into_vec(self).into_iter();
                 let recv = it.next().ok_or_else(|| self.arg_err("no receiver given"))?;
                 Ok(Call::Done(self.call_method(&recv, sym, it.collect(), block)?))
             }
             ProcBody::Collect(buf) => {
+                let mut args = args.into_vec(self);
                 let v = if args.len() == 1 {
-                    args.into_iter().next().unwrap()
+                    args.pop().unwrap()
                 } else {
                     self.array(args)
                 };
@@ -1807,8 +1866,8 @@ impl Vm {
                     None
                 };
                 let tag = proc_tag(&blk);
+                let args = Args::Stack { at: f.base + a + 1, n: argc };
                 let Some((m, owner)) = self.lookup(&recv, mid) else {
-                    let args = (0..argc).map(|i| self.reg(f, a + 1 + i)).collect();
                     return self.call_flow(f, a, tag, |vm| vm.start_call(recv, mid, args, blk));
                 };
                 // natives take their arguments as a slice: no Vec for the common case
@@ -1823,7 +1882,6 @@ impl Vm {
                         Ok(Call::Done(native(vm, &recv, args, blk.as_ref())?))
                     });
                 }
-                let args = (0..argc).map(|i| self.reg(f, a + 1 + i)).collect();
                 return self.call_flow(f, a, tag, |vm| vm.start_invoke(m, owner, recv, mid, args, blk));
             }
             Op::SendV(a, mid, has_block) => {
@@ -1835,6 +1893,7 @@ impl Vm {
                     None
                 };
                 let tag = proc_tag(&blk);
+                let args = Args::Owned(args);
                 return self.call_flow(f, a, tag, |vm| vm.start_call(recv, mid, args, blk));
             }
             Op::Super(a, argc) => {
@@ -2081,12 +2140,14 @@ impl Vm {
         let self_ = f.self_.clone();
         let tag = proc_tag(&blk);
         if let Some((m, o)) = self.find_super(&self_, &owner, mid) {
+            let args = Args::Owned(args);
             return self.call_flow(f, a, tag, |vm| vm.start_invoke(m, o, self_, mid, args, blk));
         }
         if let Some((mm, mo)) = self.lookup(&self_, self.s.method_missing) {
             let mut margs = vec![Value::Sym(mid)];
             margs.extend(args);
             let name = self.s.method_missing;
+            let margs = Args::Owned(margs);
             return self.call_flow(f, a, tag, |vm| vm.start_invoke(mm, mo, self_, name, margs, blk));
         }
         let msg = format!("super: no superclass method '{}'", self.sym_name(mid));
@@ -2280,7 +2341,8 @@ impl Vm {
             self.set_reg(f, a, v);
             return Ok(Flow::Next);
         }
-        self.call_flow(f, a, 0, |vm| vm.start_call(x, mid, vec![y], None))
+        let args = Args::Stack { at: f.base + a + 1, n: 1 };
+        self.call_flow(f, a, 0, |vm| vm.start_call(x, mid, args, None))
     }
 
     fn cmp_flow(
@@ -2295,7 +2357,8 @@ impl Vm {
             self.set_reg(f, a, Value::Bool(num_cmp(&x, &y).is_some_and(pred)));
             return Ok(Flow::Next);
         }
-        self.call_flow(f, a, 0, |vm| vm.start_call(x, mid, vec![y], None))
+        let args = Args::Stack { at: f.base + a + 1, n: 1 };
+        self.call_flow(f, a, 0, |vm| vm.start_call(x, mid, args, None))
     }
 
     /// `a == b`, dispatching to user-defined `==` for objects.
