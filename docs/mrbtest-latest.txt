@@ -5,7 +5,7 @@ basicobject.rb               5      2     2      1       0     0     0      0   
 bs_block.rb                 46     46     0      0       0     0     0      0  100.0%  
 bs_literal.rb                9      9     0      0       0     0     0      0  100.0%  
 class.rb                    49     41     7      1       0     0     0      0   83.7%  
-codegen.rb                  22     20     1      1       0     0     0      0   90.9%  
+codegen.rb                  22     20     0      1       1     0     0      0   90.9%  
 comparable.rb                7      7     0      0       0     0     0      0  100.0%  
 ensure.rb                    6      6     0      0       0     0     0      0  100.0%  
 enumerable.rb               23     19     2      2       0     0     0      0   82.6%  
@@ -20,7 +20,7 @@ integer.rb                  45     31    10      4       0     0     0      0   
 iterations.rb                4      4     0      0       0     0     0      0  100.0%  
 kernel.rb                   43     22    12      9       0     0     0      0   51.2%  
 lang.rb                      2      2     0      0       0     0     0      0  100.0%  
-literals.rb                 12      9     1      0       1     1     0      1   75.0%  
+literals.rb                 12      9     1      0       1     1     0      6   75.0%  
 localjumperror.rb            1      1     0      0       0     0     0      0  100.0%  
 methods.rb                  12      6     2      4       0     0     0      0   50.0%  
 module.rb                   65     29    29      7       0     0     0      0   44.6%  
@@ -48,11 +48,11 @@ unicode.rb                   3      3     0      0       0     0     0      0  1
 version.rb                   1      0     0      1       0     0     0      0    0.0%  
 vformat.rb                   1      0     0      1       0     0     0      0    0.0%  
 ----------------------------------------------------------------------------------------------------
-TOTAL                      970    593   145    186       1     3     0      3   61.1%
+TOTAL                      970    593   144    186       2     3     0      8   61.1%
 
 Most common syntax errors (asserts affected):
-      1  expected RBracket (found Const("NN1"))
-      0  unexpected token (found RParen)
+      2  a heredoc can't start inside string interpolation
+      0  unexpected token (found RBracket)
 
 Most common exceptions inside asserts:
      32  ArgumentError: wrong number of arguments (given 7, expected 1)
@@ -72,6 +72,11 @@ Most common exceptions inside asserts:
       2  NoMethodError: undefined method 'byteslice' for an instance of String
 
 Most common top-level errors:
+      1  undefined method 'foo' for main:Object (NoMethodError)
       1  undefined method 'has_value?' for an instance of Hash (NoMethodError)
+      1  undefined method 'mm2' for main:Object (NoMethodError)
+      1  undefined method 'nn1' for main:Object (NoMethodError)
       1  undefined method 'qq' for main:Object (NoMethodError)
       1  uninitialized constant TestNotImplement (NameError)
+      1  uninitialized constant XXX2 (NameError)
+      1  uninitialized constant XXX3 (NameError)

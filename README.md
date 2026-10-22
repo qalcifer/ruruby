@@ -1,13 +1,17 @@
 # ruruby
 
-A Ruby interpreter in Rust, structured after [mruby](https://github.com/mruby/mruby):
-the same pipeline (parser → AST → register bytecode → VM), the same opcode
-vocabulary, and modules that map onto mruby's source files.
+A language with Ruby-based syntax, implemented in pure Rust (it builds for
+wasm). It is not a Ruby port: Ruby compatibility is not a goal and the syntax
+will diverge. The implementation is structured after
+[mruby](https://github.com/mruby/mruby): the same pipeline (parser → AST →
+register bytecode → VM), the same opcode vocabulary, and modules that map onto
+mruby's source files.
 
 ```sh
 cargo run --release -- examples/classes.rb
 cargo run -- -e 'puts (1..10).select(&:even?).map { |x| x * x }.sum'
 cargo run -- --dump -e 'p [1, 2].map { |x| x + 1 }'   # print bytecode, like `mruby -v`
+cargo run -- -c file.rb                            # check syntax only
 cargo run                                          # REPL
 cargo test
 cargo run --release --bin mrbtest   # run mruby's own test suite (needs ./mruby)

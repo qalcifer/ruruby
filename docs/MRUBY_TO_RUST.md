@@ -2,6 +2,12 @@
 
 This document covers what mruby is made of, how each part maps to Rust, what
 ruruby already implements, and the order in which to build the rest.
+
+**Goal (decided after step 2):** ruruby is a new language with Ruby-based
+syntax, not a Ruby port. mruby is the structural reference, not a
+compatibility target: Ruby features and quirks are added only when the
+language wants them, and the syntax will change. mruby's test suite remains a
+useful health signal, not a score to maximise.
 The mruby checkout analysed lives in `./mruby` (git-ignored; commit `7ecfbf6`, Oct 2026).
 
 ## 1. What mruby is
@@ -77,7 +83,10 @@ and `mruby-compiler/src/codegen.c` (7.4k).
   ivar of its own `self`). That's acceptable for a prototype; a tracing GC fixes it.
 * **Native recursion depth.** Each Ruby call is several Rust frames. `main.rs`
   runs the VM on a 1 GiB thread stack and the VM raises `SystemStackError` at
-  depth 10 000. Moving to an explicit call stack removes this limit.
+  depth 10 000. Moving to an explicit call stack removes this limit. The parser
+  and codegen recurse per nesting level, which `parser::MAX_DEPTH` bounds; keep
+  parser frames small (box large `Node` variants, `#[inline(never)]` on cold
+  helpers) so the limit can be raised toward Prism's 256.
 * `sort_by` in std may panic on inconsistent comparators, and Ruby `<=>` can be
   anything, so `core::merge_sort` is a small stable sort that propagates Ruby exceptions.
 
@@ -132,8 +141,9 @@ Tooling: `ruruby file.rb`, `ruruby -e '…'`, stdin, a REPL (`mirb`-style),
 
 Verified: `examples/*.rb` produce the same output as CRuby, apart from error-message
 wording (ruruby uses Ruby 3.4's wording) and `2**-1` (Ruby returns a Rational).
-`cargo test` runs 21 end-to-end tests (`tests/language.rs`, `tests/syntax.rs`)
-plus the harness test.
+`cargo test` runs 24 end-to-end tests (`tests/language.rs`, `tests/syntax.rs`),
+the harness test, and `tests/parse_corpus.rs` (compiles every `.rb` file in
+`./mruby`).
 
 ## 4. Roadmap (suggested order)
 
@@ -146,6 +156,14 @@ Each step can be checked against mruby's own tests.
    missing: a heredoc *started inside* `#{…}` whose body follows on the outer
    lines (needs interpolations lexed inline instead of as raw text), and a real
    `Regexp` class (literals already compile to `Regexp.compile`).
+   **2b.** ✅ Gaps found by compiling every `.rb` file in the mruby checkout
+   (`ruruby -c`, now the `parse_corpus` test): 279 → 290 of 297 files compile;
+   the rest are Rational/Complex/Bignum literals (step 7) and heredocs started
+   inside `#{}` (not supported, a Ruby oddity). Also: `#{}` is lexed by the main
+   tokenizer; binary operators use precedence climbing (one table, `binary_op`);
+   nesting is limited to `parser::MAX_DEPTH` = 100 levels, so deep input is a
+   SyntaxError instead of a stack overflow (a release build needs ≤ ~740 KiB of
+   stack at the limit, within wasm's default 1 MiB).
 3. **Explicit call stack.** Replace `execute` recursion with `Vec<CallInfo>` and
    a single value stack, as in `vm.c`. Required for Fibers, and it speeds up calls.
 4. **Garbage collector.** Replace `Rc` with a tracing GC (mark-sweep over an
