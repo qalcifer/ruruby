@@ -91,7 +91,7 @@ pub enum Op {
     /// `break` inside a block.
     Break(Reg),
     /// R[a] = R[a] + i (mruby: ADDI). Anything but an Integer without
-    /// overflow takes the slow path, which puts `i` in R[a+1].
+    /// overflow takes the slow path (Float, or a call to `+`).
     AddI(Reg, i64),
     /// R[a] = R[a] - i (mruby: SUBI)
     SubI(Reg, i64),

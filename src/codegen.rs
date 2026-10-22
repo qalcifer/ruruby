@@ -315,16 +315,7 @@ impl Codegen<'_> {
             },
             Node::LAsgn(name, val) => match self.lookup(name) {
                 Some((0, reg)) => {
-                    if fills_dst_last(val) {
-                        self.expr(val, reg)?;
-                    } else {
-                        // `x = (c ? x * 2 : x)` writes its destination before it
-                        // reads `x`: compute it elsewhere first
-                        let t = self.alloc();
-                        self.expr(val, t)?;
-                        self.emit(Op::Move(reg, t));
-                        self.free_to(t);
-                    }
+                    self.assign_local(name, reg, val)?;
                     if reg != dst {
                         self.emit(Op::Move(dst, reg));
                     }
@@ -442,14 +433,15 @@ impl Codegen<'_> {
                 until,
                 do_while,
             } => self.while_loop(cond, body, *until, *do_while, dst)?,
-            Node::Seq(nodes) => {
-                if nodes.is_empty() {
-                    self.emit(Op::LoadNil(dst));
+            Node::Seq(nodes) => match nodes.split_last() {
+                None => _ = self.emit(Op::LoadNil(dst)),
+                Some((last, init)) => {
+                    for n in init {
+                        self.stmt(n)?;
+                    }
+                    self.expr(last, dst)?;
                 }
-                for n in nodes {
-                    self.expr(n, dst)?;
-                }
-            }
+            },
             Node::Def {
                 recv,
                 name,
@@ -702,6 +694,59 @@ impl Codegen<'_> {
         Ok(())
     }
 
+    /// Compiles `node` for its effects only: its value is unused.
+    fn stmt(&mut self, node: &Node) -> CResult<()> {
+        match node {
+            Node::LAsgn(name, val) if matches!(self.lookup(name), Some((0, _))) => {
+                let Some((_, reg)) = self.lookup(name) else {
+                    unreachable!()
+                };
+                self.assign_local(name, reg, val)
+            }
+            Node::Seq(nodes) => nodes.iter().try_for_each(|n| self.stmt(n)),
+            _ => {
+                let t = self.alloc();
+                self.expr(node, t)?;
+                self.free_to(t);
+                Ok(())
+            }
+        }
+    }
+
+    /// `name = val` for a local of this scope (register `reg`).
+    fn assign_local(&mut self, name: &str, reg: Reg, val: &Node) -> CResult<()> {
+        // `i += 1`: one instruction on the local's register
+        if let Node::Call {
+            recv: Some(recv),
+            name: op,
+            args,
+            block: None,
+            block_arg: None,
+            safe: false,
+        } = val
+            && matches!(&**recv, Node::LVar(n) if n == name)
+            && let [Node::Int(i)] = args.as_slice()
+            && (op == "+" || op == "-")
+        {
+            self.emit(if op == "+" {
+                Op::AddI(reg, *i)
+            } else {
+                Op::SubI(reg, *i)
+            });
+            return Ok(());
+        }
+        if fills_dst_last(val) {
+            return self.expr(val, reg);
+        }
+        // `x = (c ? x * 2 : x)` writes its destination before it reads `x`:
+        // compute it elsewhere first
+        let t = self.alloc();
+        self.expr(val, t)?;
+        self.emit(Op::Move(reg, t));
+        self.free_to(t);
+        Ok(())
+    }
+
     /// Evaluates call arguments into `sp, sp+1, ...`. Returns the count, or
     /// None if they were splatted into a single Array (for `SendV`).
     fn args(&mut self, args: &[Node]) -> CResult<Option<usize>> {
@@ -750,13 +795,12 @@ impl Codegen<'_> {
         {
             let a = self.op_reg(dst);
             self.expr(recv, a)?;
-            let r = self.alloc();
-            // `x + 1`, `n - 2`: the operand is an immediate (R[a+1] stays
-            // reserved for the slow path)
+            // `x + 1`, `n - 2`: the operand is an immediate
             match (name, arg) {
                 ("+", Node::Int(i)) => _ = self.emit(Op::AddI(a, *i)),
                 ("-", Node::Int(i)) => _ = self.emit(Op::SubI(a, *i)),
                 _ => {
+                    let r = self.alloc();
                     self.expr(arg, r)?;
                     self.emit(op(a));
                 }
@@ -1024,7 +1068,7 @@ impl Codegen<'_> {
         if do_while {
             start = self.pc();
             self.cur().loops.last_mut().unwrap().body_start = start;
-            self.expr(body, t)?;
+            self.stmt(body)?;
             cond_pc = self.pc();
             self.expr(cond, t)?;
             self.emit(if until {
@@ -1044,7 +1088,7 @@ impl Codegen<'_> {
             }));
             let body_start = self.pc();
             self.cur().loops.last_mut().unwrap().body_start = body_start;
-            self.expr(body, t)?;
+            self.stmt(body)?;
             self.emit(Op::Jmp(start));
         }
         let lp = self.cur().loops.pop().unwrap();

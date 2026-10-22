@@ -1941,12 +1941,21 @@ impl Vm {
                 {
                     self.set_reg(f, a, Value::Int(v));
                 } else {
-                    self.set_reg(f, a + 1, Value::Int(i));
-                    return if add {
-                        self.arith_flow(f, a, Arith::Add, self.s.add)
+                    // no register holds the operand (`a` may be a local's),
+                    // so the slow path passes it as an owned argument
+                    let (x, y) = (self.reg(f, a), Value::Int(i));
+                    let (op, mid) = if add {
+                        (Arith::Add, self.s.add)
                     } else {
-                        self.arith_flow(f, a, Arith::Sub, self.s.sub)
+                        (Arith::Sub, self.s.sub)
                     };
+                    if x.is_numeric() {
+                        let v = self.arith(op, &x, &y)?;
+                        self.set_reg(f, a, v);
+                    } else {
+                        let args = Args::Owned(vec![y]);
+                        return self.call_flow(f, a, 0, |vm| vm.start_call(x, mid, args, None));
+                    }
                 }
             }
             Op::Add(a) => return self.arith_flow(f, a, Arith::Add, self.s.add),

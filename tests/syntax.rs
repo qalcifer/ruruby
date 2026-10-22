@@ -349,3 +349,28 @@ fn immediate_operands() {
         "2\n7\n2.5\n9.223372036854776e+18\n-9.223372036854776e+18\n\"ab\"\n[2]\n\"5m\"\n"
     );
 }
+
+#[test]
+fn local_increments_and_discarded_values() {
+    // `i += 1` on a local is one AddI on its register; statements whose
+    // value is unused compile without copying it anywhere
+    let src = r##"
+        i = 0
+        p((i += 1), (j = i += 2), i, j)
+        f = 1.5
+        f += 1
+        s = "a"
+        s += "b"
+        k = 10
+        k -= 3
+        [1, 2].each { i += 10 }
+        n = 0
+        r = while n < 3
+          n += 1
+          :ignored
+        end
+        def m(x) = (x += 1; x * 2)
+        p f, s, k, i, n, r, m(4)
+    "##;
+    assert_eq!(run(src), "1\n3\n3\n3\n2.5\n\"ab\"\n7\n23\n3\nnil\n10\n");
+}
