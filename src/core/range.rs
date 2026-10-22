@@ -9,9 +9,9 @@ pub fn range_vec(vm: &mut Vm, r: &(Value, Value, bool)) -> Result<Vec<Value>, Un
             Ok((*lo..=hi).map(Value::Int).collect())
         }
         (Value::Str(lo), Value::Str(hi)) => {
-            let (lo, hi) = (lo.borrow().clone(), hi.borrow().clone());
+            let (lo, hi) = (vm.heap[lo].borrow().clone(), vm.heap[hi].borrow().clone());
             let mut out = Vec::new();
-            let mut cur = Value::str(lo);
+            let mut cur = vm.str(lo);
             loop {
                 let s = str_of(vm, &cur)?;
                 if s.chars().count() > hi.chars().count() {
@@ -33,9 +33,10 @@ pub fn range_vec(vm: &mut Vm, r: &(Value, Value, bool)) -> Result<Vec<Value>, Un
     }
 }
 
-fn this(vm: &Vm, s: &Value) -> Result<Rc<(Value, Value, bool)>, Unwind> {
+/// The receiver's (begin, end, exclusive?).
+fn this(vm: &Vm, s: &Value) -> Result<(Value, Value, bool), Unwind> {
     match s {
-        Value::Range(r) => Ok(r.clone()),
+        Value::Range(r) => Ok(vm.heap[r].clone()),
         _ => Err(vm.type_err("expected a Range")),
     }
 }
@@ -50,7 +51,7 @@ pub fn init(vm: &mut Vm) {
         }
         let n = int_of(vm, &a[0])?.max(0) as usize;
         let v = range_vec(vm, &r)?;
-        Ok(Value::array(v.into_iter().take(n).collect()))
+        Ok(vm.array(v.into_iter().take(n).collect()))
     });
     vm.def(&c, "begin", |vm, s, _, _| Ok(this(vm, s)?.0.clone()));
     vm.def(&c, "last", |vm, s, a, _| {
@@ -60,7 +61,7 @@ pub fn init(vm: &mut Vm) {
         }
         let n = int_of(vm, &a[0])?.max(0) as usize;
         let v = range_vec(vm, &r)?;
-        Ok(Value::array(v[v.len().saturating_sub(n)..].to_vec()))
+        Ok(vm.array(v[v.len().saturating_sub(n)..].to_vec()))
     });
     vm.def(&c, "end", |vm, s, _, _| Ok(this(vm, s)?.1.clone()));
     vm.def(&c, "exclude_end?", |vm, s, _, _| {
@@ -128,14 +129,10 @@ pub fn init(vm: &mut Vm) {
     }
     vm.def(&c, "to_s", |vm, s, _, _| {
         let r = this(vm, s)?;
-        Ok(Value::str(format!(
-            "{}{}{}",
-            vm.to_s(&r.0)?,
-            if r.2 { "..." } else { ".." },
-            vm.to_s(&r.1)?
-        )))
+        let (lo, hi) = (vm.to_s(&r.0)?, vm.to_s(&r.1)?);
+        Ok(vm.str(format!("{lo}{}{hi}", if r.2 { "..." } else { ".." })))
     });
-    vm.def(&c, "inspect", |vm, s, _, _| Ok(Value::str(vm.inspect(s)?)));
+    vm.def(&c, "inspect", |vm, s, _, _| Ok({ let v = vm.inspect(s)?; vm.str(v) }));
     vm.def(&c, "sum", |vm, s, a, b| {
         let r = this(vm, s)?;
         match (&r.0, &r.1, b) {

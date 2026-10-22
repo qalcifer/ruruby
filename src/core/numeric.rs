@@ -30,14 +30,14 @@ pub fn init(vm: &mut Vm) {
             q => q,
         };
         let m = vm.arith(Arith::Mod, s, &d)?;
-        Ok(Value::array(vec![q, m]))
+        Ok(vm.array(vec![q, m]))
     });
     vm.def(&n, "-@", |vm, s, _, _| {
         vm.arith(Arith::Sub, &Value::Int(0), s)
     });
     vm.def(&n, "+@", |_, s, _, _| Ok(s.clone()));
-    vm.def(&n, "==", |_, s, a, _| {
-        Ok(Value::Bool(values_eq(s, &arg(a, 0))))
+    vm.def(&n, "==", |vm, s, a, _| {
+        Ok(Value::Bool(values_eq(&vm.heap, s, &arg(a, 0))))
     });
     vm.def(&n, "<", |vm, s, a, _| cmp(vm, s, a, Ordering::is_lt));
     vm.def(&n, "<=", |vm, s, a, _| cmp(vm, s, a, Ordering::is_le));
@@ -155,7 +155,7 @@ pub fn init(vm: &mut Vm) {
     vm.def(&i, "chr", |vm, s, _, _| {
         let n = int_of(vm, s)?;
         char::from_u32(n as u32)
-            .map(|c| Value::str(c.to_string()))
+            .map(|c| vm.str(c.to_string()))
             .ok_or_else(|| vm.err(&vm.c.argument_error, format!("{n} out of char range")))
     });
     vm.def(&i, "gcd", |vm, s, a, _| {
@@ -180,7 +180,7 @@ pub fn init(vm: &mut Vm) {
             v.push(Value::Int(n % 10));
             n /= 10;
         }
-        Ok(Value::array(v))
+        Ok(vm.array(v))
     });
     vm.def(&i, "&", |vm, s, a, _| {
         Ok(Value::Int(int_of(vm, s)? & int_of(vm, &arg(a, 0))?))
@@ -219,8 +219,10 @@ pub fn init(vm: &mut Vm) {
         Ok(Value::Bool(float_of(vm, s)?.is_finite()))
     });
 
-    vm.set_const("RUBY_VERSION", Value::str("3.4.0"));
-    vm.set_const("RUBY_ENGINE", Value::str("ruruby"));
+    let version = vm.str("3.4.0");
+    vm.set_const("RUBY_VERSION", version);
+    let engine = vm.str("ruruby");
+    vm.set_const("RUBY_ENGINE", engine);
     let float_consts = [
         ("INFINITY", f64::INFINITY),
         ("NAN", f64::NAN),
@@ -312,9 +314,9 @@ fn to_s(vm: &mut Vm, s: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
             if neg {
                 digits.push('-');
             }
-            Ok(Value::str(digits.iter().rev().collect::<String>()))
+            Ok(vm.str(digits.iter().rev().collect::<String>()))
         }
-        _ => Ok(Value::str(vm.to_s(s)?)),
+        _ => Ok({ let v = vm.to_s(s)?; vm.str(v) }),
     }
 }
 

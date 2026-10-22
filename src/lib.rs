@@ -19,6 +19,7 @@
 pub mod ast;
 pub mod codegen;
 pub mod core;
+pub mod gc;
 pub mod lexer;
 pub mod opcode;
 pub mod parser;
@@ -99,7 +100,8 @@ impl Interpreter {
     /// Runs the `at_exit` / `END { }` blocks, most recent first.
     pub fn run_at_exit(&mut self) -> Result<(), Error> {
         while let Some(b) = self.vm.at_exit.pop() {
-            self.vm.call_block(&b, vec![]).map_err(|u| match u {
+            let r = self.vm.call_block(&b, vec![]).map_err(|u| self.vm.materialize(u));
+            r.map_err(|u| match u {
                 vm::Unwind::Error(e) => Error::Runtime {
                     class: self.vm.class_name(&e),
                     message: self.vm.exc_message(&e),

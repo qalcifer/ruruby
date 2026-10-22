@@ -7,11 +7,18 @@ use super::*;
 use crate::vm::{VmResult, inspect_str};
 
 fn s_of(vm: &Vm, s: &Value) -> Result<String, Unwind> {
-    Ok(this_str(vm, s)?.borrow().clone())
+    Ok(vm.heap[this_str(vm, s)?].borrow().clone())
 }
 
-fn map_str(vm: &Vm, s: &Value, f: impl FnOnce(&str) -> String) -> VmResult {
-    Ok(Value::str(f(&s_of(vm, s)?)))
+fn map_str(vm: &mut Vm, s: &Value, f: impl FnOnce(&str) -> String) -> VmResult {
+    let r = f(&s_of(vm, s)?);
+    Ok(vm.str(r))
+}
+
+/// An Array of new Strings.
+fn str_array(vm: &mut Vm, parts: impl IntoIterator<Item = String>) -> Value {
+    let v = parts.into_iter().map(|p| vm.str(p)).collect();
+    vm.array(v)
 }
 
 /// Resolves a (possibly negative) index against `len`.
@@ -25,10 +32,10 @@ pub fn init(vm: &mut Vm) {
     vm.def(&c, "to_s", |_, s, _, _| Ok(s.clone()));
     vm.def(&c, "to_str", |_, s, _, _| Ok(s.clone()));
     vm.def(&c, "inspect", |vm, s, _, _| {
-        Ok(Value::str(inspect_str(&s_of(vm, s)?)))
+        Ok(vm.str(inspect_str(&s_of(vm, s)?)))
     });
     vm.def(&c, "dump", |vm, s, _, _| {
-        Ok(Value::str(inspect_str(&s_of(vm, s)?)))
+        Ok(vm.str(inspect_str(&s_of(vm, s)?)))
     });
     vm.def(&c, "to_sym", to_sym);
     vm.def(&c, "intern", to_sym);
@@ -122,34 +129,31 @@ pub fn init(vm: &mut Vm) {
         })
     });
     vm.def(&c, "chars", |vm, s, _, _| {
-        Ok(Value::array(
-            s_of(vm, s)?
-                .chars()
-                .map(|c| Value::str(c.to_string()))
-                .collect(),
-        ))
+        let chars: Vec<String> = s_of(vm, s)?.chars().map(String::from).collect();
+        Ok(str_array(vm, chars))
     });
     vm.def(&c, "bytes", |vm, s, _, _| {
-        Ok(Value::array(
+        Ok(vm.array(
             s_of(vm, s)?.bytes().map(|b| Value::Int(b as i64)).collect(),
         ))
     });
     vm.def(&c, "lines", |vm, s, _, _| {
-        Ok(Value::array(
-            s_of(vm, s)?.split_inclusive('\n').map(Value::str).collect(),
-        ))
+        let lines: Vec<String> = s_of(vm, s)?.split_inclusive('\n').map(String::from).collect();
+        Ok(str_array(vm, lines))
     });
     vm.def(&c, "each_char", |vm, s, _, b| {
         let b = need_block(vm, b)?;
         for ch in s_of(vm, s)?.chars() {
-            vm.call_block(&b, vec![Value::str(ch.to_string())])?;
+            let ch = vm.str(ch.to_string());
+            vm.call_block(&b, vec![ch])?;
         }
         Ok(s.clone())
     });
     vm.def(&c, "each_line", |vm, s, _, b| {
         let b = need_block(vm, b)?;
         for line in s_of(vm, s)?.split_inclusive('\n') {
-            vm.call_block(&b, vec![Value::str(line)])?;
+            let line = vm.str(line);
+            vm.call_block(&b, vec![line])?;
         }
         Ok(s.clone())
     });
@@ -162,44 +166,45 @@ pub fn init(vm: &mut Vm) {
     });
     vm.def(&c, "+", |vm, s, a, _| {
         let rhs = str_of(vm, &arg(a, 0))?;
-        Ok(Value::str(s_of(vm, s)? + &rhs))
+        Ok(vm.str(s_of(vm, s)? + &rhs))
     });
     vm.def(&c, "*", |vm, s, a, _| {
         let n = int_of(vm, &arg(a, 0))?;
         if n < 0 {
             return Err(vm.arg_err("negative argument"));
         }
-        Ok(Value::str(s_of(vm, s)?.repeat(n as usize)))
+        Ok(vm.str(s_of(vm, s)?.repeat(n as usize)))
     });
     vm.def(&c, "%", |vm, s, a, _| {
         let fmt = s_of(vm, s)?;
         let args = match arg(a, 0) {
-            Value::Array(v) => v.borrow().clone(),
+            Value::Array(v) => vm.heap[v].borrow().clone(),
             v => vec![v],
         };
-        Ok(Value::str(kernel::format(vm, &fmt, &args)?))
+        let out = kernel::format(vm, &fmt, &args)?;
+        Ok(vm.str(out))
     });
     let append: NativeFn = |vm, s, a, _| {
         let piece = vm.to_s(&arg(a, 0))?;
-        this_str(vm, s)?.borrow_mut().push_str(&piece);
+        vm.heap[this_str(vm, s)?].borrow_mut().push_str(&piece);
         Ok(s.clone())
     };
     vm.def(&c, "<<", append);
     vm.def(&c, "concat", append);
     vm.def(&c, "replace", |vm, s, a, _| {
         let new = str_of(vm, &arg(a, 0))?;
-        *this_str(vm, s)?.borrow_mut() = new;
+        *vm.heap[this_str(vm, s)?].borrow_mut() = new;
         Ok(s.clone())
     });
-    vm.def(&c, "==", |_, s, a, _| {
-        Ok(Value::Bool(values_eq(s, &arg(a, 0))))
+    vm.def(&c, "==", |vm, s, a, _| {
+        Ok(Value::Bool(values_eq(&vm.heap, s, &arg(a, 0))))
     });
-    vm.def(&c, "eql?", |_, s, a, _| {
-        Ok(Value::Bool(values_eq(s, &arg(a, 0))))
+    vm.def(&c, "eql?", |vm, s, a, _| {
+        Ok(Value::Bool(values_eq(&vm.heap, s, &arg(a, 0))))
     });
     vm.def(&c, "<=>", |vm, s, a, _| match arg(a, 0) {
         Value::Str(o) => Ok(Value::Int(
-            s_of(vm, s)?.as_str().cmp(o.borrow().as_str()) as i64
+            s_of(vm, s)?.as_str().cmp(vm.heap[o].borrow().as_str()) as i64
         )),
         _ => Ok(Value::Nil),
     });
@@ -252,7 +257,7 @@ pub fn init(vm: &mut Vm) {
     });
     vm.def(&c, "delete", |vm, s, a, _| {
         let set: Vec<char> = str_of(vm, &arg(a, 0))?.chars().collect();
-        Ok(Value::str(
+        Ok(vm.str(
             s_of(vm, s)?
                 .chars()
                 .filter(|c| !set.contains(c))
@@ -266,15 +271,15 @@ pub fn init(vm: &mut Vm) {
                 out.push(ch);
             }
         }
-        Ok(Value::str(out))
+        Ok(vm.str(out))
     });
     vm.def(&c, "sub", |vm, s, a, _| {
         let (pat, rep) = (str_of(vm, &arg(a, 0))?, str_of(vm, &arg(a, 1))?);
-        Ok(Value::str(s_of(vm, s)?.replacen(&pat, &rep, 1)))
+        Ok(vm.str(s_of(vm, s)?.replacen(&pat, &rep, 1)))
     });
     vm.def(&c, "gsub", |vm, s, a, _| {
         let (pat, rep) = (str_of(vm, &arg(a, 0))?, str_of(vm, &arg(a, 1))?);
-        Ok(Value::str(s_of(vm, s)?.replace(&pat, &rep)))
+        Ok(vm.str(s_of(vm, s)?.replace(&pat, &rep)))
     });
     vm.def(&c, "tr", |vm, s, a, _| {
         let from: Vec<char> = str_of(vm, &arg(a, 0))?.chars().collect();
@@ -286,7 +291,7 @@ pub fn init(vm: &mut Vm) {
                 None => c,
             })
             .collect::<String>();
-        Ok(Value::str(out))
+        Ok(vm.str(out))
     });
     vm.def(&c, "split", |vm, s, a, _| {
         let s = s_of(vm, s)?;
@@ -307,7 +312,7 @@ pub fn init(vm: &mut Vm) {
                 }
             }
         };
-        Ok(Value::array(parts.into_iter().map(Value::str).collect()))
+        Ok(str_array(vm, parts))
     });
     vm.def(&c, "ljust", |vm, s, a, _| pad(vm, s, a, 0));
     vm.def(&c, "rjust", |vm, s, a, _| pad(vm, s, a, 1));
@@ -315,10 +320,10 @@ pub fn init(vm: &mut Vm) {
     vm.def(&c, "[]", slice);
     vm.def(&c, "slice", slice);
     vm.def(&c, "succ", |vm, s, _, _| {
-        Ok(Value::str(succ(&s_of(vm, s)?)))
+        Ok(vm.str(succ(&s_of(vm, s)?)))
     });
     vm.def(&c, "next", |vm, s, _, _| {
-        Ok(Value::str(succ(&s_of(vm, s)?)))
+        Ok(vm.str(succ(&s_of(vm, s)?)))
     });
     vm.def(&c, "hash", |vm, s, _, _| {
         use std::hash::{Hash, Hasher};
@@ -343,11 +348,11 @@ fn pad(vm: &mut Vm, s: &Value, a: &[Value], mode: u8) -> VmResult {
     };
     let len = s.chars().count();
     if width <= len || padstr.is_empty() {
-        return Ok(Value::str(s));
+        return Ok(vm.str(s));
     }
     let fill = |n: usize| padstr.chars().cycle().take(n).collect::<String>();
     let total = width - len;
-    Ok(Value::str(match mode {
+    Ok(vm.str(match mode {
         0 => s + &fill(total),
         1 => fill(total) + &s,
         _ => fill(total / 2) + &s + &fill(total - total / 2),
@@ -357,30 +362,22 @@ fn pad(vm: &mut Vm, s: &Value, a: &[Value], mode: u8) -> VmResult {
 fn slice(vm: &mut Vm, s: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
     let chars: Vec<char> = s_of(vm, s)?.chars().collect();
     let len = chars.len();
-    let sub = |start: usize, n: usize| {
-        Value::str(
-            chars[start..(start + n).min(len)]
-                .iter()
-                .collect::<String>(),
-        )
-    };
+    let sub = |start: usize, n: usize| chars[start..(start + n).min(len)].iter().collect::<String>();
     match (arg(a, 0), a.len()) {
         (Value::Int(i), 1) => Ok(match norm_index(i, len) {
-            Some(i) if i < len => Value::str(chars[i].to_string()),
+            Some(i) if i < len => vm.str(chars[i].to_string()),
             _ => Value::Nil,
         }),
         (Value::Int(i), 2) => {
             let n = int_of(vm, &a[1])?;
             Ok(match norm_index(i, len) {
-                Some(i) if n >= 0 => sub(i, n as usize),
+                Some(i) if n >= 0 => vm.str(sub(i, n as usize)),
                 _ => Value::Nil,
             })
         }
         (Value::Range(r), _) => {
-            let (lo, hi) = (
-                int_of(vm, &r.0)?,
-                if r.1.is_nil() { -1 } else { int_of(vm, &r.1)? },
-            );
+            let r = vm.heap[r].clone();
+            let (lo, hi) = (int_of(vm, &r.0)?, if r.1.is_nil() { -1 } else { int_of(vm, &r.1)? });
             let Some(start) = norm_index(lo, len) else {
                 return Ok(Value::Nil);
             };
@@ -388,12 +385,12 @@ fn slice(vm: &mut Vm, s: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
             if !r.2 || r.1.is_nil() {
                 end += 1;
             }
-            Ok(sub(start, (end - start as i64).max(0) as usize))
+            Ok(vm.str(sub(start, (end - start as i64).max(0) as usize)))
         }
         (Value::Str(needle), _) => {
-            let needle = needle.borrow().clone();
+            let needle = vm.heap[needle].borrow().clone();
             Ok(if chars.iter().collect::<String>().contains(&needle) {
-                Value::str(needle)
+                vm.str(needle)
             } else {
                 Value::Nil
             })

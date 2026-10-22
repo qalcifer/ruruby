@@ -4,11 +4,18 @@ use super::*;
 use crate::vm::VmResult;
 
 fn pairs(vm: &Vm, s: &Value) -> Result<Vec<(Value, Value)>, Unwind> {
-    Ok(this_hash(vm, s)?.borrow().pairs.clone())
+    Ok(vm.heap[this_hash(vm, s)?].borrow().pairs.clone())
 }
 
-fn pair(k: &Value, v: &Value) -> Value {
-    Value::array(vec![k.clone(), v.clone()])
+fn pair(vm: &mut Vm, k: &Value, v: &Value) -> Value {
+    vm.array(vec![k.clone(), v.clone()])
+}
+
+/// A new empty Hash: the value and its handle.
+fn new_hash(vm: &mut Vm) -> (Value, HashRef) {
+    let v = vm.hash(RHash::new());
+    let Value::Hash(h) = v else { unreachable!() };
+    (v, h)
 }
 
 pub fn init(vm: &mut Vm) {
@@ -18,8 +25,8 @@ pub fn init(vm: &mut Vm) {
         let h = this_hash(vm, s)?;
         let key = arg(a, 0);
         let (found, default, default_proc) = {
-            let h = h.borrow();
-            (h.get(&key), h.default.clone(), h.default_proc.clone())
+            let h = vm.heap[h].borrow();
+            (h.get(&vm.heap, &key), h.default.clone(), h.default_proc.clone())
         };
         match (found, default_proc) {
             (Some(v), _) => Ok(v),
@@ -29,16 +36,15 @@ pub fn init(vm: &mut Vm) {
     });
     let store: NativeFn = |vm, s, a, _| {
         check_argc(vm, a, 2, 2)?;
-        this_hash(vm, s)?
-            .borrow_mut()
-            .set(a[0].clone(), a[1].clone());
+        let h = this_hash(vm, s)?;
+        vm.hash_set(h, a[0].clone(), a[1].clone());
         Ok(a[1].clone())
     };
     vm.def(&c, "[]=", store);
     vm.def(&c, "store", store);
     vm.def(&c, "fetch", |vm, s, a, b| {
         let key = arg(a, 0);
-        if let Some(v) = this_hash(vm, s)?.borrow().get(&key) {
+        if let Some(v) = vm.heap[this_hash(vm, s)?].borrow().get(&vm.heap, &key) {
             return Ok(v);
         }
         if let Some(b) = b {
@@ -62,7 +68,7 @@ pub fn init(vm: &mut Vm) {
     });
     let has_key: NativeFn = |vm, s, a, _| {
         Ok(Value::Bool(
-            this_hash(vm, s)?.borrow().get(&arg(a, 0)).is_some(),
+            vm.heap[this_hash(vm, s)?].borrow().get(&vm.heap, &arg(a, 0)).is_some(),
         ))
     };
     for name in ["key?", "has_key?", "include?", "member?"] {
@@ -70,56 +76,57 @@ pub fn init(vm: &mut Vm) {
     }
     vm.def(&c, "value?", |vm, s, a, _| {
         Ok(Value::Bool(
-            pairs(vm, s)?.iter().any(|(_, v)| values_eq(v, &arg(a, 0))),
+            pairs(vm, s)?.iter().any(|(_, v)| values_eq(&vm.heap, v, &arg(a, 0))),
         ))
     });
     vm.def(&c, "key", |vm, s, a, _| {
         Ok(pairs(vm, s)?
             .into_iter()
-            .find(|(_, v)| values_eq(v, &arg(a, 0)))
+            .find(|(_, v)| values_eq(&vm.heap, v, &arg(a, 0)))
             .map(|(k, _)| k)
             .unwrap_or(Value::Nil))
     });
     vm.def(&c, "keys", |vm, s, _, _| {
-        Ok(Value::array(
+        Ok(vm.array(
             pairs(vm, s)?.into_iter().map(|(k, _)| k).collect(),
         ))
     });
     vm.def(&c, "values", |vm, s, _, _| {
-        Ok(Value::array(
+        Ok(vm.array(
             pairs(vm, s)?.into_iter().map(|(_, v)| v).collect(),
         ))
     });
     vm.def(&c, "length", |vm, s, _, _| {
-        Ok(Value::Int(this_hash(vm, s)?.borrow().pairs.len() as i64))
+        Ok(Value::Int(vm.heap[this_hash(vm, s)?].borrow().pairs.len() as i64))
     });
     vm.def(&c, "size", |vm, s, _, _| {
-        Ok(Value::Int(this_hash(vm, s)?.borrow().pairs.len() as i64))
+        Ok(Value::Int(vm.heap[this_hash(vm, s)?].borrow().pairs.len() as i64))
     });
     vm.def(&c, "count", |vm, s, a, b| match b {
-        None if a.is_empty() => Ok(Value::Int(this_hash(vm, s)?.borrow().pairs.len() as i64)),
+        None if a.is_empty() => Ok(Value::Int(vm.heap[this_hash(vm, s)?].borrow().pairs.len() as i64)),
         _ => enumerable::count(vm, s, a, b),
     });
     vm.def(&c, "empty?", |vm, s, _, _| {
-        Ok(Value::Bool(this_hash(vm, s)?.borrow().pairs.is_empty()))
+        Ok(Value::Bool(vm.heap[this_hash(vm, s)?].borrow().pairs.is_empty()))
     });
     vm.def(&c, "to_h", |_, s, _, _| Ok(s.clone()));
-    vm.def(&c, "to_s", |vm, s, _, _| Ok(Value::str(vm.inspect(s)?)));
-    vm.def(&c, "inspect", |vm, s, _, _| Ok(Value::str(vm.inspect(s)?)));
-    vm.def(&c, "==", |_, s, a, _| {
-        Ok(Value::Bool(values_eq(s, &arg(a, 0))))
+    vm.def(&c, "to_s", |vm, s, _, _| Ok({ let v = vm.inspect(s)?; vm.str(v) }));
+    vm.def(&c, "inspect", |vm, s, _, _| Ok({ let v = vm.inspect(s)?; vm.str(v) }));
+    vm.def(&c, "==", |vm, s, a, _| {
+        Ok(Value::Bool(values_eq(&vm.heap, s, &arg(a, 0))))
     });
     vm.def(&c, "default", |vm, s, _, _| {
-        Ok(this_hash(vm, s)?.borrow().default.clone())
+        Ok(vm.heap[this_hash(vm, s)?].borrow().default.clone())
     });
     vm.def(&c, "default=", |vm, s, a, _| {
-        this_hash(vm, s)?.borrow_mut().default = arg(a, 0);
+        vm.heap[this_hash(vm, s)?].borrow_mut().default = arg(a, 0);
         Ok(arg(a, 0))
     });
     let each: NativeFn = |vm, s, _, b| {
         let b = need_block(vm, b)?;
         for (k, v) in pairs(vm, s)? {
-            vm.call_block(&b, vec![pair(&k, &v)])?;
+            let kv = pair(vm, &k, &v);
+            vm.call_block(&b, vec![kv])?;
         }
         Ok(s.clone())
     };
@@ -140,24 +147,22 @@ pub fn init(vm: &mut Vm) {
         Ok(s.clone())
     });
     vm.def(&c, "delete", |vm, s, a, _| {
-        Ok(this_hash(vm, s)?
-            .borrow_mut()
-            .remove(&arg(a, 0))
+        Ok(vm.heap[this_hash(vm, s)?].borrow_mut()
+            .remove(&vm.heap, &arg(a, 0))
             .unwrap_or(Value::Nil))
     });
     vm.def(&c, "clear", |vm, s, _, _| {
-        this_hash(vm, s)?.borrow_mut().pairs.clear();
+        vm.heap[this_hash(vm, s)?].borrow_mut().pairs.clear();
         Ok(s.clone())
     });
     vm.def(&c, "merge", |vm, s, a, b| {
-        let mut h = this_hash(vm, s)?.borrow().clone();
-        merge_into(vm, &mut h, a, b)?;
-        Ok(Value::hash(h))
+        let copy = vm.heap[this_hash(vm, s)?].borrow().clone();
+        let hv = vm.hash(copy);
+        merge_into(vm, this_hash(vm, &hv)?, a, b)?;
+        Ok(hv)
     });
     let update: NativeFn = |vm, s, a, b| {
-        let mut h = this_hash(vm, s)?.borrow().clone();
-        merge_into(vm, &mut h, a, b)?;
-        *this_hash(vm, s)?.borrow_mut() = h;
+        merge_into(vm, this_hash(vm, s)?, a, b)?;
         Ok(s.clone())
     };
     vm.def(&c, "merge!", update);
@@ -167,45 +172,49 @@ pub fn init(vm: &mut Vm) {
     vm.def(&c, "reject", |vm, s, _, b| filter(vm, s, b, false));
     vm.def(&c, "transform_values", |vm, s, _, b| {
         let b = need_block(vm, b)?;
-        let mut h = RHash::new();
+        let (hv, h) = new_hash(vm);
         for (k, v) in pairs(vm, s)? {
-            h.set(k, vm.call_block(&b, vec![v])?);
+            let v = vm.call_block(&b, vec![v])?;
+            vm.hash_set(h, k, v);
         }
-        Ok(Value::hash(h))
+        Ok(hv)
     });
     vm.def(&c, "transform_keys", |vm, s, _, b| {
         let b = need_block(vm, b)?;
-        let mut h = RHash::new();
+        let (hv, h) = new_hash(vm);
         for (k, v) in pairs(vm, s)? {
-            h.set(vm.call_block(&b, vec![k])?, v);
+            let k = vm.call_block(&b, vec![k])?;
+            vm.hash_set(h, k, v);
         }
-        Ok(Value::hash(h))
+        Ok(hv)
     });
     vm.def(&c, "invert", |vm, s, _, _| {
-        let mut h = RHash::new();
+        let (hv, h) = new_hash(vm);
         for (k, v) in pairs(vm, s)? {
-            h.set(v, k);
+            vm.hash_set(h, v, k);
         }
-        Ok(Value::hash(h))
+        Ok(hv)
     });
     vm.def(&c, "values_at", |vm, s, a, _| {
         let h = this_hash(vm, s)?;
-        let h = h.borrow();
-        Ok(Value::array(
+        let values: Vec<Value> = {
+            let h = vm.heap[h].borrow();
             a.iter()
-                .map(|k| h.get(k).unwrap_or_else(|| h.default.clone()))
-                .collect(),
-        ))
+                .map(|k| h.get(&vm.heap, k).unwrap_or_else(|| h.default.clone()))
+                .collect()
+        };
+        Ok(vm.array(values))
     });
     vm.def(&c, "sort", |vm, s, _, b| {
         let v = to_vec(vm, s)?;
-        Ok(Value::array(sort_values(vm, v, b)?))
+        Ok({ let v = sort_values(vm, v, b)?; vm.array(v) })
     });
 
     let a = vm.c.array.clone();
     vm.def(&a, "to_h", |vm, s, _, b| {
-        let mut h = RHash::new();
-        for x in this_ary(vm, s)?.borrow().clone() {
+        let (hv, h) = new_hash(vm);
+        let items = vm.heap[this_ary(vm, s)?].borrow().clone();
+        for x in items {
             let x = match b {
                 Some(b) => vm.call_block(b, vec![x])?,
                 None => x,
@@ -213,29 +222,25 @@ pub fn init(vm: &mut Vm) {
             let Value::Array(p) = &x else {
                 return Err(vm.type_err("wrong element type (expected array)"));
             };
-            let p = p.borrow();
-            h.set(
-                p.first().cloned().unwrap_or(Value::Nil),
-                p.get(1).cloned().unwrap_or(Value::Nil),
-            );
+            let (k, v) = {
+                let p = vm.heap[p].borrow();
+                (p.first().cloned().unwrap_or(Value::Nil), p.get(1).cloned().unwrap_or(Value::Nil))
+            };
+            vm.hash_set(h, k, v);
         }
-        Ok(Value::hash(h))
+        Ok(hv)
     });
 }
 
-fn merge_into(
-    vm: &mut Vm,
-    h: &mut RHash,
-    others: &[Value],
-    b: Option<&Value>,
-) -> Result<(), Unwind> {
+fn merge_into(vm: &mut Vm, h: HashRef, others: &[Value], b: Option<&Value>) -> Result<(), Unwind> {
     for o in others {
         for (k, v) in pairs(vm, o)? {
-            let v = match (b, h.get(&k)) {
+            let old = vm.heap[h].borrow().get(&vm.heap, &k);
+            let v = match (b, old) {
                 (Some(b), Some(old)) => vm.call_block(b, vec![k.clone(), old, v])?,
                 _ => v,
             };
-            h.set(k, v);
+            vm.hash_set(h, k, v);
         }
     }
     Ok(())
@@ -243,11 +248,11 @@ fn merge_into(
 
 fn filter(vm: &mut Vm, s: &Value, b: Option<&Value>, keep: bool) -> VmResult {
     let b = need_block(vm, b)?;
-    let mut h = RHash::new();
+    let (hv, h) = new_hash(vm);
     for (k, v) in pairs(vm, s)? {
         if vm.call_block(&b, vec![k.clone(), v.clone()])?.truthy() == keep {
-            h.set(k, v);
+            vm.hash_set(h, k, v);
         }
     }
-    Ok(Value::hash(h))
+    Ok(hv)
 }

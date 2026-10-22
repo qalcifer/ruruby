@@ -66,7 +66,8 @@ fn run(args: Vec<String>) -> ExitCode {
 
     let mut interp = Interpreter::new();
     interp.vm.stack_budget = STACK_SIZE - (64 << 20);
-    let argv = Value::array(script_args.into_iter().map(Value::str).collect());
+    let args = script_args.into_iter().map(|a| interp.vm.str(a)).collect();
+    let argv = interp.vm.array(args);
     interp.vm.set_const("ARGV", argv);
 
     let (name, src) = match (code, file) {

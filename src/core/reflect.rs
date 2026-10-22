@@ -108,7 +108,7 @@ fn init_kernel(vm: &mut Vm) {
                 .as_ref()
                 .map(|m| m.methods.borrow().keys().copied().collect())
                 .unwrap_or_default(),
-            Value::Object(o) => o
+            Value::Object(o) => vm.heap[o]
                 .singleton
                 .borrow()
                 .as_ref()
@@ -130,7 +130,7 @@ fn init_kernel(vm: &mut Vm) {
     vm.def(&k, "remove_instance_variable", |vm, s, a, _| {
         let iv = sym_of(vm, &arg(a, 0))?;
         let table = match s {
-            Value::Object(o) => &o.ivars,
+            Value::Object(o) => &vm.heap[o].ivars,
             Value::Class(c) => &c.ivars,
             _ => return Err(vm.name_err("instance variable not defined")),
         };
@@ -143,7 +143,7 @@ fn init_kernel(vm: &mut Vm) {
     vm.def(&k, "respond_to_missing?", |_, _, _, _| {
         Ok(Value::Bool(false))
     });
-    vm.def(&k, "caller", |_, _, _, _| Ok(Value::array(vec![])));
+    vm.def(&k, "caller", |vm, _, _, _| Ok(vm.array(vec![])));
     vm.def(&k, "at_exit", |vm, _, _, b| {
         let b = need_block(vm, b)?;
         vm.at_exit.push(b.clone());
@@ -151,17 +151,18 @@ fn init_kernel(vm: &mut Vm) {
     });
     vm.def(&k, "Array", |vm, _, a, _| {
         let v = arg(a, 0);
-        Ok(Value::array(vm.splat_to_vec(&v)?))
+        Ok({ let v = vm.splat_to_vec(&v)?; vm.array(v) })
     });
     vm.def(&k, "String", |vm, _, a, _| {
-        Ok(Value::str(vm.to_s(&arg(a, 0))?))
+        Ok({ let v = vm.to_s(&arg(a, 0))?; vm.str(v) })
     });
 }
 
 fn sorted_syms(vm: &mut Vm, syms: Vec<Sym>) -> Value {
     let mut names: Vec<String> = syms.iter().map(|s| vm.sym_name(*s).to_string()).collect();
     names.sort();
-    Value::array(names.iter().map(|n| Value::Sym(vm.intern(n))).collect())
+    let syms = names.iter().map(|n| Value::Sym(vm.intern(n))).collect();
+    vm.array(syms)
 }
 
 fn init_module(vm: &mut Vm) {
@@ -171,10 +172,10 @@ fn init_module(vm: &mut Vm) {
         Ok(if c.is_anonymous() {
             Value::Nil
         } else {
-            Value::str(c.name())
+            vm.str(c.name())
         })
     });
-    let to_s: NativeFn = |vm, s, _, _| Ok(Value::str(this_class(vm, s)?.name()));
+    let to_s: NativeFn = |vm, s, _, _| Ok(vm.str(this_class(vm, s)?.name()));
     vm.def(&m, "to_s", to_s);
     vm.def(&m, "inspect", to_s);
     for name in [
@@ -221,7 +222,7 @@ fn init_module(vm: &mut Vm) {
     });
     vm.def(&m, "included_modules", |vm, s, _, _| {
         let cls = this_class(vm, s)?;
-        Ok(Value::array(
+        Ok(vm.array(
             Vm::ancestors(&cls)
                 .into_iter()
                 .filter(|c| c.is_module)
@@ -336,11 +337,11 @@ fn init_module(vm: &mut Vm) {
         "public_class_method",
         "private_constant",
     ] {
-        vm.def(&m, name, |_, _, a, _| {
+        vm.def(&m, name, |vm, _, a, _| {
             Ok(match a.len() {
                 0 => Value::Nil,
                 1 => a[0].clone(),
-                _ => Value::array(a.to_vec()),
+                _ => vm.array(a.to_vec()),
             })
         });
     }
@@ -398,12 +399,12 @@ fn init_module(vm: &mut Vm) {
         for k in Vm::ancestors(&cls) {
             syms.extend(k.cvars.borrow().items.iter().map(|(s, _)| *s));
         }
-        Ok(Value::array(syms.into_iter().map(Value::Sym).collect()))
+        Ok(vm.array(syms.into_iter().map(Value::Sym).collect()))
     });
     vm.def(&m, "const_get", |vm, s, a, _| {
         let mut cls = this_class(vm, s)?;
         let path = match arg(a, 0) {
-            Value::Str(p) => p.borrow().clone(),
+            Value::Str(p) => vm.heap[p].borrow().clone(),
             v => {
                 let sym = sym_of(vm, &v)?;
                 vm.sym_name(sym).to_string()
@@ -444,7 +445,7 @@ fn init_module(vm: &mut Vm) {
         let cls = this_class(vm, s)?;
         let syms: Vec<Value> = cls.consts.borrow().keys().map(|k| Value::Sym(*k)).collect();
         let _ = vm;
-        Ok(Value::array(syms))
+        Ok(vm.array(syms))
     });
     vm.def(&m, "freeze", |_, s, _, _| Ok(s.clone()));
     vm.def(&m, "==", |_, s, a, _| {
@@ -460,7 +461,8 @@ fn init_module(vm: &mut Vm) {
 
     let c = vm.c.class.clone();
     vm.def(&c, "allocate", |vm, s, _, _| {
-        Ok(Value::Object(Rc::new(RObject::new(this_class(vm, s)?))))
+        let cls = this_class(vm, s)?;
+        Ok(vm.object(RObject::new(cls)))
     });
 }
 
@@ -513,16 +515,13 @@ fn init_proc(vm: &mut Vm) {
         b.cloned()
             .ok_or_else(|| vm.arg_err("tried to create Proc object without a block"))
     });
-    vm.def(&p, "lambda?", |_, s, _, _| {
-        Ok(Value::Bool(matches!(s, Value::Proc(p) if p.lambda)))
+    vm.def(&p, "lambda?", |vm, s, _, _| {
+        Ok(Value::Bool(matches!(s, Value::Proc(p) if vm.heap[p].lambda)))
     });
-    vm.def(&p, "inspect", |_, s, _, _| {
+    vm.def(&p, "inspect", |vm, s, _, _| {
         let Value::Proc(p) = s else { unreachable!() };
-        let lambda = if p.lambda { " (lambda)" } else { "" };
-        Ok(Value::str(format!(
-            "#<Proc:0x{:016x}{lambda}>",
-            Rc::as_ptr(p) as usize
-        )))
+        let lambda = if vm.heap[p].lambda { " (lambda)" } else { "" };
+        Ok(vm.str(format!("#<Proc:0x{:016x}{lambda}>", p.id())))
     });
     vm.def(&p, "to_s", |vm, s, _, _| vm.send(s, "inspect", vec![]));
     vm.def(&p, "==", |_, s, a, _| {
@@ -565,11 +564,11 @@ fn init_pattern_support(vm: &mut Vm) {
     let h = vm.c.hash.clone();
     vm.def(&h, "deconstruct_keys", |_, s, _, _| Ok(s.clone()));
     vm.def(&h, "except", |vm, s, a, _| {
-        let mut out = this_hash(vm, s)?.borrow().clone();
+        let mut out = vm.heap[this_hash(vm, s)?].borrow().clone();
         out.kw = false;
         for k in a {
-            out.remove(k);
+            out.remove(&vm.heap, k);
         }
-        Ok(Value::hash(out))
+        Ok(vm.hash(out))
     });
 }

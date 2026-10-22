@@ -12,6 +12,7 @@
 //! * mruby unwinds with `setjmp/longjmp`; here unwinding is `Result<_, Unwind>`
 //!   propagated with `?`, and each frame consults its irep's catch table.
 
+use crate::gc::{ArrayRef, EnvRef, HashRef, Heap};
 use crate::opcode::{ArgSpec, DefinedKind, Irep, Literal, Op, Reg};
 use crate::symbol::{Sym, SymbolTable};
 use crate::value::*;
@@ -24,8 +25,13 @@ use std::rc::Rc;
 pub enum Unwind {
     /// A raised exception (an exception object).
     Error(Value),
+    /// An exception not yet made into an object: class and message. Errors
+    /// raised from Rust are created this way so raising doesn't allocate
+    /// ([`Vm::err`] only needs `&self`); [`Vm::materialize`] makes the object
+    /// when Ruby code gets to see it.
+    Raise(Rc<RClass>, String),
     /// `break` out of a block; caught by the call site that passed the block (`tag`).
-    Break { tag: usize, value: Value },
+    Break { tag: u64, value: Value },
     /// `return` from inside a block; caught by the method frame `home`.
     Return { home: usize, value: Value },
 }
@@ -111,6 +117,7 @@ pub struct CommonSyms {
 }
 
 pub struct Vm {
+    pub heap: Heap,
     pub syms: SymbolTable,
     pub c: Classes,
     pub s: CommonSyms,
@@ -132,16 +139,16 @@ pub struct Vm {
     /// before raising SystemStackError. Raise it when running on a big stack.
     pub stack_budget: usize,
     /// Arrays/hashes being inspected right now, to print recursion as `[...]`.
-    inspecting: Vec<usize>,
+    inspecting: Vec<u64>,
     /// Blocks whose receiving call is still running: `break` targets.
-    live_breaks: Vec<usize>,
+    live_breaks: Vec<u64>,
     /// Method (and lambda) frames still running: `return` targets of their blocks.
     live_homes: Vec<usize>,
 }
 
 struct Frame {
     irep: Rc<Irep>,
-    env: Rc<Env>,
+    env: EnvRef,
     self_: Value,
     block: Option<Value>,
     /// Where `def` puts methods and where constants are looked up first.
@@ -154,7 +161,7 @@ struct Frame {
     kw_mask: u64,
     home: usize,
     /// Identity of the running block's proc (0 for methods), the tag for `break`.
-    proc_tag: usize,
+    proc_tag: u64,
     exc: Option<Value>,
     /// A `break`/`return` paused while an `ensure` clause runs; `Raise` of nil resumes it.
     pending: Option<Unwind>,
@@ -163,7 +170,7 @@ struct Frame {
     /// The caller's register that receives this frame's value.
     ret: Reg,
     /// Tag of the block passed at the call site: a `break` from it ends this call.
-    break_tag: usize,
+    break_tag: u64,
     /// Catches `return` from its blocks: methods, lambdas and the main script.
     is_home: bool,
     /// A lambda: `break` in its own body returns from it.
@@ -171,7 +178,7 @@ struct Frame {
 }
 
 impl Frame {
-    fn new(irep: Rc<Irep>, env: Rc<Env>, self_: Value, target: Rc<RClass>) -> Frame {
+    fn new(irep: Rc<Irep>, env: EnvRef, self_: Value, target: Rc<RClass>) -> Frame {
         Frame {
             irep,
             env,
@@ -191,14 +198,6 @@ impl Frame {
             is_home: false,
             lambda: false,
         }
-    }
-
-    fn get(&self, i: Reg) -> Value {
-        self.env.regs.borrow()[i].clone()
-    }
-
-    fn set(&self, i: Reg, v: Value) {
-        self.env.regs.borrow_mut()[i] = v;
     }
 }
 
@@ -221,7 +220,7 @@ enum Flow {
 
 /// Bound arguments: the frame's registers plus what the prologue needs.
 struct Bound {
-    env: Rc<Env>,
+    env: EnvRef,
     opt_filled: usize,
     kw_mask: u64,
 }
@@ -406,8 +405,10 @@ impl Vm {
             to_ary: syms.intern("to_ary"),
             to_proc: syms.intern("to_proc"),
         };
-        let main_obj = Value::Object(Rc::new(RObject::new(c.object.clone())));
+        let mut heap = Heap::default();
+        let main_obj = Value::Object(heap.alloc(RObject::new(c.object.clone())));
         let mut vm = Vm {
+            heap,
             syms,
             c,
             s,
@@ -426,6 +427,73 @@ impl Vm {
         };
         crate::core::init(&mut vm);
         vm
+    }
+
+    // ---- heap values ---------------------------------------------------
+
+    pub fn str(&mut self, s: impl Into<String>) -> Value {
+        Value::Str(self.heap.alloc(RefCell::new(s.into())))
+    }
+
+    pub fn array(&mut self, v: Vec<Value>) -> Value {
+        Value::Array(self.heap.alloc(RefCell::new(v)))
+    }
+
+    pub fn hash(&mut self, h: RHash) -> Value {
+        Value::Hash(self.heap.alloc(RefCell::new(h)))
+    }
+
+    pub fn range(&mut self, lo: Value, hi: Value, excl: bool) -> Value {
+        Value::Range(self.heap.alloc((lo, hi, excl)))
+    }
+
+    pub fn object(&mut self, o: RObject) -> Value {
+        Value::Object(self.heap.alloc(o))
+    }
+
+    /// `h[k] = v`. A new String key is copied, as Ruby dups (and freezes) them.
+    pub fn hash_set(&mut self, h: HashRef, k: Value, v: Value) {
+        let k = match &k {
+            Value::Str(s) if !self.heap[h].borrow().contains(&self.heap, &k) => {
+                let copy = self.heap[s].borrow().clone();
+                self.str(copy)
+            }
+            _ => k,
+        };
+        self.heap[h].borrow_mut().set(&self.heap, k, v);
+    }
+
+    /// Contents of a String value.
+    pub fn string(&self, v: &Value) -> Option<String> {
+        match v {
+            Value::Str(s) => Some(self.heap[s].borrow().clone()),
+            _ => None,
+        }
+    }
+
+    /// Elements of an Array value.
+    pub fn elements(&self, v: &Value) -> Option<Vec<Value>> {
+        match v {
+            Value::Array(a) => Some(self.heap[a].borrow().clone()),
+            _ => None,
+        }
+    }
+
+    /// The env `depth + 1` levels out from the frame's (a block's outer scopes).
+    fn upvar_env(&self, f: &Frame, depth: usize) -> EnvRef {
+        let mut env = self.heap[f.env].upper.expect("upvar outside of block");
+        for _ in 0..depth {
+            env = self.heap[env].upper.expect("upvar depth");
+        }
+        env
+    }
+
+    fn reg(&self, f: &Frame, i: Reg) -> Value {
+        self.heap[f.env].regs.borrow()[i].clone()
+    }
+
+    fn set_reg(&self, f: &Frame, i: Reg, v: Value) {
+        self.heap[f.env].regs.borrow_mut()[i] = v;
     }
 
     // ---- small helpers -------------------------------------------------
@@ -482,14 +550,23 @@ impl Vm {
 
     // ---- errors (src/error.c) ------------------------------------------
 
-    pub fn make_exception(&self, cls: &Rc<RClass>, msg: impl Into<String>) -> Value {
+    pub fn make_exception(&mut self, cls: &Rc<RClass>, msg: impl Into<String>) -> Value {
+        let msg = self.str(msg);
         let obj = RObject::new(cls.clone());
-        obj.ivars.borrow_mut().set(self.s.message, Value::str(msg));
-        Value::Object(Rc::new(obj))
+        obj.ivars.borrow_mut().set(self.s.message, msg);
+        self.object(obj)
     }
 
     pub fn err(&self, cls: &Rc<RClass>, msg: impl Into<String>) -> Unwind {
-        Unwind::Error(self.make_exception(cls, msg))
+        Unwind::Raise(cls.clone(), msg.into())
+    }
+
+    /// Turns a pending [`Unwind::Raise`] into an exception object.
+    pub fn materialize(&mut self, e: Unwind) -> Unwind {
+        match e {
+            Unwind::Raise(cls, msg) => Unwind::Error(self.make_exception(&cls, msg)),
+            e => e,
+        }
     }
 
     pub fn arg_err(&self, msg: impl Into<String>) -> Unwind {
@@ -506,9 +583,9 @@ impl Vm {
 
     pub fn exc_message(&self, e: &Value) -> String {
         if let Value::Object(o) = e
-            && let Some(Value::Str(s)) = o.ivars.borrow().get(self.s.message)
+            && let Some(Value::Str(s)) = self.heap[o].ivars.borrow().get(self.s.message)
         {
-            return s.borrow().clone();
+            return self.heap[s].borrow().clone();
         }
         self.class_of(e).name()
     }
@@ -537,7 +614,7 @@ impl Vm {
                     c.class.clone()
                 }
             }
-            Value::Object(o) => o.class.clone(),
+            Value::Object(o) => self.heap[o].class.clone(),
         }
     }
 
@@ -573,14 +650,14 @@ impl Vm {
         match v {
             Value::Class(c) => Ok(self.class_singleton(c)),
             Value::Object(o) => {
-                if let Some(s) = o.singleton.borrow().as_ref() {
+                if let Some(s) = self.heap[o].singleton.borrow().as_ref() {
                     return Ok(s.clone());
                 }
                 let s = RClass::new_singleton(
-                    format!("#<Class:#<{}>>", o.class.name()),
-                    o.class.clone(),
+                    format!("#<Class:#<{}>>", self.heap[o].class.name()),
+                    self.heap[o].class.clone(),
                 );
-                *o.singleton.borrow_mut() = Some(s.clone());
+                *self.heap[o].singleton.borrow_mut() = Some(s.clone());
                 Ok(s)
             }
             Value::Nil => Ok(self.c.nil.clone()),
@@ -594,11 +671,10 @@ impl Vm {
     pub fn dispatch_class(&self, v: &Value) -> Rc<RClass> {
         match v {
             Value::Class(c) => self.class_singleton(c),
-            Value::Object(o) => o
-                .singleton
-                .borrow()
-                .clone()
-                .unwrap_or_else(|| o.class.clone()),
+            Value::Object(o) => {
+                let o = &self.heap[o];
+                o.singleton.borrow().clone().unwrap_or_else(|| o.class.clone())
+            }
             _ => self.class_of(v),
         }
     }
@@ -953,29 +1029,29 @@ impl Vm {
     /// Binds arguments to parameter registers (mruby: OP_ENTER).
     /// `strict` is method/lambda semantics; procs pad, truncate and auto-splat.
     fn bind_args(
-        &self,
+        &mut self,
         irep: &Irep,
         self_: &Value,
         mut args: Vec<Value>,
         block: &Option<Value>,
         strict: bool,
-        upper: Option<Rc<Env>>,
+        upper: Option<EnvRef>,
     ) -> Result<Bound, Unwind> {
         let spec = &irep.spec;
         // keyword arguments arrive as a trailing Hash marked `kw`
         let mut kwargs: Option<RHash> = None;
         if let Some(Value::Hash(h)) = args.last()
-            && h.borrow().kw
+            && self.heap[h].borrow().kw
         {
             if spec.takes_kw() || spec.nokw {
-                let mut kh = h.borrow().clone();
+                let mut kh = self.heap[h].borrow().clone();
                 kh.kw = false;
                 kwargs = Some(kh);
                 args.pop();
-            } else if h.borrow().pairs.is_empty() {
+            } else if self.heap[h].borrow().pairs.is_empty() {
                 args.pop(); // `**{}` passes nothing
             } else {
-                h.borrow_mut().kw = false; // a plain positional Hash from here on
+                self.heap[h].borrow_mut().kw = false; // a plain positional Hash from here on
             }
         }
         // a proc taking several parameters splats a single Array argument
@@ -984,7 +1060,7 @@ impl Vm {
             if (positional > 1 || spec.auto_splat || (spec.rest && positional > 0))
                 && let Value::Array(a) = &args[0]
             {
-                let items = a.borrow().clone();
+                let items = self.heap[a].borrow().clone();
                 args = items;
             }
         }
@@ -1019,7 +1095,7 @@ impl Vm {
             r += 1;
         }
         if spec.rest {
-            regs[r] = Value::array(it.by_ref().take(rest_len).collect());
+            regs[r] = self.array(it.by_ref().take(rest_len).collect());
             r += 1;
         }
         for _ in 0..spec.post {
@@ -1033,7 +1109,7 @@ impl Vm {
         let mut kwh = kwargs.unwrap_or_default();
         let mut missing = Vec::new();
         for (i, (sym, required)) in spec.kw.iter().enumerate() {
-            match kwh.remove(&Value::Sym(*sym)) {
+            match kwh.remove(&self.heap, &Value::Sym(*sym)) {
                 Some(v) => {
                     regs[r] = v;
                     kw_mask |= 1 << i.min(63);
@@ -1051,7 +1127,7 @@ impl Vm {
             regs[r] = if spec.nokw {
                 Value::Nil
             } else {
-                Value::hash(kwh)
+                self.hash(kwh)
             };
             r += 1;
         } else if !kwh.pairs.is_empty() {
@@ -1073,7 +1149,7 @@ impl Vm {
             regs[r] = block.clone().unwrap_or(Value::Nil);
         }
         Ok(Bound {
-            env: Rc::new(Env {
+            env: self.heap.alloc(Env {
                 regs: RefCell::new(regs),
                 upper,
             }),
@@ -1110,34 +1186,37 @@ impl Vm {
         let Value::Proc(p) = blk else {
             return Err(self.type_err("wrong argument type (expected Proc)"));
         };
-        match &p.body {
+        let p = *p;
+        match self.heap[p].body.clone() {
             ProcBody::SymCall(sym) => {
                 let mut it = args.into_iter();
                 let recv = it.next().ok_or_else(|| self.arg_err("no receiver given"))?;
-                Ok(Call::Done(self.call_method(&recv, *sym, it.collect(), block)?))
+                Ok(Call::Done(self.call_method(&recv, sym, it.collect(), block)?))
             }
             ProcBody::Collect(buf) => {
                 let v = if args.len() == 1 {
                     args.into_iter().next().unwrap()
                 } else {
-                    Value::array(args)
+                    self.array(args)
                 };
-                buf.borrow_mut().push(v);
+                self.heap[buf].borrow_mut().push(v);
                 Ok(Call::Done(Value::Nil))
             }
             ProcBody::Ruby { irep, env } => {
-                let lambda = p.lambda || call.lambda;
-                let self_ = call.self_.unwrap_or_else(|| p.self_.clone());
-                let bound =
-                    self.bind_args(irep, &self_, args, &block, lambda, Some(env.clone()))?;
-                let target = call.target.unwrap_or_else(|| p.target.clone());
-                let mut f = Frame::new(irep.clone(), bound.env, self_, target);
-                f.block = p.block.clone();
-                f.method = call.method.or_else(|| p.method.clone());
+                let rp = &self.heap[p];
+                let lambda = rp.lambda || call.lambda;
+                let self_ = call.self_.unwrap_or_else(|| rp.self_.clone());
+                let target = call.target.unwrap_or_else(|| rp.target.clone());
+                let method = call.method.or_else(|| rp.method.clone());
+                let (outer_block, home) = (rp.block.clone(), rp.home);
+                let bound = self.bind_args(&irep, &self_, args, &block, lambda, Some(env))?;
+                let mut f = Frame::new(irep, bound.env, self_, target);
+                f.block = outer_block;
+                f.method = method;
                 f.opt_filled = bound.opt_filled;
                 f.kw_mask = bound.kw_mask;
-                f.home = if lambda { self.new_id() } else { p.home };
-                f.proc_tag = Rc::as_ptr(p) as usize;
+                f.home = if lambda { self.new_id() } else { home };
+                f.proc_tag = p.id();
                 f.is_home = lambda;
                 f.lambda = lambda;
                 Ok(Call::Frame(f))
@@ -1145,30 +1224,35 @@ impl Vm {
         }
     }
 
-    pub fn proc_value(&self, body: ProcBody) -> Value {
-        Value::Proc(Rc::new(RProc {
+    pub fn proc_value(&mut self, body: ProcBody) -> Value {
+        let target = self.c.object.clone();
+        Value::Proc(self.heap.alloc(RProc {
             body,
             self_: Value::Nil,
             block: None,
             home: 0,
             method: None,
-            target: self.c.object.clone(),
+            target,
             lambda: false,
         }))
     }
 
     /// The same proc with lambda semantics (`lambda { }`).
-    pub fn to_lambda(&self, v: &Value) -> Value {
+    pub fn to_lambda(&mut self, v: &Value) -> Value {
         match v {
-            Value::Proc(p) if !p.lambda => Value::Proc(Rc::new(RProc {
-                body: p.body.clone(),
-                self_: p.self_.clone(),
-                block: p.block.clone(),
-                home: p.home,
-                method: p.method.clone(),
-                target: p.target.clone(),
-                lambda: true,
-            })),
+            Value::Proc(p) if !self.heap[p].lambda => {
+                let p = &self.heap[p];
+                let copy = RProc {
+                    body: p.body.clone(),
+                    self_: p.self_.clone(),
+                    block: p.block.clone(),
+                    home: p.home,
+                    method: p.method.clone(),
+                    target: p.target.clone(),
+                    lambda: true,
+                };
+                Value::Proc(self.heap.alloc(copy))
+            }
             v => v.clone(),
         }
     }
@@ -1195,18 +1279,16 @@ impl Vm {
     /// Elements of `*v` (mruby: `mrb_ary_splat`).
     pub fn splat_to_vec(&mut self, v: &Value) -> Result<Vec<Value>, Unwind> {
         Ok(match v {
-            Value::Array(a) => a.borrow().clone(),
+            Value::Array(a) => self.heap[a].borrow().clone(),
             Value::Nil => vec![],
-            Value::Hash(h) => h
-                .borrow()
-                .pairs
-                .iter()
-                .map(|(k, v)| Value::array(vec![k.clone(), v.clone()]))
-                .collect(),
+            Value::Hash(h) => {
+                let pairs = self.heap[h].borrow().pairs.clone();
+                pairs.into_iter().map(|(k, v)| self.array(vec![k, v])).collect()
+            }
             Value::Range(_) => crate::core::to_vec(self, v)?,
             _ if self.respond_to(v, self.s.to_a) => {
                 match self.call_method(v, self.s.to_a, vec![], None)? {
-                    Value::Array(a) => a.borrow().clone(),
+                    Value::Array(a) => self.heap[a].borrow().clone(),
                     Value::Nil => vec![v.clone()],
                     _ => return Err(self.type_err("can't convert to Array (to_a gives non-Array)")),
                 }
@@ -1216,17 +1298,18 @@ impl Vm {
     }
 
     /// Converts the right-hand side of a multiple assignment to an Array.
-    fn masgn_array(&mut self, v: &Value) -> Result<Rc<RefCell<Vec<Value>>>, Unwind> {
+    fn masgn_array(&mut self, v: &Value) -> Result<ArrayRef, Unwind> {
+        let wrap = |vm: &mut Self| vm.heap.alloc(RefCell::new(vec![v.clone()]));
         match v {
-            Value::Array(a) => Ok(a.clone()),
+            Value::Array(a) => Ok(*a),
             _ if !matches!(v, Value::Nil) && self.respond_to(v, self.s.to_ary) => {
                 match self.call_method(v, self.s.to_ary, vec![], None)? {
                     Value::Array(a) => Ok(a),
-                    Value::Nil => Ok(Rc::new(RefCell::new(vec![v.clone()]))),
+                    Value::Nil => Ok(wrap(self)),
                     _ => Err(self.type_err("can't convert to Array (to_ary gives non-Array)")),
                 }
             }
-            _ => Ok(Rc::new(RefCell::new(vec![v.clone()]))),
+            _ => Ok(wrap(self)),
         }
     }
 
@@ -1236,7 +1319,7 @@ impl Vm {
 
     pub fn ivar_lookup(&self, obj: &Value, iv: Sym) -> Option<Value> {
         match obj {
-            Value::Object(o) => o.ivars.borrow().get(iv),
+            Value::Object(o) => self.heap[o].ivars.borrow().get(iv),
             Value::Class(c) => c.ivars.borrow().get(iv),
             _ => None,
         }
@@ -1244,7 +1327,7 @@ impl Vm {
 
     pub fn ivar_set(&self, obj: &Value, iv: Sym, v: Value) -> Result<(), Unwind> {
         match obj {
-            Value::Object(o) => o.ivars.borrow_mut().set(iv, v),
+            Value::Object(o) => self.heap[o].ivars.borrow_mut().set(iv, v),
             Value::Class(c) => c.ivars.borrow_mut().set(iv, v),
             _ => {
                 return Err(self.err(
@@ -1264,14 +1347,18 @@ impl Vm {
         let mut f = self.body_frame(irep, main, self.c.object.clone());
         f.home = self.new_id();
         f.is_home = true;
-        match self.run_frames(f) {
+        let r = self.run_frames(f).map_err(|e| self.materialize(e));
+        match r {
             Ok(v) => Ok(v),
             Err(Unwind::Error(e)) => Err(e),
+            Err(Unwind::Raise(..)) => unreachable!("materialized"),
             Err(Unwind::Return { .. }) => {
-                Err(self.make_exception(&self.c.local_jump_error, "unexpected return"))
+                let c = self.c.local_jump_error.clone();
+                Err(self.make_exception(&c, "unexpected return"))
             }
             Err(Unwind::Break { .. }) => {
-                Err(self.make_exception(&self.c.local_jump_error, "break from proc-closure"))
+                let c = self.c.local_jump_error.clone();
+                Err(self.make_exception(&c, "break from proc-closure"))
             }
         }
     }
@@ -1280,7 +1367,7 @@ impl Vm {
     fn body_frame(&mut self, irep: Rc<Irep>, self_: Value, target: Rc<RClass>) -> Frame {
         let mut regs = vec![Value::Nil; irep.nregs.max(1)];
         regs[0] = self_.clone();
-        let env = Rc::new(Env {
+        let env = self.heap.alloc(Env {
             regs: RefCell::new(regs),
             upper: None,
         });
@@ -1347,7 +1434,7 @@ impl Vm {
                 let done = std::mem::replace(&mut f, caller);
                 match result {
                     Ok(v) => {
-                        f.set(done.ret, v);
+                        self.set_reg(&f, done.ret, v);
                         break;
                     }
                     Err(e) => {
@@ -1366,6 +1453,7 @@ impl Vm {
     /// took the unwind (and `f` continues there). Exceptions go to any
     /// handler, `break`/`return` passing through only run `ensure` clauses.
     fn catch(&mut self, f: &mut Frame, e: Unwind, at: usize, own: bool) -> Option<Unwind> {
+        let e = self.materialize(e);
         let covers = |h: &&crate::opcode::CatchHandler| h.start <= at && at < h.end;
         match e {
             Unwind::Error(exc) => match f.irep.catch.iter().find(covers).map(|h| h.target) {
@@ -1434,7 +1522,7 @@ impl Vm {
         &mut self,
         f: &Frame,
         a: Reg,
-        tag: usize,
+        tag: u64,
         start: impl FnOnce(&mut Self) -> Result<Call, Unwind>,
     ) -> Result<Flow, Unwind> {
         if tag != 0 {
@@ -1451,11 +1539,11 @@ impl Vm {
                 Ok(Flow::Call(callee))
             }
             Ok(Call::Done(v)) => {
-                f.set(a, v);
+                self.set_reg(f, a, v);
                 Ok(Flow::Next)
             }
             Err(Unwind::Break { tag: t, value }) if tag != 0 && t == tag => {
-                f.set(a, value);
+                self.set_reg(f, a, value);
                 Ok(Flow::Next)
             }
             Err(e) => Err(e),
@@ -1464,7 +1552,7 @@ impl Vm {
 
     fn args_from_array(&self, v: Value) -> Vec<Value> {
         match v {
-            Value::Array(a) => a.borrow().clone(),
+            Value::Array(a) => self.heap[a].borrow().clone(),
             other => vec![other],
         }
     }
@@ -1473,31 +1561,31 @@ impl Vm {
     fn step(&mut self, f: &mut Frame, op: Op) -> Result<Flow, Unwind> {
         match op {
             Op::Nop => {}
-            Op::Move(a, b) => f.set(a, f.get(b)),
-            Op::LoadI(a, i) => f.set(a, Value::Int(i)),
+            Op::Move(a, b) => self.set_reg(f, a, self.reg(f, b)),
+            Op::LoadI(a, i) => self.set_reg(f, a, Value::Int(i)),
             Op::LoadL(a, i) => {
                 let v = match &f.irep.pool[i] {
                     Literal::Float(x) => Value::Float(*x),
-                    Literal::Str(s) => Value::str(s.to_string()),
+                    Literal::Str(s) => self.str(s.to_string()),
                 };
-                f.set(a, v);
+                self.set_reg(f, a, v);
             }
-            Op::LoadSym(a, s) => f.set(a, Value::Sym(s)),
-            Op::LoadNil(a) => f.set(a, Value::Nil),
-            Op::LoadSelf(a) => f.set(a, f.self_.clone()),
-            Op::LoadTrue(a) => f.set(a, Value::Bool(true)),
-            Op::LoadFalse(a) => f.set(a, Value::Bool(false)),
-            Op::GetGV(a, s) => f.set(a, self.globals.get(&s).cloned().unwrap_or(Value::Nil)),
-            Op::SetGV(a, s) => _ = self.globals.insert(s, f.get(a)),
-            Op::GetIV(a, s) => f.set(a, self.ivar_get(&f.self_, s)),
-            Op::SetIV(a, s) => self.ivar_set(&f.self_, s, f.get(a))?,
+            Op::LoadSym(a, s) => self.set_reg(f, a, Value::Sym(s)),
+            Op::LoadNil(a) => self.set_reg(f, a, Value::Nil),
+            Op::LoadSelf(a) => self.set_reg(f, a, f.self_.clone()),
+            Op::LoadTrue(a) => self.set_reg(f, a, Value::Bool(true)),
+            Op::LoadFalse(a) => self.set_reg(f, a, Value::Bool(false)),
+            Op::GetGV(a, s) => self.set_reg(f, a, self.globals.get(&s).cloned().unwrap_or(Value::Nil)),
+            Op::SetGV(a, s) => _ = self.globals.insert(s, self.reg(f, a)),
+            Op::GetIV(a, s) => self.set_reg(f, a, self.ivar_get(&f.self_, s)),
+            Op::SetIV(a, s) => self.ivar_set(&f.self_, s, self.reg(f, a))?,
             Op::GetCV(a, s) => {
                 let v = self.cvar_get(&f.target, s)?;
-                f.set(a, v);
+                self.set_reg(f, a, v);
             }
-            Op::SetCV(a, s) => self.cvar_set(&f.target, s, f.get(a)),
+            Op::SetCV(a, s) => self.cvar_set(&f.target, s, self.reg(f, a)),
             Op::GetConst(a, s) => match self.get_const(&f.target, s) {
-                Some(v) => f.set(a, v),
+                Some(v) => self.set_reg(f, a, v),
                 None => {
                     return Err(
                         self.name_err(format!("uninitialized constant {}", self.sym_name(s)))
@@ -1506,16 +1594,16 @@ impl Vm {
             },
             Op::SetConst(a, s) => {
                 let owner = self.lexical_class(&f.target);
-                self.store_const(&owner, s, f.get(a));
+                self.store_const(&owner, s, self.reg(f, a));
             }
             Op::GetMCnst(a, s) => {
-                let Value::Class(outer) = f.get(a) else {
-                    let v = f.get(a);
+                let Value::Class(outer) = self.reg(f, a) else {
+                    let v = self.reg(f, a);
                     let what = self.inspect(&v)?;
                     return Err(self.type_err(format!("{what} is not a class/module")));
                 };
                 match self.get_const_in(&outer, s) {
-                    Some(v) => f.set(a, v),
+                    Some(v) => self.set_reg(f, a, v),
                     None => {
                         let msg = format!(
                             "uninitialized constant {}::{}",
@@ -1527,35 +1615,35 @@ impl Vm {
                 }
             }
             Op::SetMCnst(a, s) => {
-                let Value::Class(outer) = f.get(a + 1) else {
-                    let v = f.get(a + 1);
+                let Value::Class(outer) = self.reg(f, a + 1) else {
+                    let v = self.reg(f, a + 1);
                     let what = self.inspect(&v)?;
                     return Err(self.type_err(format!("{what} is not a class/module")));
                 };
-                self.store_const(&outer, s, f.get(a));
+                self.store_const(&outer, s, self.reg(f, a));
             }
-            Op::OClass(a) => f.set(a, Value::Class(self.c.object.clone())),
+            Op::OClass(a) => self.set_reg(f, a, Value::Class(self.c.object.clone())),
             Op::GetUpVar(a, idx, depth) => {
-                let env = upvar_env(f, depth);
-                f.set(a, env.regs.borrow()[idx].clone());
+                let env = self.upvar_env(f, depth);
+                self.set_reg(f, a, self.heap[env].regs.borrow()[idx].clone());
             }
             Op::SetUpVar(a, idx, depth) => {
-                let env = upvar_env(f, depth);
-                env.regs.borrow_mut()[idx] = f.get(a);
+                let env = self.upvar_env(f, depth);
+                self.heap[env].regs.borrow_mut()[idx] = self.reg(f, a);
             }
             Op::Jmp(t) => f.pc = t,
             Op::JmpIf(a, t) => {
-                if f.get(a).truthy() {
+                if self.reg(f, a).truthy() {
                     f.pc = t;
                 }
             }
             Op::JmpNot(a, t) => {
-                if !f.get(a).truthy() {
+                if !self.reg(f, a).truthy() {
                     f.pc = t;
                 }
             }
             Op::JmpNil(a, t) => {
-                if f.get(a).is_nil() {
+                if self.reg(f, a).is_nil() {
                     f.pc = t;
                 }
             }
@@ -1571,12 +1659,12 @@ impl Vm {
             }
             Op::Except(a) => {
                 let exc = f.exc.take().unwrap_or(Value::Nil);
-                f.set(a, exc);
+                self.set_reg(f, a, exc);
             }
             Op::Rescue(a, b) => {
-                let exc = f.get(a);
-                let classes = match f.get(b) {
-                    Value::Array(list) => list.borrow().clone(),
+                let exc = self.reg(f, a);
+                let classes = match self.reg(f, b) {
+                    Value::Array(list) => self.heap[list].borrow().clone(),
                     v => vec![v],
                 };
                 let mut hit = false;
@@ -1589,10 +1677,10 @@ impl Vm {
                         break;
                     }
                 }
-                f.set(b, Value::Bool(hit));
+                self.set_reg(f, b, Value::Bool(hit));
             }
             Op::Raise(a) => {
-                let v = f.get(a);
+                let v = self.reg(f, a);
                 if v.is_nil()
                     && let Some(pending) = f.pending.take()
                 {
@@ -1601,10 +1689,10 @@ impl Vm {
                 return Err(Unwind::Error(v));
             }
             Op::Send(a, mid, argc, has_block) => {
-                let recv = f.get(a);
-                let args = (0..argc).map(|i| f.get(a + 1 + i)).collect();
+                let recv = self.reg(f, a);
+                let args = (0..argc).map(|i| self.reg(f, a + 1 + i)).collect();
                 let blk = if has_block {
-                    self.block_from(f.get(a + argc + 1))?
+                    self.block_from(self.reg(f, a + argc + 1))?
                 } else {
                     None
                 };
@@ -1612,10 +1700,10 @@ impl Vm {
                 return self.call_flow(f, a, tag, |vm| vm.start_call(recv, mid, args, blk));
             }
             Op::SendV(a, mid, has_block) => {
-                let recv = f.get(a);
-                let args = self.args_from_array(f.get(a + 1));
+                let recv = self.reg(f, a);
+                let args = self.args_from_array(self.reg(f, a + 1));
                 let blk = if has_block {
-                    self.block_from(f.get(a + 2))?
+                    self.block_from(self.reg(f, a + 2))?
                 } else {
                     None
                 };
@@ -1623,31 +1711,31 @@ impl Vm {
                 return self.call_flow(f, a, tag, |vm| vm.start_call(recv, mid, args, blk));
             }
             Op::Super(a, argc) => {
-                let args: Vec<Value> = (0..argc).map(|i| f.get(a + 1 + i)).collect();
-                let blk = self.block_from(f.get(a + argc + 1))?;
+                let args: Vec<Value> = (0..argc).map(|i| self.reg(f, a + 1 + i)).collect();
+                let blk = self.block_from(self.reg(f, a + argc + 1))?;
                 return self.super_flow(f, a, args, blk);
             }
             Op::SuperV(a) => {
-                let args = self.args_from_array(f.get(a + 1));
-                let blk = self.block_from(f.get(a + 2))?;
+                let args = self.args_from_array(self.reg(f, a + 1));
+                let blk = self.block_from(self.reg(f, a + 2))?;
                 return self.super_flow(f, a, args, blk);
             }
             Op::BlkPush(a, required) => match &f.block {
-                Some(b) => f.set(a, b.clone()),
+                Some(b) => self.set_reg(f, a, b.clone()),
                 None if required => {
                     return Err(self.err(&self.c.local_jump_error, "no block given (yield)"));
                 }
-                None => f.set(a, Value::Nil),
+                None => self.set_reg(f, a, Value::Nil),
             },
-            Op::BlockGiven(a) => f.set(a, Value::Bool(f.block.is_some())),
-            Op::Return(a) => return Ok(Flow::Return(f.get(a))),
+            Op::BlockGiven(a) => self.set_reg(f, a, Value::Bool(f.block.is_some())),
+            Op::Return(a) => return Ok(Flow::Return(self.reg(f, a))),
             Op::ReturnBlk(a) => {
                 if !self.live_homes.contains(&f.home) {
                     return Err(self.err(&self.c.local_jump_error, "unexpected return"));
                 }
                 return Err(Unwind::Return {
                     home: f.home,
-                    value: f.get(a),
+                    value: self.reg(f, a),
                 });
             }
             Op::Break(a) => {
@@ -1656,7 +1744,7 @@ impl Vm {
                 }
                 return Err(Unwind::Break {
                     tag: f.proc_tag,
-                    value: f.get(a),
+                    value: self.reg(f, a),
                 });
             }
             Op::Add(a) => return self.arith_flow(f, a, Arith::Add, self.s.add),
@@ -1664,68 +1752,76 @@ impl Vm {
             Op::Mul(a) => return self.arith_flow(f, a, Arith::Mul, self.s.mul),
             Op::Div(a) => return self.arith_flow(f, a, Arith::Div, self.s.div),
             Op::Eq(a) => {
-                let (x, y) = (f.get(a), f.get(a + 1));
+                let (x, y) = (self.reg(f, a), self.reg(f, a + 1));
                 let v = self.equal(&x, &y)?;
-                f.set(a, Value::Bool(v));
+                self.set_reg(f, a, Value::Bool(v));
             }
             Op::Lt(a) => return self.cmp_flow(f, a, self.s.lt, Ordering::is_lt),
             Op::Le(a) => return self.cmp_flow(f, a, self.s.le, Ordering::is_le),
             Op::Gt(a) => return self.cmp_flow(f, a, self.s.gt, Ordering::is_gt),
             Op::Ge(a) => return self.cmp_flow(f, a, self.s.ge, Ordering::is_ge),
-            Op::Not(a) => f.set(a, Value::Bool(!f.get(a).truthy())),
+            Op::Not(a) => self.set_reg(f, a, Value::Bool(!self.reg(f, a).truthy())),
             Op::Array(a, b, n) => {
-                let v = (0..n).map(|i| f.get(b + i)).collect();
-                f.set(a, Value::array(v));
+                let v = (0..n).map(|i| self.reg(f, b + i)).collect();
+                let v = self.array(v);
+                self.set_reg(f, a, v);
             }
             Op::ArrayCat(a, b) => {
-                let items = self.splat_to_vec(&f.get(b))?;
-                if let Value::Array(arr) = f.get(a) {
-                    arr.borrow_mut().extend(items);
+                let items = self.splat_to_vec(&self.reg(f, b))?;
+                if let Value::Array(arr) = self.reg(f, a) {
+                    self.heap[arr].borrow_mut().extend(items);
                 }
             }
             Op::ArrayPush(a, b) => {
-                if let Value::Array(arr) = f.get(a) {
-                    arr.borrow_mut().push(f.get(b));
+                if let Value::Array(arr) = self.reg(f, a) {
+                    let v = self.reg(f, b);
+                    self.heap[arr].borrow_mut().push(v);
                 }
             }
             Op::ToAry(a, b) => {
-                let arr = self.masgn_array(&f.get(b))?;
-                f.set(a, Value::Array(arr));
+                let v = self.reg(f, b);
+                let arr = self.masgn_array(&v)?;
+                self.set_reg(f, a, Value::Array(arr));
             }
             Op::ARef(a, b, i) => {
-                let v = match f.get(b) {
-                    Value::Array(arr) => arr.borrow().get(i).cloned().unwrap_or(Value::Nil),
+                let v = match self.reg(f, b) {
+                    Value::Array(arr) => self.heap[arr].borrow().get(i).cloned().unwrap_or(Value::Nil),
                     other if i == 0 => other,
                     _ => Value::Nil,
                 };
-                f.set(a, v);
+                self.set_reg(f, a, v);
             }
             Op::ASplat(a, b, pre, post) => {
-                let items = self.args_from_array(f.get(b));
+                let items = self.args_from_array(self.reg(f, b));
                 let start = pre.min(items.len());
                 let end = items.len().saturating_sub(post).max(start);
-                f.set(a, Value::array(items[start..end].to_vec()));
+                let v = self.array(items[start..end].to_vec());
+                self.set_reg(f, a, v);
             }
             Op::APost(a, b, pre, post, j) => {
-                let items = self.args_from_array(f.get(b));
+                let items = self.args_from_array(self.reg(f, b));
                 let idx = pre.max(items.len().saturating_sub(post)) + j;
-                f.set(a, items.get(idx).cloned().unwrap_or(Value::Nil));
+                self.set_reg(f, a, items.get(idx).cloned().unwrap_or(Value::Nil));
             }
             Op::Hash(a, b, n) => {
-                let mut h = RHash::new();
+                let Value::Hash(h) = self.hash(RHash::new()) else {
+                    unreachable!()
+                };
                 for i in 0..n {
-                    h.set(f.get(b + 2 * i), f.get(b + 2 * i + 1));
+                    let (k, v) = (self.reg(f, b + 2 * i), self.reg(f, b + 2 * i + 1));
+                    self.hash_set(h, k, v);
                 }
-                f.set(a, Value::hash(h));
+                self.set_reg(f, a, Value::Hash(h));
             }
             Op::HashAdd(a, b) => {
-                if let Value::Hash(h) = f.get(a) {
-                    h.borrow_mut().set(f.get(b), f.get(b + 1));
+                if let Value::Hash(h) = self.reg(f, a) {
+                    let (k, v) = (self.reg(f, b), self.reg(f, b + 1));
+                    self.hash_set(h, k, v);
                 }
             }
             Op::HashCat(a, b) => {
-                let pairs = match f.get(b) {
-                    Value::Hash(other) => other.borrow().pairs.clone(),
+                let pairs = match self.reg(f, b) {
+                    Value::Hash(other) => self.heap[other].borrow().pairs.clone(),
                     Value::Nil => vec![],
                     v => {
                         let what = self.class_name(&v);
@@ -1734,49 +1830,53 @@ impl Vm {
                         );
                     }
                 };
-                if let Value::Hash(h) = f.get(a) {
-                    let mut h = h.borrow_mut();
+                if let Value::Hash(h) = self.reg(f, a) {
                     for (k, v) in pairs {
-                        h.set(k, v);
+                        self.hash_set(h, k, v);
                     }
                 }
             }
             Op::KwHash(a) => {
-                if let Value::Hash(h) = f.get(a) {
-                    h.borrow_mut().kw = true;
+                if let Value::Hash(h) = self.reg(f, a) {
+                    self.heap[h].borrow_mut().kw = true;
                 }
             }
             Op::String(a, i) => {
                 let Literal::Str(s) = &f.irep.pool[i] else {
                     unreachable!()
                 };
-                f.set(a, Value::str(s.to_string()));
+                let v = self.str(s.to_string());
+                self.set_reg(f, a, v);
             }
             Op::StrCat(a) => {
-                let piece = match f.get(a + 1) {
-                    Value::Str(s) => s.borrow().clone(),
+                let piece = match self.reg(f, a + 1) {
+                    Value::Str(s) => self.heap[s].borrow().clone(),
                     other => self.inspect(&other)?,
                 };
-                if let Value::Str(s) = f.get(a) {
-                    s.borrow_mut().push_str(&piece);
+                if let Value::Str(s) = self.reg(f, a) {
+                    self.heap[s].borrow_mut().push_str(&piece);
                 }
             }
             Op::Intern(a) => {
-                let v = match f.get(a) {
+                let v = match self.reg(f, a) {
                     Value::Str(s) => {
-                        let s = s.borrow().clone();
+                        let s = self.heap[s].borrow().clone();
                         Value::Sym(self.intern(&s))
                     }
                     v => v,
                 };
-                f.set(a, v);
+                self.set_reg(f, a, v);
             }
-            Op::Range(a, excl) => f.set(a, Value::Range(Rc::new((f.get(a), f.get(a + 1), excl)))),
+            Op::Range(a, excl) => {
+                let (lo, hi) = (self.reg(f, a), self.reg(f, a + 1));
+                let v = self.range(lo, hi, excl);
+                self.set_reg(f, a, v);
+            }
             Op::Block(a, idx) | Op::Lambda(a, idx) => {
                 let p = RProc {
                     body: ProcBody::Ruby {
                         irep: f.irep.reps[idx].clone(),
-                        env: f.env.clone(),
+                        env: f.env,
                     },
                     self_: f.self_.clone(),
                     block: f.block.clone(),
@@ -1785,28 +1885,29 @@ impl Vm {
                     target: f.target.clone(),
                     lambda: matches!(op, Op::Lambda(..)),
                 };
-                f.set(a, Value::Proc(Rc::new(p)));
+                let p = Value::Proc(self.heap.alloc(p));
+                self.set_reg(f, a, p);
             }
             Op::TDef(s, idx) => {
                 let irep = f.irep.reps[idx].clone();
                 f.target.methods.borrow_mut().insert(s, Method::Ruby(irep));
             }
             Op::SDef(a, s, idx) => {
-                let cls = self.singleton_class(&f.get(a))?;
+                let cls = self.singleton_class(&self.reg(f, a))?;
                 cls.methods
                     .borrow_mut()
                     .insert(s, Method::Ruby(f.irep.reps[idx].clone()));
             }
             Op::Class(a, name, is_module) => {
                 let cls = self.define_class(f, a, name, is_module)?;
-                f.set(a, Value::Class(cls));
+                self.set_reg(f, a, Value::Class(cls));
             }
             Op::SClass(a) => {
-                let cls = self.singleton_class(&f.get(a))?;
-                f.set(a, Value::Class(cls));
+                let cls = self.singleton_class(&self.reg(f, a))?;
+                self.set_reg(f, a, Value::Class(cls));
             }
             Op::Exec(a, idx) => {
-                let Value::Class(cls) = f.get(a) else {
+                let Value::Class(cls) = self.reg(f, a) else {
                     unreachable!()
                 };
                 let target = cls.clone();
@@ -1821,8 +1922,11 @@ impl Vm {
             }
             Op::Undef(s) => self.undef_method(&f.target, s)?,
             Op::Defined(a, kind, s) => {
-                let v = self.defined(f, kind, s);
-                f.set(a, v.map(Value::str).unwrap_or(Value::Nil));
+                let v = match self.defined(f, kind, s) {
+                    Some(d) => self.str(d),
+                    None => Value::Nil,
+                };
+                self.set_reg(f, a, v);
             }
             Op::CurMethod(a) => {
                 let v = f
@@ -1830,7 +1934,7 @@ impl Vm {
                     .as_ref()
                     .map(|(_, m)| Value::Sym(*m))
                     .unwrap_or(Value::Nil);
-                f.set(a, v);
+                self.set_reg(f, a, v);
             }
         }
         Ok(Flow::Next)
@@ -1896,11 +2000,11 @@ impl Vm {
                 self.cvar_holder(&base, s).is_some()
             }
             DefinedKind::Const => self.get_const(&f.target, s).is_some(),
-            DefinedKind::ScopedConst(r) => match f.get(r) {
+            DefinedKind::ScopedConst(r) => match self.reg(f, r) {
                 Value::Class(c) => self.get_const_in(&c, s).is_some(),
                 _ => false,
             },
-            DefinedKind::Method(r, _) => self.respond_to(&f.get(r), s),
+            DefinedKind::Method(r, _) => self.respond_to(&self.reg(f, r), s),
             DefinedKind::Super => match &f.method {
                 Some((owner, mid)) => self.find_super(&f.self_, owner, *mid).is_some(),
                 None => false,
@@ -1926,7 +2030,7 @@ impl Vm {
         name: Sym,
         is_module: bool,
     ) -> Result<Rc<RClass>, Unwind> {
-        let outer = match f.get(a) {
+        let outer = match self.reg(f, a) {
             Value::Class(c) => c,
             Value::Nil => self.lexical_class(&f.target),
             v => {
@@ -1938,7 +2042,7 @@ impl Vm {
         let existing = outer.consts.borrow().get(&name).cloned();
         match existing {
             Some(Value::Class(c)) if c.is_module == is_module => {
-                if let Value::Class(sup) = f.get(a + 1) {
+                if let Value::Class(sup) = self.reg(f, a + 1) {
                     let same = c.superclass.as_ref().is_some_and(|s| Rc::ptr_eq(s, &sup));
                     if !is_module && !same {
                         return Err(
@@ -1956,7 +2060,7 @@ impl Vm {
                 let superclass = if is_module {
                     None
                 } else {
-                    match f.get(a + 1) {
+                    match self.reg(f, a + 1) {
                         Value::Nil => Some(self.c.object.clone()),
                         Value::Class(s) if !s.is_module && !s.is_singleton => Some(s),
                         _ => return Err(self.type_err("superclass must be a Class")),
@@ -2042,10 +2146,10 @@ impl Vm {
 
     /// `R[a] op R[a+1]`: numbers directly, anything else as a method call.
     fn arith_flow(&mut self, f: &Frame, a: Reg, op: Arith, mid: Sym) -> Result<Flow, Unwind> {
-        let (x, y) = (f.get(a), f.get(a + 1));
+        let (x, y) = (self.reg(f, a), self.reg(f, a + 1));
         if x.is_numeric() && y.is_numeric() {
             let v = self.arith(op, &x, &y)?;
-            f.set(a, v);
+            self.set_reg(f, a, v);
             return Ok(Flow::Next);
         }
         self.call_flow(f, a, 0, |vm| vm.start_call(x, mid, vec![y], None))
@@ -2058,9 +2162,9 @@ impl Vm {
         mid: Sym,
         pred: fn(Ordering) -> bool,
     ) -> Result<Flow, Unwind> {
-        let (x, y) = (f.get(a), f.get(a + 1));
+        let (x, y) = (self.reg(f, a), self.reg(f, a + 1));
         if x.is_numeric() && y.is_numeric() {
-            f.set(a, Value::Bool(num_cmp(&x, &y).is_some_and(pred)));
+            self.set_reg(f, a, Value::Bool(num_cmp(&x, &y).is_some_and(pred)));
             return Ok(Flow::Next);
         }
         self.call_flow(f, a, 0, |vm| vm.start_call(x, mid, vec![y], None))
@@ -2073,28 +2177,28 @@ impl Vm {
                 .call_method(a, self.s.eq, vec![b.clone()], None)?
                 .truthy());
         }
-        Ok(values_eq(a, b))
+        Ok(values_eq(&self.heap, a, b))
     }
 
     // ---- conversions (src/print.c, object.c) ---------------------------
 
     pub fn to_s(&mut self, v: &Value) -> Result<String, Unwind> {
         Ok(match v {
-            Value::Str(s) => s.borrow().clone(),
+            Value::Str(s) => self.heap[s].borrow().clone(),
             Value::Nil => String::new(),
             Value::Bool(b) => b.to_string(),
             Value::Int(i) => i.to_string(),
             Value::Float(x) => fmt_float(*x),
             Value::Sym(s) => self.sym_name(*s).to_string(),
             _ => match self.call_method(v, self.s.to_s, vec![], None)? {
-                Value::Str(s) => s.borrow().clone(),
+                Value::Str(s) => self.heap[s].borrow().clone(),
                 _ => format!("#<{}>", self.class_name(v)),
             },
         })
     }
 
-    fn inspect_array(&mut self, a: &Rc<RefCell<Vec<Value>>>) -> Result<String, Unwind> {
-        let items = a.borrow().clone();
+    fn inspect_array(&mut self, a: ArrayRef) -> Result<String, Unwind> {
+        let items = self.heap[a].borrow().clone();
         let mut parts = Vec::with_capacity(items.len());
         for x in &items {
             parts.push(self.inspect(x)?);
@@ -2102,8 +2206,8 @@ impl Vm {
         Ok(format!("[{}]", parts.join(", ")))
     }
 
-    fn inspect_hash(&mut self, h: &Rc<RefCell<RHash>>) -> Result<String, Unwind> {
-        let pairs = h.borrow().pairs.clone();
+    fn inspect_hash(&mut self, h: HashRef) -> Result<String, Unwind> {
+        let pairs = self.heap[h].borrow().pairs.clone();
         if pairs.is_empty() {
             return Ok("{}".into());
         }
@@ -2128,43 +2232,36 @@ impl Vm {
             Value::Int(i) => i.to_string(),
             Value::Float(x) => fmt_float(*x),
             Value::Sym(s) => inspect_sym(self.sym_name(*s)),
-            Value::Str(s) => inspect_str(&s.borrow()),
+            Value::Str(s) => inspect_str(&self.heap[s].borrow()),
             Value::Array(a) => {
-                let id = Rc::as_ptr(a) as usize;
+                let id = a.id();
                 if self.inspecting.contains(&id) {
                     return Ok("[...]".into());
                 }
                 self.inspecting.push(id);
-                let r = self.inspect_array(a);
+                let r = self.inspect_array(*a);
                 self.inspecting.pop();
                 r?
             }
             Value::Hash(h) => {
-                let id = Rc::as_ptr(h) as usize;
+                let id = h.id();
                 if self.inspecting.contains(&id) {
                     return Ok("{...}".into());
                 }
                 self.inspecting.push(id);
-                let r = self.inspect_hash(h);
+                let r = self.inspect_hash(*h);
                 self.inspecting.pop();
                 r?
             }
             Value::Range(r) => {
-                let lo = if r.0.is_nil() {
-                    String::new()
-                } else {
-                    self.inspect(&r.0)?
-                };
-                let hi = if r.1.is_nil() {
-                    String::new()
-                } else {
-                    self.inspect(&r.1)?
-                };
-                format!("{lo}{}{hi}", if r.2 { "..." } else { ".." })
+                let (lo, hi, excl) = self.heap[r].clone();
+                let lo = if lo.is_nil() { String::new() } else { self.inspect(&lo)? };
+                let hi = if hi.is_nil() { String::new() } else { self.inspect(&hi)? };
+                format!("{lo}{}{hi}", if excl { "..." } else { ".." })
             }
             Value::Class(_) | Value::Proc(_) | Value::Object(_) => {
                 match self.call_method(v, self.s.inspect, vec![], None)? {
-                    Value::Str(s) => s.borrow().clone(),
+                    Value::Str(s) => self.heap[s].borrow().clone(),
                     _ => format!("#<{}>", self.class_name(v)),
                 }
             }
@@ -2172,19 +2269,11 @@ impl Vm {
     }
 }
 
-fn proc_tag(blk: &Option<Value>) -> usize {
+fn proc_tag(blk: &Option<Value>) -> u64 {
     match blk {
-        Some(Value::Proc(p)) => Rc::as_ptr(p) as usize,
+        Some(Value::Proc(p)) => p.id(),
         _ => 0,
     }
-}
-
-fn upvar_env(f: &Frame, depth: usize) -> Rc<Env> {
-    let mut env = f.env.upper.clone().expect("upvar outside of block");
-    for _ in 0..depth {
-        env = env.upper.clone().expect("upvar depth");
-    }
-    env
 }
 
 fn is_simple_sym(s: &str) -> bool {

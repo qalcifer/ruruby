@@ -1,12 +1,12 @@
 //! Values and heap objects: `include/mruby/value.h`, `object.h`, `class.h`,
 //! `proc.h`, `hash.h` in mruby.
 //!
-//! mruby packs a value into one machine word (NaN/word boxing) and manages
-//! heap objects with its own incremental GC. Here a `Value` is a Rust enum
-//! and heap objects are reference counted (`Rc`). That is simple and safe,
-//! but leaks reference cycles; replacing `Rc` with a tracing GC (`gc.c`) is
-//! one of the roadmap items.
+//! mruby packs a value into one machine word (NaN/word boxing). Here a
+//! `Value` is a Rust enum; heap objects live in the [`Heap`](crate::gc::Heap)
+//! and a `Value` holds a [`Gc`](crate::gc::Gc) handle to them. Classes are
+//! the exception: they stay reference counted (`Rc<RClass>`).
 
+use crate::gc::{ArrayRef, EnvRef, HashRef, Heap, ObjRef, ProcRef, RangeRef, StrRef};
 use crate::opcode::Irep;
 use crate::symbol::Sym;
 use crate::vm::{Vm, VmResult};
@@ -161,19 +161,19 @@ impl RObject {
 /// reference to their defining frame's env so they can read/write its locals.
 pub struct Env {
     pub regs: RefCell<Vec<Value>>,
-    pub upper: Option<Rc<Env>>,
+    pub upper: Option<EnvRef>,
 }
 
 #[derive(Clone)]
 pub enum ProcBody {
     Ruby {
         irep: Rc<Irep>,
-        env: Rc<Env>,
+        env: EnvRef,
     },
     /// `&:sym` (Symbol#to_proc)
     SymCall(Sym),
     /// Internal: collects yielded values (used to run Enumerable over `each`).
-    Collect(Rc<RefCell<Vec<Value>>>),
+    Collect(ArrayRef),
 }
 
 pub struct RProc {
@@ -211,29 +211,28 @@ impl RHash {
         }
     }
 
-    pub fn get(&self, k: &Value) -> Option<Value> {
+    pub fn get(&self, heap: &Heap, k: &Value) -> Option<Value> {
         self.pairs
             .iter()
-            .find(|(key, _)| eql(key, k))
+            .find(|(key, _)| eql(heap, key, k))
             .map(|(_, v)| v.clone())
     }
 
-    pub fn set(&mut self, k: Value, v: Value) {
-        match self.pairs.iter_mut().find(|(key, _)| eql(key, &k)) {
+    pub fn contains(&self, heap: &Heap, k: &Value) -> bool {
+        self.pairs.iter().any(|(key, _)| eql(heap, key, k))
+    }
+
+    /// Sets `k`. A new String key must already be a private copy (Ruby
+    /// dups string keys); [`Vm::hash_set`](crate::vm::Vm::hash_set) does that.
+    pub fn set(&mut self, heap: &Heap, k: Value, v: Value) {
+        match self.pairs.iter_mut().find(|(key, _)| eql(heap, key, &k)) {
             Some(slot) => slot.1 = v,
-            None => {
-                // string keys are copied, like Ruby's frozen key dup
-                let k = match &k {
-                    Value::Str(s) => Value::str(s.borrow().clone()),
-                    _ => k,
-                };
-                self.pairs.push((k, v))
-            }
+            None => self.pairs.push((k, v)),
         }
     }
 
-    pub fn remove(&mut self, k: &Value) -> Option<Value> {
-        let i = self.pairs.iter().position(|(key, _)| eql(key, k))?;
+    pub fn remove(&mut self, heap: &Heap, k: &Value) -> Option<Value> {
+        let i = self.pairs.iter().position(|(key, _)| eql(heap, key, k))?;
         Some(self.pairs.remove(i).1)
     }
 }
@@ -251,30 +250,18 @@ pub enum Value {
     Int(i64),
     Float(f64),
     Sym(Sym),
-    Str(Rc<RefCell<String>>),
-    Array(Rc<RefCell<Vec<Value>>>),
-    Hash(Rc<RefCell<RHash>>),
-    Range(Rc<(Value, Value, bool)>),
-    Proc(Rc<RProc>),
+    Str(StrRef),
+    Array(ArrayRef),
+    Hash(HashRef),
+    Range(RangeRef),
+    Proc(ProcRef),
     Class(Rc<RClass>),
-    Object(Rc<RObject>),
+    Object(ObjRef),
 }
 
 impl Value {
     pub fn truthy(&self) -> bool {
         !matches!(self, Value::Nil | Value::Bool(false))
-    }
-
-    pub fn str(s: impl Into<String>) -> Value {
-        Value::Str(Rc::new(RefCell::new(s.into())))
-    }
-
-    pub fn array(v: Vec<Value>) -> Value {
-        Value::Array(Rc::new(RefCell::new(v)))
-    }
-
-    pub fn hash(h: RHash) -> Value {
-        Value::Hash(Rc::new(RefCell::new(h)))
     }
 
     pub fn is_numeric(&self) -> bool {
@@ -287,33 +274,53 @@ impl Value {
 
     /// Identity (`equal?`).
     pub fn identical(&self, other: &Value) -> bool {
+        use Value::*;
         match (self, other) {
-            (Value::Str(a), Value::Str(b)) => Rc::ptr_eq(a, b),
-            (Value::Array(a), Value::Array(b)) => Rc::ptr_eq(a, b),
-            (Value::Hash(a), Value::Hash(b)) => Rc::ptr_eq(a, b),
-            (Value::Range(a), Value::Range(b)) => Rc::ptr_eq(a, b),
-            (Value::Proc(a), Value::Proc(b)) => Rc::ptr_eq(a, b),
-            (Value::Class(a), Value::Class(b)) => Rc::ptr_eq(a, b),
-            (Value::Object(a), Value::Object(b)) => Rc::ptr_eq(a, b),
-            _ => values_eq(self, other),
+            (Nil, Nil) => true,
+            (Bool(a), Bool(b)) => a == b,
+            (Int(a), Int(b)) => a == b,
+            (Float(a), Float(b)) => a == b,
+            (Sym(a), Sym(b)) => a == b,
+            (Str(a), Str(b)) => a == b,
+            (Array(a), Array(b)) => a == b,
+            (Hash(a), Hash(b)) => a == b,
+            (Range(a), Range(b)) => a == b,
+            (Proc(a), Proc(b)) => a == b,
+            (Class(a), Class(b)) => Rc::ptr_eq(a, b),
+            (Object(a), Object(b)) => a == b,
+            _ => false,
+        }
+    }
+
+    /// Identity as a number (`object_id`, recursion guards); 0 for immediates.
+    pub fn heap_id(&self) -> u64 {
+        match self {
+            Value::Str(h) => h.id(),
+            Value::Array(h) => h.id(),
+            Value::Hash(h) => h.id(),
+            Value::Range(h) => h.id(),
+            Value::Proc(h) => h.id(),
+            Value::Object(h) => h.id(),
+            Value::Class(c) => Rc::as_ptr(c) as usize as u64,
+            _ => 0,
         }
     }
 }
 
 /// Structural `==` for built-in types (objects compare by identity here;
 /// the VM dispatches user-defined `==` before getting here).
-pub fn values_eq(a: &Value, b: &Value) -> bool {
-    eq_rec(a, b, &mut Vec::new())
+pub fn values_eq(heap: &Heap, a: &Value, b: &Value) -> bool {
+    eq_rec(heap, a, b, &mut Vec::new())
 }
 
 /// `in_progress` holds the container pairs currently being compared. Like
 /// Ruby, a pair met again while comparing itself is assumed equal, so
 /// recursive structures compare without looping forever.
-type InProgress = Vec<(usize, usize)>;
+type InProgress = Vec<(u64, u64)>;
 
 fn guarded(
-    pa: usize,
-    pb: usize,
+    pa: u64,
+    pb: u64,
     ip: &mut InProgress,
     f: impl FnOnce(&mut InProgress) -> bool,
 ) -> bool {
@@ -326,55 +333,40 @@ fn guarded(
     r
 }
 
-fn eq_rec(a: &Value, b: &Value, in_progress: &mut InProgress) -> bool {
+fn eq_rec(heap: &Heap, a: &Value, b: &Value, in_progress: &mut InProgress) -> bool {
     use Value::*;
     match (a, b) {
-        (Nil, Nil) => true,
-        (Bool(x), Bool(y)) => x == y,
-        (Int(x), Int(y)) => x == y,
-        (Float(x), Float(y)) => x == y,
         (Int(x), Float(y)) | (Float(y), Int(x)) => (*x as f64) == *y,
-        (Sym(x), Sym(y)) => x == y,
-        (Str(x), Str(y)) => *x.borrow() == *y.borrow(),
+        (Str(x), Str(y)) => x == y || *heap[*x].borrow() == *heap[*y].borrow(),
         (Array(x), Array(y)) => {
-            let (xv, yv) = (x.borrow().clone(), y.borrow().clone());
-            guarded(
-                Rc::as_ptr(x) as usize,
-                Rc::as_ptr(y) as usize,
-                in_progress,
-                |ip| xv.len() == yv.len() && xv.iter().zip(&yv).all(|(p, q)| eq_rec(p, q, ip)),
-            )
+            let (xv, yv) = (heap[*x].borrow().clone(), heap[*y].borrow().clone());
+            guarded(x.id(), y.id(), in_progress, |ip| {
+                xv.len() == yv.len() && xv.iter().zip(&yv).all(|(p, q)| eq_rec(heap, p, q, ip))
+            })
         }
         (Hash(x), Hash(y)) => {
-            let (xh, yh) = (x.borrow().clone(), y.borrow().clone());
-            guarded(
-                Rc::as_ptr(x) as usize,
-                Rc::as_ptr(y) as usize,
-                in_progress,
-                |ip| {
-                    xh.pairs.len() == yh.pairs.len()
-                        && xh
-                            .pairs
-                            .iter()
-                            .all(|(k, v)| yh.get(k).is_some_and(|w| eq_rec(v, &w, ip)))
-                },
-            )
+            let (xh, yh) = (heap[*x].borrow().clone(), heap[*y].borrow().clone());
+            guarded(x.id(), y.id(), in_progress, |ip| {
+                xh.pairs.len() == yh.pairs.len()
+                    && xh.pairs.iter().all(|(k, v)| {
+                        yh.get(heap, k)
+                            .is_some_and(|w| eq_rec(heap, v, &w, ip))
+                    })
+            })
         }
         (Range(x), Range(y)) => {
-            eq_rec(&x.0, &y.0, in_progress) && eq_rec(&x.1, &y.1, in_progress) && x.2 == y.2
+            let (x, y) = (&heap[*x], &heap[*y]);
+            eq_rec(heap, &x.0, &y.0, in_progress) && eq_rec(heap, &x.1, &y.1, in_progress) && x.2 == y.2
         }
-        (Proc(x), Proc(y)) => Rc::ptr_eq(x, y),
-        (Class(x), Class(y)) => Rc::ptr_eq(x, y),
-        (Object(x), Object(y)) => Rc::ptr_eq(x, y),
-        _ => false,
+        _ => a.identical(b),
     }
 }
 
 /// `eql?` — hash-key equality (`1.eql?(1.0)` is false).
-pub fn eql(a: &Value, b: &Value) -> bool {
+pub fn eql(heap: &Heap, a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Int(_), Value::Float(_)) | (Value::Float(_), Value::Int(_)) => false,
-        _ => values_eq(a, b),
+        _ => values_eq(heap, a, b),
     }
 }
 

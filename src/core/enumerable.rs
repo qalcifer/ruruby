@@ -14,9 +14,9 @@ fn yield1(vm: &mut Vm, b: &Value, x: &Value) -> VmResult {
 
 pub fn init(vm: &mut Vm) {
     let e = vm.c.enumerable.clone();
-    vm.def(&e, "to_a", |vm, s, _, _| Ok(Value::array(to_vec(vm, s)?)));
+    vm.def(&e, "to_a", |vm, s, _, _| Ok({ let v = to_vec(vm, s)?; vm.array(v) }));
     vm.def(&e, "entries", |vm, s, _, _| {
-        Ok(Value::array(to_vec(vm, s)?))
+        Ok({ let v = to_vec(vm, s)?; vm.array(v) })
     });
     let map: NativeFn = |vm, s, _, b| {
         let b = need_block(vm, b)?;
@@ -24,7 +24,7 @@ pub fn init(vm: &mut Vm) {
         for x in to_vec(vm, s)? {
             out.push(yield1(vm, &b, &x)?);
         }
-        Ok(Value::array(out))
+        Ok(vm.array(out))
     };
     vm.def(&e, "map", map);
     vm.def(&e, "collect", map);
@@ -33,11 +33,11 @@ pub fn init(vm: &mut Vm) {
         let mut out = Vec::new();
         for x in to_vec(vm, s)? {
             match yield1(vm, &b, &x)? {
-                Value::Array(a) => out.extend(a.borrow().iter().cloned()),
+                Value::Array(a) => out.extend(vm.heap[a].borrow().iter().cloned()),
                 v => out.push(v),
             }
         }
-        Ok(Value::array(out))
+        Ok(vm.array(out))
     });
     vm.def(&e, "filter_map", |vm, s, _, b| {
         let b = need_block(vm, b)?;
@@ -48,7 +48,7 @@ pub fn init(vm: &mut Vm) {
                 out.push(v);
             }
         }
-        Ok(Value::array(out))
+        Ok(vm.array(out))
     });
     vm.def(&e, "select", |vm, s, _, b| select(vm, s, b, true));
     vm.def(&e, "filter", |vm, s, _, b| select(vm, s, b, true));
@@ -63,7 +63,7 @@ pub fn init(vm: &mut Vm) {
                 no.push(x)
             }
         }
-        Ok(Value::array(vec![Value::array(yes), Value::array(no)]))
+        Ok({ let v = vec![vm.array(yes), vm.array(no)]; vm.array(v) })
     });
     let find: NativeFn = |vm, s, _, b| {
         let b = need_block(vm, b)?;
@@ -110,7 +110,8 @@ pub fn init(vm: &mut Vm) {
             return Err(vm.arg_err("invalid slice size"));
         }
         for chunk in to_vec(vm, s)?.chunks(n as usize) {
-            vm.call_block(&b, vec![Value::array(chunk.to_vec())])?;
+            let chunk = vm.array(chunk.to_vec());
+            vm.call_block(&b, vec![chunk])?;
         }
         Ok(Value::Nil)
     });
@@ -121,7 +122,8 @@ pub fn init(vm: &mut Vm) {
             return Err(vm.arg_err("invalid size"));
         }
         for w in to_vec(vm, s)?.windows(n as usize) {
-            vm.call_block(&b, vec![Value::array(w.to_vec())])?;
+            let w = vm.array(w.to_vec());
+            vm.call_block(&b, vec![w])?;
         }
         Ok(s.clone())
     });
@@ -162,30 +164,33 @@ pub fn init(vm: &mut Vm) {
     vm.def(&e, "minmax", |vm, s, _, _| {
         let lo = extreme(vm, s, &[], None, Ordering::Less)?;
         let hi = extreme(vm, s, &[], None, Ordering::Greater)?;
-        Ok(Value::array(vec![lo, hi]))
+        Ok(vm.array(vec![lo, hi]))
     });
     vm.def(&e, "sort", |vm, s, _, b| {
         let v = to_vec(vm, s)?;
-        Ok(Value::array(sort_values(vm, v, b)?))
+        Ok({ let v = sort_values(vm, v, b)?; vm.array(v) })
     });
     vm.def(&e, "sort_by", |vm, s, _, b| {
         let b = need_block(vm, b)?;
         let mut keyed = Vec::new();
         for x in to_vec(vm, s)? {
             let k = yield1(vm, &b, &x)?;
-            keyed.push(Value::array(vec![k, x]));
+            keyed.push(vm.array(vec![k, x]));
         }
-        let first = |p: &Value| match p {
-            Value::Array(p) => p.borrow()[0].clone(),
+        let first = |vm: &Vm, p: &Value| match p {
+            Value::Array(p) => vm.heap[p].borrow()[0].clone(),
             _ => unreachable!(),
         };
-        let sorted = merge_sort(vm, keyed, &mut |vm, x, y| compare(vm, &first(x), &first(y)))?;
-        Ok(Value::array(
+        let sorted = merge_sort(vm, keyed, &mut |vm, x, y| {
+            let (x, y) = (first(vm, x), first(vm, y));
+            compare(vm, &x, &y)
+        })?;
+        Ok(vm.array(
             sorted
                 .into_iter()
                 .map(|p| {
                     if let Value::Array(p) = p {
-                        p.borrow()[1].clone()
+                        vm.heap[p].borrow()[1].clone()
                     } else {
                         p
                     }
@@ -223,11 +228,11 @@ pub fn init(vm: &mut Vm) {
     });
     vm.def(&e, "take", |vm, s, a, _| {
         let n = int_of(vm, &arg(a, 0))?.max(0) as usize;
-        Ok(Value::array(to_vec(vm, s)?.into_iter().take(n).collect()))
+        Ok({ let v = to_vec(vm, s)?.into_iter().take(n).collect(); vm.array(v) })
     });
     vm.def(&e, "drop", |vm, s, a, _| {
         let n = int_of(vm, &arg(a, 0))?.max(0) as usize;
-        Ok(Value::array(to_vec(vm, s)?.into_iter().skip(n).collect()))
+        Ok({ let v = to_vec(vm, s)?.into_iter().skip(n).collect(); vm.array(v) })
     });
     vm.def(&e, "take_while", |vm, s, _, b| {
         let b = need_block(vm, b)?;
@@ -238,7 +243,7 @@ pub fn init(vm: &mut Vm) {
             }
             out.push(x);
         }
-        Ok(Value::array(out))
+        Ok(vm.array(out))
     });
     vm.def(&e, "drop_while", |vm, s, _, b| {
         let b = need_block(vm, b)?;
@@ -250,46 +255,52 @@ pub fn init(vm: &mut Vm) {
                 break;
             }
         }
-        Ok(Value::array(items[start..].to_vec()))
+        Ok(vm.array(items[start..].to_vec()))
     });
     vm.def(&e, "group_by", |vm, s, _, b| {
         let b = need_block(vm, b)?;
-        let mut h = RHash::new();
+        let hv = vm.hash(RHash::new());
+        let h = this_hash(vm, &hv)?;
         for x in to_vec(vm, s)? {
             let k = yield1(vm, &b, &x)?;
-            match h.get(&k) {
-                Some(Value::Array(v)) => v.borrow_mut().push(x),
-                _ => h.set(k, Value::array(vec![x])),
+            let found = vm.heap[h].borrow().get(&vm.heap, &k);
+            match found {
+                Some(Value::Array(v)) => vm.heap[v].borrow_mut().push(x),
+                _ => {
+                    let group = vm.array(vec![x]);
+                    vm.hash_set(h, k, group);
+                }
             }
         }
-        Ok(Value::hash(h))
+        Ok(hv)
     });
     vm.def(&e, "tally", |vm, s, _, _| {
-        let mut h = RHash::new();
+        let hv = vm.hash(RHash::new());
+        let h = this_hash(vm, &hv)?;
         for x in to_vec(vm, s)? {
-            let n = match h.get(&x) {
+            let n = match vm.heap[h].borrow().get(&vm.heap, &x) {
                 Some(Value::Int(n)) => n + 1,
                 _ => 1,
             };
-            h.set(x, Value::Int(n));
+            vm.hash_set(h, x, Value::Int(n));
         }
-        Ok(Value::hash(h))
+        Ok(hv)
     });
     vm.def(&e, "uniq", |vm, s, _, b| {
         let items = to_vec(vm, s)?;
         let Some(b) = b else {
-            return Ok(Value::array(uniq(items)));
+            return Ok({ let u = uniq(vm, items); vm.array(u) });
         };
         let mut keys: Vec<Value> = Vec::new();
         let mut out = Vec::new();
         for x in items {
             let k = yield1(vm, b, &x)?;
-            if !keys.iter().any(|y| eql(&k, y)) {
+            if !keys.iter().any(|y| eql(&vm.heap, &k, y)) {
                 keys.push(k);
                 out.push(x);
             }
         }
-        Ok(Value::array(out))
+        Ok(vm.array(out))
     });
     vm.def(&e, "zip", |vm, s, a, _| {
         let mine = to_vec(vm, s)?;
@@ -297,20 +308,16 @@ pub fn init(vm: &mut Vm) {
             .iter()
             .map(|o| to_vec(vm, o))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(Value::array(
-            mine.into_iter()
-                .enumerate()
-                .map(|(i, x)| {
-                    let mut row = vec![x];
-                    row.extend(
-                        others
-                            .iter()
-                            .map(|o| o.get(i).cloned().unwrap_or(Value::Nil)),
-                    );
-                    Value::array(row)
-                })
-                .collect(),
-        ))
+        let rows: Vec<Value> = mine
+            .into_iter()
+            .enumerate()
+            .map(|(i, x)| {
+                let mut row = vec![x];
+                row.extend(others.iter().map(|o| o.get(i).cloned().unwrap_or(Value::Nil)));
+                vm.array(row)
+            })
+            .collect();
+        Ok(vm.array(rows))
     });
     vm.def(&e, "each_entry", |vm, s, _, b| {
         let b = need_block(vm, b)?;
@@ -329,7 +336,7 @@ fn select(vm: &mut Vm, s: &Value, b: Option<&Value>, keep: bool) -> VmResult {
             out.push(x);
         }
     }
-    Ok(Value::array(out))
+    Ok(vm.array(out))
 }
 
 pub fn count(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>) -> VmResult {
@@ -374,7 +381,7 @@ fn extreme(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>, want: Orderin
             sorted.reverse();
         }
         sorted.truncate(n);
-        return Ok(Value::array(sorted));
+        return Ok(vm.array(sorted));
     }
     let mut best: Option<Value> = None;
     for x in items {

@@ -226,10 +226,11 @@ fn child(file: &Path) -> ExitCode {
         }
         // stream new failure messages and the running totals
         if let Value::Array(a) = global(&mut interp, "$asserts") {
-            let msgs: Vec<String> = a.borrow()[reported..]
+            let heap = &interp.vm.heap;
+            let msgs: Vec<String> = heap[a].borrow()[reported..]
                 .iter()
                 .map(|m| match m {
-                    Value::Str(s) => s.borrow().clone(),
+                    Value::Str(s) => heap[s].borrow().clone(),
                     _ => String::new(),
                 })
                 .collect();

@@ -12,6 +12,7 @@ pub mod range;
 pub mod reflect;
 pub mod string;
 
+pub use crate::gc::{ArrayRef, HashRef, StrRef};
 use crate::symbol::Sym;
 use crate::value::*;
 use crate::vm::{Unwind, Vm};
@@ -77,7 +78,7 @@ pub fn float_of(vm: &Vm, v: &Value) -> Result<f64, Unwind> {
 
 pub fn str_of(vm: &Vm, v: &Value) -> Result<String, Unwind> {
     match v {
-        Value::Str(s) => Ok(s.borrow().clone()),
+        Value::Str(s) => Ok(vm.heap[s].borrow().clone()),
         _ => Err(vm.type_err(format!(
             "no implicit conversion of {} into String",
             describe(vm, v)
@@ -89,7 +90,7 @@ pub fn sym_of(vm: &mut Vm, v: &Value) -> Result<Sym, Unwind> {
     match v {
         Value::Sym(s) => Ok(*s),
         Value::Str(s) => {
-            let s = s.borrow().clone();
+            let s = vm.heap[s].borrow().clone();
             Ok(vm.intern(&s))
         }
         _ => Err(vm.type_err(format!("{} is not a symbol nor a string", describe(vm, v)))),
@@ -104,23 +105,23 @@ fn describe(vm: &Vm, v: &Value) -> String {
     }
 }
 
-pub fn this_str(vm: &Vm, v: &Value) -> Result<Rc<RefCell<String>>, Unwind> {
+pub fn this_str(vm: &Vm, v: &Value) -> Result<StrRef, Unwind> {
     match v {
-        Value::Str(s) => Ok(s.clone()),
+        Value::Str(s) => Ok(*s),
         _ => Err(vm.type_err("expected a String receiver")),
     }
 }
 
-pub fn this_ary(vm: &Vm, v: &Value) -> Result<Rc<RefCell<Vec<Value>>>, Unwind> {
+pub fn this_ary(vm: &Vm, v: &Value) -> Result<ArrayRef, Unwind> {
     match v {
-        Value::Array(a) => Ok(a.clone()),
+        Value::Array(a) => Ok(*a),
         _ => Err(vm.type_err("expected an Array receiver")),
     }
 }
 
-pub fn this_hash(vm: &Vm, v: &Value) -> Result<Rc<RefCell<RHash>>, Unwind> {
+pub fn this_hash(vm: &Vm, v: &Value) -> Result<HashRef, Unwind> {
     match v {
-        Value::Hash(h) => Ok(h.clone()),
+        Value::Hash(h) => Ok(*h),
         _ => Err(vm.type_err("expected a Hash receiver")),
     }
 }
@@ -131,10 +132,10 @@ pub fn compare(vm: &mut Vm, a: &Value, b: &Value) -> Result<Ordering, Unwind> {
         return Ok(o);
     }
     if let (Value::Str(x), Value::Str(y)) = (a, b) {
-        return Ok(x.borrow().as_str().cmp(y.borrow().as_str()));
+        return Ok(vm.heap[x].borrow().as_str().cmp(vm.heap[y].borrow().as_str()));
     }
     if let (Value::Array(x), Value::Array(y)) = (a, b) {
-        let (x, y) = (x.borrow().clone(), y.borrow().clone());
+        let (x, y) = (vm.heap[x].borrow().clone(), vm.heap[y].borrow().clone());
         for (p, q) in x.iter().zip(&y) {
             let o = compare(vm, p, q)?;
             if o != Ordering::Equal {
@@ -205,19 +206,20 @@ pub fn sort_values(vm: &mut Vm, v: Vec<Value>, blk: Option<&Value>) -> Result<Ve
 /// or any object with an `each` method.
 pub fn to_vec(vm: &mut Vm, v: &Value) -> Result<Vec<Value>, Unwind> {
     match v {
-        Value::Array(a) => Ok(a.borrow().clone()),
-        Value::Hash(h) => Ok(h
-            .borrow()
-            .pairs
-            .iter()
-            .map(|(k, v)| Value::array(vec![k.clone(), v.clone()]))
-            .collect()),
-        Value::Range(r) => range::range_vec(vm, r),
+        Value::Array(a) => Ok(vm.heap[a].borrow().clone()),
+        Value::Hash(h) => {
+            let pairs = vm.heap[h].borrow().pairs.clone();
+            Ok(pairs.into_iter().map(|(k, v)| vm.array(vec![k, v])).collect())
+        }
+        Value::Range(r) => {
+            let r = vm.heap[r].clone();
+            range::range_vec(vm, &r)
+        }
         _ => {
-            let buf = Rc::new(RefCell::new(Vec::new()));
-            let collector = vm.proc_value(ProcBody::Collect(buf.clone()));
+            let buf = vm.heap.alloc(RefCell::new(Vec::new()));
+            let collector = vm.proc_value(ProcBody::Collect(buf));
             vm.call_method(v, vm.s.each, vec![], Some(collector))?;
-            let out = buf.borrow().clone();
+            let out = vm.heap[buf].borrow().clone();
             Ok(out)
         }
     }
