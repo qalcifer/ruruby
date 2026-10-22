@@ -14,11 +14,10 @@
 
 use crate::gc::{ArrayRef, EnvRef, HashRef, Heap, Marker};
 use crate::opcode::{ArgSpec, DefinedKind, Irep, Literal, Op, Reg};
-use crate::symbol::{Sym, SymbolTable};
+use crate::symbol::{Sym, SymMap, SymbolTable};
 use crate::value::*;
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 /// Non-local control flow.
@@ -121,7 +120,7 @@ pub struct Vm {
     pub syms: SymbolTable,
     pub c: Classes,
     pub s: CommonSyms,
-    pub globals: HashMap<Sym, Value>,
+    pub globals: SymMap<Value>,
     pub main_obj: Value,
     /// When set, output of `puts`/`print`/`p` goes here instead of stdout.
     pub capture: Option<String>,
@@ -415,7 +414,7 @@ impl Vm {
             syms,
             c,
             s,
-            globals: HashMap::new(),
+            globals: SymMap::default(),
             main_obj,
             capture: None,
             at_exit: Vec::new(),

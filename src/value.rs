@@ -8,11 +8,10 @@
 
 use crate::gc::{ArrayRef, EnvRef, HashRef, Heap, ObjRef, ProcRef, RangeRef, StrRef};
 use crate::opcode::Irep;
-use crate::symbol::Sym;
+use crate::symbol::{Sym, SymMap};
 use crate::vm::{Vm, VmResult};
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 /// A method implemented in Rust (mruby: `mrb_func_t`).
@@ -62,8 +61,8 @@ pub struct RClass {
     pub name_cell: RefCell<String>,
     pub superclass: Option<Rc<RClass>>,
     pub is_module: bool,
-    pub methods: RefCell<HashMap<Sym, Method>>,
-    pub consts: RefCell<HashMap<Sym, Value>>,
+    pub methods: RefCell<SymMap<Method>>,
+    pub consts: RefCell<SymMap<Value>>,
     /// Included modules (mruby inserts `MRB_TT_ICLASS` proxies into the superclass chain).
     pub includes: RefCell<Vec<Rc<RClass>>>,
     /// Modules prepended with `prepend`, searched before the class itself.
