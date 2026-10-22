@@ -8,6 +8,7 @@
 use crate::ast::*;
 use crate::opcode::{ArgSpec, CatchHandler, DefinedKind, Irep, Literal, Op, Reg};
 use crate::symbol::{Sym, SymbolTable};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 type CResult<T> = Result<T, String>;
@@ -143,7 +144,9 @@ impl Codegen<'_> {
     }
 
     fn pop_scope(&mut self) -> Irep {
-        self.scopes.pop().unwrap().irep
+        let mut irep = self.scopes.pop().unwrap().irep;
+        irep.caches = irep.code.iter().map(|_| RefCell::default()).collect();
+        irep
     }
 
     fn add_child(&mut self, irep: Irep) -> usize {

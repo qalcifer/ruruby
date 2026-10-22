@@ -72,7 +72,7 @@ fn init_kernel(vm: &mut Vm) {
         for m in a.iter().rev() {
             let m = module_arg(vm, m)?;
             if !sc.includes.borrow().iter().any(|x| Rc::ptr_eq(x, &m)) {
-                sc.includes.borrow_mut().push(m.clone());
+                sc.includes.push(m.clone());
             }
             hook(vm, &Value::Class(m), "extended", s.clone())?;
         }
@@ -95,9 +95,7 @@ fn init_kernel(vm: &mut Vm) {
             None => arg(a, 1),
         };
         vm.singleton_class(s)?
-            .methods
-            .borrow_mut()
-            .insert(name, Method::Proc(body));
+            .methods.insert(name, Method::Proc(body));
         Ok(Value::Sym(name))
     });
     vm.def(&k, "singleton_methods", |vm, s, _, _| {
@@ -195,7 +193,7 @@ fn init_module(vm: &mut Vm) {
             if Vm::ancestors(&cls).iter().any(|x| Rc::ptr_eq(x, &module)) {
                 continue;
             }
-            cls.includes.borrow_mut().push(module.clone());
+            cls.includes.push(module.clone());
             hook(vm, v, "included", s.clone())?;
         }
         Ok(s.clone())
@@ -207,7 +205,7 @@ fn init_module(vm: &mut Vm) {
             if cls.prepends.borrow().iter().any(|x| Rc::ptr_eq(x, &module)) {
                 continue;
             }
-            cls.prepends.borrow_mut().push(module.clone());
+            cls.prepends.push(module.clone());
             hook(vm, v, "prepended", s.clone())?;
         }
         Ok(s.clone())
@@ -238,7 +236,7 @@ fn init_module(vm: &mut Vm) {
             (None, Some(p @ Value::Proc(_))) => p.clone(),
             _ => return Err(vm.arg_err("tried to create Proc object without a block")),
         };
-        cls.methods.borrow_mut().insert(name, Method::Proc(body));
+        cls.methods.insert(name, Method::Proc(body));
         Ok(Value::Sym(name))
     });
     vm.def(&m, "alias_method", |vm, s, a, _| {
@@ -251,7 +249,7 @@ fn init_module(vm: &mut Vm) {
         let cls = this_class(vm, s)?;
         for n in a {
             let mid = sym_of(vm, n)?;
-            if cls.methods.borrow_mut().remove(&mid).is_none() {
+            if cls.methods.remove(&mid).is_none() {
                 let msg = format!(
                     "method '{}' not defined in {}",
                     vm.sym_name(mid),
@@ -351,7 +349,7 @@ fn init_module(vm: &mut Vm) {
         for n in a {
             let mid = sym_of(vm, n)?;
             if let Some((meth, _)) = Vm::find_method(&cls, mid) {
-                sc.methods.borrow_mut().insert(mid, meth);
+                sc.methods.insert(mid, meth);
             }
         }
         Ok(Value::Nil)

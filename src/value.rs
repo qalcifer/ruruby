@@ -55,18 +55,70 @@ impl IvTable {
     }
 }
 
+thread_local! {
+    static METHOD_EPOCH: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Changes whenever method lookup could find something else: a method
+/// table, include or prepend list changed, or a class was created (so a
+/// cache keyed by a class's address can't outlive it). Inline caches on
+/// `Send` are valid only for the epoch they were filled in.
+pub fn method_epoch() -> u64 {
+    METHOD_EPOCH.with(|e| e.get())
+}
+
+fn methods_changed() {
+    METHOD_EPOCH.with(|e| e.set(e.get() + 1));
+}
+
+/// A class's methods. Mutation goes through `insert`/`remove`, which
+/// invalidate the method caches.
+#[derive(Default)]
+pub struct MethodTable(RefCell<SymMap<Method>>);
+
+impl MethodTable {
+    pub fn borrow(&self) -> std::cell::Ref<'_, SymMap<Method>> {
+        self.0.borrow()
+    }
+
+    pub fn insert(&self, name: Sym, m: Method) {
+        methods_changed();
+        self.0.borrow_mut().insert(name, m);
+    }
+
+    pub fn remove(&self, name: &Sym) -> Option<Method> {
+        methods_changed();
+        self.0.borrow_mut().remove(name)
+    }
+}
+
+/// Included or prepended modules; `push` invalidates the method caches.
+#[derive(Default)]
+pub struct ModuleList(RefCell<Vec<Rc<RClass>>>);
+
+impl ModuleList {
+    pub fn borrow(&self) -> std::cell::Ref<'_, Vec<Rc<RClass>>> {
+        self.0.borrow()
+    }
+
+    pub fn push(&self, m: Rc<RClass>) {
+        methods_changed();
+        self.0.borrow_mut().push(m);
+    }
+}
+
 /// Class or module (mruby: `struct RClass`).
 pub struct RClass {
     /// Use [`RClass::name`]; anonymous classes get their name on first constant assignment.
     pub name_cell: RefCell<String>,
     pub superclass: Option<Rc<RClass>>,
     pub is_module: bool,
-    pub methods: RefCell<SymMap<Method>>,
+    pub methods: MethodTable,
     pub consts: RefCell<SymMap<Value>>,
     /// Included modules (mruby inserts `MRB_TT_ICLASS` proxies into the superclass chain).
-    pub includes: RefCell<Vec<Rc<RClass>>>,
+    pub includes: ModuleList,
     /// Modules prepended with `prepend`, searched before the class itself.
-    pub prepends: RefCell<Vec<Rc<RClass>>>,
+    pub prepends: ModuleList,
     pub ivars: RefCell<IvTable>,
     pub cvars: RefCell<IvTable>,
     /// The singleton class ("metaclass"), created on demand (mruby: `MRB_TT_SCLASS`).
@@ -81,6 +133,7 @@ pub struct RClass {
 
 impl RClass {
     pub fn new(name: &str, superclass: Option<Rc<RClass>>, is_module: bool) -> Rc<RClass> {
+        methods_changed();
         Rc::new(RClass {
             name_cell: RefCell::new(name.to_string()),
             superclass,
@@ -99,6 +152,7 @@ impl RClass {
     }
 
     pub fn new_singleton(name: String, superclass: Rc<RClass>) -> Rc<RClass> {
+        methods_changed();
         Rc::new(RClass {
             name_cell: RefCell::new(name),
             superclass: Some(superclass),

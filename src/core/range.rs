@@ -43,7 +43,7 @@ fn this(vm: &Vm, s: &Value) -> Result<(Value, Value, bool), Unwind> {
 
 pub fn init(vm: &mut Vm) {
     let c = vm.c.range.clone();
-    c.includes.borrow_mut().push(vm.c.enumerable.clone());
+    c.includes.push(vm.c.enumerable.clone());
     vm.def(&c, "first", |vm, s, a, _| {
         let r = this(vm, s)?;
         if a.is_empty() {

@@ -20,7 +20,7 @@ fn new_hash(vm: &mut Vm) -> (Value, HashRef) {
 
 pub fn init(vm: &mut Vm) {
     let c = vm.c.hash.clone();
-    c.includes.borrow_mut().push(vm.c.enumerable.clone());
+    c.includes.push(vm.c.enumerable.clone());
     vm.def(&c, "[]", |vm, s, a, _| {
         let h = this_hash(vm, s)?;
         let key = arg(a, 0);

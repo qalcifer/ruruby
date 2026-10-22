@@ -8,6 +8,8 @@
 //! later, mechanical step.
 
 use crate::symbol::{Sym, SymbolTable};
+use crate::value::{Method, RClass};
+use std::cell::RefCell;
 use std::fmt::Write;
 use std::rc::Rc;
 
@@ -256,16 +258,34 @@ impl ArgSpec {
 }
 
 /// A compiled unit: method body, block, class body, or top-level script.
+/// Inline cache of a `Send`: the method found for receivers of one class
+/// (by address) in one method epoch (mruby: the method cache; CRuby: the
+/// call cache of a call site).
+#[derive(Default)]
+pub struct CallCache {
+    pub class: usize,
+    pub epoch: u64,
+    pub hit: Option<(Method, Rc<RClass>)>,
+}
+
 #[derive(Debug, Default)]
 pub struct Irep {
     pub name: String,
     pub code: Vec<Op>,
+    /// One inline cache per instruction (used by `Send`).
+    pub caches: Box<[RefCell<CallCache>]>,
     pub pool: Vec<Literal>,
     pub reps: Vec<Rc<Irep>>,
     pub catch: Vec<CatchHandler>,
     pub nlocals: usize,
     pub nregs: usize,
     pub spec: ArgSpec,
+}
+
+impl std::fmt::Debug for CallCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "CallCache")
+    }
 }
 
 impl Irep {

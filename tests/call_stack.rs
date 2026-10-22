@@ -163,3 +163,45 @@ fn closures_outlive_their_frames() {
     "#;
     assert_eq!(run(src), "2\n11\n10\n:done\n9\n[10, 20, 30]\n3\n3\n11\n");
 }
+
+#[test]
+fn method_caches_see_every_change() {
+    // `call(o)` is one Send whose inline cache gets filled, then each kind
+    // of change must make it look the method up again
+    let src = r#"
+        class A; def hi = "A"; end
+        def call(o) = (o.hi rescue "none")
+        a = A.new
+        out = [call(a)]
+        class A; def hi = "A2"; end
+        out << call(a)
+        module M; def hi = "M"; end
+        class A; include M; end
+        out << call(a)
+        module P; def hi = "P"; end
+        class A; prepend P; end
+        out << call(a)
+        def a.hi = "singleton"
+        out << call(a)
+        b = A.new
+        out << call(b)
+        b.extend(Module.new { define_method(:hi) { "extended" } })
+        out << call(b)
+        class B; def hi = "B"; end
+        out << call(B.new)
+        class B; alias_method :hello, :hi; undef_method :hi; end
+        out << call(B.new)
+        class B; define_method(:hi) { "defined" }; end
+        out << call(B.new)
+        B.send(:remove_method, :hi)
+        out << call(B.new) << B.new.hello
+        p out
+        # the same site sees receivers of different classes
+        p [1, "s", :y, nil, 2.0].map { |x| x.to_s }
+    "#;
+    assert_eq!(
+        run(src),
+        "[\"A\", \"A2\", \"A2\", \"P\", \"singleton\", \"P\", \"extended\", \"B\", \"none\", \"defined\", \"none\", \"B\"]\n\
+         [\"1\", \"s\", \"y\", \"\", \"2.0\"]\n"
+    );
+}

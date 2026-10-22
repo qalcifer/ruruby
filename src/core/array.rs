@@ -14,7 +14,7 @@ fn items(vm: &Vm, s: &Value) -> Result<Vec<Value>, Unwind> {
 
 pub fn init(vm: &mut Vm) {
     let c = vm.c.array.clone();
-    c.includes.borrow_mut().push(vm.c.enumerable.clone());
+    c.includes.push(vm.c.enumerable.clone());
     vm.def(&c, "each", |vm, s, _, b| {
         let b = need_block(vm, b)?;
         let arr = this_ary(vm, s)?;

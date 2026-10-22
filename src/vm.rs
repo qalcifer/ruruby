@@ -14,7 +14,7 @@
 //!   propagated with `?`, and each frame consults its irep's catch table.
 
 use crate::gc::{ArrayRef, EnvRef, HashRef, Heap, Marker};
-use crate::opcode::{ArgSpec, DefinedKind, Irep, Literal, Op, Reg};
+use crate::opcode::{ArgSpec, CallCache, DefinedKind, Irep, Literal, Op, Reg};
 use crate::symbol::{Sym, SymMap, SymbolTable};
 use crate::value::*;
 use std::cell::RefCell;
@@ -320,7 +320,7 @@ impl Vm {
         let basic_object = RClass::new("BasicObject", None, false);
         let object = RClass::new("Object", Some(basic_object.clone()), false);
         let kernel = RClass::new("Kernel", None, true);
-        object.includes.borrow_mut().push(kernel.clone());
+        object.includes.push(kernel.clone());
         let sub = |name: &str, sup: &Rc<RClass>| RClass::new(name, Some(sup.clone()), false);
         let module = sub("Module", &object);
         let class = sub("Class", &module);
@@ -621,15 +621,13 @@ impl Vm {
 
     pub fn def(&mut self, cls: &Rc<RClass>, name: &str, f: NativeFn) {
         let s = self.intern(name);
-        cls.methods.borrow_mut().insert(s, Method::Native(f));
+        cls.methods.insert(s, Method::Native(f));
     }
 
     pub fn def_singleton(&mut self, cls: &Rc<RClass>, name: &str, f: NativeFn) {
         let s = self.intern(name);
         self.class_singleton(cls)
-            .methods
-            .borrow_mut()
-            .insert(s, Method::Native(f));
+            .methods.insert(s, Method::Native(f));
     }
 
     pub fn set_const(&mut self, name: &str, v: Value) {
@@ -835,6 +833,58 @@ impl Vm {
             c = k.superclass.clone();
         }
         None
+    }
+
+    /// The class lookup for `v` starts at, by address, without cloning it;
+    /// 0 for classes (their singleton class may not exist yet).
+    fn dispatch_key(&self, v: &Value) -> usize {
+        let c = &self.c;
+        let class = match v {
+            Value::Object(o) => {
+                let o = &self.heap[o];
+                return match o.singleton.borrow().as_ref() {
+                    Some(s) => Rc::as_ptr(s) as usize,
+                    None => Rc::as_ptr(&o.class) as usize,
+                };
+            }
+            Value::Class(_) => return 0,
+            Value::Nil => &c.nil,
+            Value::Bool(true) => &c.true_,
+            Value::Bool(false) => &c.false_,
+            Value::Int(_) => &c.integer,
+            Value::Float(_) => &c.float,
+            Value::Sym(_) => &c.symbol,
+            Value::Str(_) => &c.string,
+            Value::Array(_) => &c.array,
+            Value::Hash(_) => &c.hash,
+            Value::Range(_) => &c.range,
+            Value::Proc(_) => &c.proc_,
+        };
+        Rc::as_ptr(class) as usize
+    }
+
+    /// `lookup` through the inline cache of the `Send` that just ran
+    /// (`f.pc - 1`).
+    fn cached_lookup(&self, f: &Frame, recv: &Value, mid: Sym) -> Option<(Method, Rc<RClass>)> {
+        let key = self.dispatch_key(recv);
+        if key == 0 {
+            return self.lookup(recv, mid);
+        }
+        let epoch = method_epoch();
+        let cache = &f.irep.caches[f.pc - 1];
+        {
+            let c = cache.borrow();
+            if c.class == key && c.epoch == epoch {
+                return c.hit.clone();
+            }
+        }
+        let found = self.lookup(recv, mid);
+        *cache.borrow_mut() = CallCache {
+            class: key,
+            epoch,
+            hit: found.clone(),
+        };
+        found
     }
 
     fn lookup(&self, recv: &Value, mid: Sym) -> Option<(Method, Rc<RClass>)> {
@@ -1868,7 +1918,7 @@ impl Vm {
                 };
                 let tag = proc_tag(&blk);
                 let args = Args::Stack { at: f.base + a + 1, n: argc };
-                let Some((m, owner)) = self.lookup(&recv, mid) else {
+                let Some((m, owner)) = self.cached_lookup(f, &recv, mid) else {
                     return self.call_flow(f, a, tag, |vm| vm.start_call(recv, mid, args, blk));
                 };
                 // natives take their arguments as a slice: no Vec for the common case
@@ -2102,13 +2152,11 @@ impl Vm {
             }
             Op::TDef(s, idx) => {
                 let irep = f.irep.reps[idx].clone();
-                f.target.methods.borrow_mut().insert(s, Method::Ruby(irep));
+                f.target.methods.insert(s, Method::Ruby(irep));
             }
             Op::SDef(a, s, idx) => {
                 let cls = self.singleton_class(&self.reg(f, a))?;
-                cls.methods
-                    .borrow_mut()
-                    .insert(s, Method::Ruby(f.irep.reps[idx].clone()));
+                cls.methods.insert(s, Method::Ruby(f.irep.reps[idx].clone()));
             }
             Op::Class(a, name, is_module) => {
                 let cls = self.define_class(f, a, name, is_module)?;
@@ -2182,7 +2230,7 @@ impl Vm {
     pub fn alias_method(&self, target: &Rc<RClass>, new: Sym, old: Sym) -> Result<(), Unwind> {
         match Self::find_method(target, old) {
             Some((m, _)) => {
-                target.methods.borrow_mut().insert(new, m);
+                target.methods.insert(new, m);
                 Ok(())
             }
             None => Err(self.name_err(format!(
@@ -2201,7 +2249,7 @@ impl Vm {
                 target.name()
             )));
         }
-        target.methods.borrow_mut().insert(s, Method::Undefined);
+        target.methods.insert(s, Method::Undefined);
         Ok(())
     }
 

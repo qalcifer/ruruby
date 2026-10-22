@@ -338,11 +338,11 @@ fn attr(vm: &mut Vm, s: &Value, a: &[Value], reader: bool, writer: bool) -> VmRe
         let iv = vm.intern(&format!("@{n}"));
         if reader {
             let m = vm.intern(&n);
-            cls.methods.borrow_mut().insert(m, Method::AttrReader(iv));
+            cls.methods.insert(m, Method::AttrReader(iv));
         }
         if writer {
             let m = vm.intern(&format!("{n}="));
-            cls.methods.borrow_mut().insert(m, Method::AttrWriter(iv));
+            cls.methods.insert(m, Method::AttrWriter(iv));
         }
     }
     Ok(Value::Nil)
@@ -367,7 +367,7 @@ fn init_module(vm: &mut Vm) {
         for m in a {
             match m {
                 Value::Class(module) if module.is_module => {
-                    cls.includes.borrow_mut().push(module.clone())
+                    cls.includes.push(module.clone())
                 }
                 _ => return Err(vm.type_err("wrong argument type (expected Module)")),
             }
@@ -485,7 +485,7 @@ fn init_misc(vm: &mut Vm) {
     let p = vm.c.proc_.clone();
     for name in ["call", "()", "yield", "[]"] {
         let s = vm.intern(name);
-        p.methods.borrow_mut().insert(s, Method::ProcCall);
+        p.methods.insert(s, Method::ProcCall);
     }
     vm.def(&p, "to_proc", |_, s, _, _| Ok(s.clone()));
     vm.def(&p, "arity", |vm, s, _, _| match s {
