@@ -1778,9 +1778,121 @@ impl Vm {
         }
     }
 
-    /// Executes one instruction.
+    /// Executes one instruction: the simplest ones (and the Integer fast
+    /// paths) right here in the dispatch loop, everything else out of line,
+    /// so the loop stays small enough to keep its state in registers.
     #[inline(always)]
     fn step(&mut self, f: &mut Frame, op: Op) -> Result<Flow, Unwind> {
+        match op {
+            Op::Move(a, b) => {
+                let v = self.reg(f, b);
+                self.set_reg(f, a, v);
+            }
+            Op::LoadI(a, i) => self.set_reg(f, a, Value::Int(i)),
+            Op::LoadSym(a, s) => self.set_reg(f, a, Value::Sym(s)),
+            Op::LoadNil(a) => self.set_reg(f, a, Value::Nil),
+            Op::LoadSelf(a) => self.set_reg(f, a, f.self_),
+            Op::LoadTrue(a) => self.set_reg(f, a, Value::Bool(true)),
+            Op::LoadFalse(a) => self.set_reg(f, a, Value::Bool(false)),
+            Op::Jmp(t) => f.pc = t,
+            Op::JmpIf(a, t) => {
+                if self.reg(f, a).truthy() {
+                    f.pc = t;
+                }
+            }
+            Op::JmpNot(a, t) => {
+                if !self.reg(f, a).truthy() {
+                    f.pc = t;
+                }
+            }
+            Op::Return(a) => return Ok(Flow::Return(self.reg(f, a))),
+            Op::GetUpVar(a, idx, depth) => {
+                let env = self.upvar_env(f, depth);
+                let v = self.env_get(env, idx);
+                self.set_reg(f, a, v);
+            }
+            Op::SetUpVar(a, idx, depth) => {
+                let env = self.upvar_env(f, depth);
+                let v = self.reg(f, a);
+                self.env_set(env, idx, v);
+            }
+            Op::BlkPush(a, _) if f.block.is_some() => self.set_reg(f, a, f.block.unwrap()),
+            Op::Send(a, mid, argc, has_block) => return self.send_op(f, a, mid, argc, has_block),
+            Op::AddI(a, i) | Op::SubI(a, i) => {
+                let add = matches!(op, Op::AddI(..));
+                if let Value::Int(x) = self.reg(f, a)
+                    && let Some(v) = if add { x.checked_add(i) } else { x.checked_sub(i) }
+                {
+                    self.set_reg(f, a, Value::Int(v));
+                } else {
+                    return self.step_slow(f, op);
+                }
+            }
+            Op::Add(a) | Op::Sub(a) | Op::Lt(a) | Op::Le(a) | Op::Gt(a) | Op::Ge(a) => {
+                let (Value::Int(x), Value::Int(y)) = (self.reg(f, a), self.reg(f, a + 1)) else {
+                    return self.step_slow(f, op);
+                };
+                let v = match op {
+                    Op::Add(_) => match x.checked_add(y) {
+                        Some(v) => Value::Int(v),
+                        None => return self.step_slow(f, op),
+                    },
+                    Op::Sub(_) => match x.checked_sub(y) {
+                        Some(v) => Value::Int(v),
+                        None => return self.step_slow(f, op),
+                    },
+                    Op::Lt(_) => Value::Bool(x < y),
+                    Op::Le(_) => Value::Bool(x <= y),
+                    Op::Gt(_) => Value::Bool(x > y),
+                    _ => Value::Bool(x >= y),
+                };
+                self.set_reg(f, a, v);
+            }
+            _ => return self.step_slow(f, op),
+        }
+        Ok(Flow::Next)
+    }
+
+    /// `Send`, out of line but separate from [`Vm::step_slow`]: calls and
+    /// yields are frequent enough to deserve their own small function.
+    #[inline(never)]
+    fn send_op(
+        &mut self,
+        f: &mut Frame,
+        a: Reg,
+        mid: Sym,
+        argc: usize,
+        has_block: bool,
+    ) -> Result<Flow, Unwind> {
+        let recv = self.reg(f, a);
+        let blk = if has_block {
+            self.block_from(self.reg(f, a + argc + 1))?
+        } else {
+            None
+        };
+        let tag = proc_tag(&blk);
+        let args = Args::Stack { at: f.base + a + 1, n: argc };
+        let Some((m, owner)) = self.cached_lookup(f, &recv, mid) else {
+            return self.call_flow(f, a, tag, |vm| vm.start_call(recv, mid, args, blk));
+        };
+        // natives take their arguments as a slice: no Vec for the common case
+        if let Method::Native(native) = m
+            && argc <= MAX_INLINE_ARGS
+        {
+            let mut buf: [Value; MAX_INLINE_ARGS] = Default::default();
+            let at = f.base + a + 1;
+            buf[..argc].clone_from_slice(&self.stack[at..at + argc]);
+            let args = &buf[..argc];
+            return self.call_flow(f, a, tag, |vm| {
+                Ok(Call::Done(native(vm, &recv, args, blk.as_ref())?))
+            });
+        }
+        self.call_flow(f, a, tag, |vm| vm.start_invoke(m, owner, recv, mid, args, blk))
+    }
+
+    /// Every instruction, out of line (see [`Vm::step`]).
+    #[inline(never)]
+    fn step_slow(&mut self, f: &mut Frame, op: Op) -> Result<Flow, Unwind> {
         match op {
             Op::Nop => {}
             Op::Move(a, b) => self.set_reg(f, a, self.reg(f, b)),
@@ -1912,32 +2024,7 @@ impl Vm {
                 }
                 return Err(Unwind::Error(v));
             }
-            Op::Send(a, mid, argc, has_block) => {
-                let recv = self.reg(f, a);
-                let blk = if has_block {
-                    self.block_from(self.reg(f, a + argc + 1))?
-                } else {
-                    None
-                };
-                let tag = proc_tag(&blk);
-                let args = Args::Stack { at: f.base + a + 1, n: argc };
-                let Some((m, owner)) = self.cached_lookup(f, &recv, mid) else {
-                    return self.call_flow(f, a, tag, |vm| vm.start_call(recv, mid, args, blk));
-                };
-                // natives take their arguments as a slice: no Vec for the common case
-                if let Method::Native(native) = m
-                    && argc <= MAX_INLINE_ARGS
-                {
-                    let mut buf: [Value; MAX_INLINE_ARGS] = Default::default();
-                    let at = f.base + a + 1;
-                    buf[..argc].clone_from_slice(&self.stack[at..at + argc]);
-                    let args = &buf[..argc];
-                    return self.call_flow(f, a, tag, |vm| {
-                        Ok(Call::Done(native(vm, &recv, args, blk.as_ref())?))
-                    });
-                }
-                return self.call_flow(f, a, tag, |vm| vm.start_invoke(m, owner, recv, mid, args, blk));
-            }
+            Op::Send(a, mid, argc, has_block) => return self.send_op(f, a, mid, argc, has_block),
             Op::SendV(a, mid, has_block) => {
                 let recv = self.reg(f, a);
                 let args = self.args_from_array(self.reg(f, a + 1));
