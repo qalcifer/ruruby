@@ -434,6 +434,11 @@ fn aset(vm: &mut Vm, s: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
 }
 
 fn aref(vm: &mut Vm, s: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
+    // `a[i]` is hot (Ruby iterators index in a loop): read it in place
+    if let [Value::Int(i)] = a {
+        let v = vm.heap[this_ary(vm, s)?].borrow();
+        return Ok(norm_index(*i, v.len()).and_then(|i| v.get(i).cloned()).unwrap_or(Value::Nil));
+    }
     let v = items(vm, s)?;
     let len = v.len();
     match (arg(a, 0), a.len()) {
