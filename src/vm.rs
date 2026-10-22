@@ -1726,6 +1726,7 @@ impl Vm {
     }
 
     /// Executes one instruction.
+    #[inline(always)]
     fn step(&mut self, f: &mut Frame, op: Op) -> Result<Flow, Unwind> {
         match op {
             Op::Nop => {}
