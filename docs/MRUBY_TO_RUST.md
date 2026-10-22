@@ -199,10 +199,16 @@ Each step can be checked against mruby's own tests.
    `respond_to_missing?`, `Method`/`UnboundMethod`, frozen objects, and subclasses
    of built-in classes (`class X < Array` instances are plain objects, which is what
    most of `hash.rb` trips over).
-6. **Performance.** Global method cache, inline caches on `Send`, avoid the
-   per-call `Vec` for args (pass slices of the value stack), only heap-allocate
-   envs when a block captures them, NaN-boxed `Value`. Target: CRuby parity on
-   `fib(30)`. Today ruruby takes 0.89 s and CRuby 2.6 takes 0.14 s.
+6. **Performance.** 🚧 In progress. Done: one value stack for all frames'
+   registers with envs only for captured locals (as mruby), simple calls bound
+   straight from the caller's registers, results computed in their destination
+   register, `ADDI`/`SUBI`, `i += n` as one instruction, discarded statement
+   values not copied, `step` inlined into the dispatch loop. `fib(30)` 0.79 →
+   0.33 s, a counting `while` loop 2.80 → 0.94 s (30M iterations), `times`/`each`
+   2.3× faster (now faster than the old native iterators). CRuby 2.6: `fib(30)`
+   0.14 s, the loop 0.69 s. Next: `Value` as `Copy` (classes into the heap) and
+   then NaN-boxing, compact instructions (48 → 16–24 bytes), inline method
+   caches on `Send`, fewer `Rc` updates per call.
 7. **Numbers.** Bignum (`num-bigint`, matching `mruby-bigint`), Rational, Complex.
 8. **Enumerators.** `Enumerator`, external iteration (needs Fibers), `lazy`.
 9. **Standard gems** as Cargo features: `mruby-io`/`mruby-dir`, `mruby-time`,
