@@ -12,7 +12,7 @@
 //! * mruby unwinds with `setjmp/longjmp`; here unwinding is `Result<_, Unwind>`
 //!   propagated with `?`, and each frame consults its irep's catch table.
 
-use crate::gc::{ArrayRef, EnvRef, HashRef, Heap};
+use crate::gc::{ArrayRef, EnvRef, HashRef, Heap, Marker};
 use crate::opcode::{ArgSpec, DefinedKind, Irep, Literal, Op, Reg};
 use crate::symbol::{Sym, SymbolTable};
 use crate::value::*;
@@ -135,6 +135,9 @@ pub struct Vm {
     reentry: usize,
     /// Native stack address at the outermost `run_frames`.
     stack_base: usize,
+    /// The `reentry` level of the loop where collection may run (the
+    /// outermost loop of `run_main`); 0 when none is running.
+    gc_level: usize,
     /// Native stack (bytes) the VM may use for natives calling back into Ruby
     /// before raising SystemStackError. Raise it when running on a big stack.
     pub stack_budget: usize,
@@ -420,6 +423,7 @@ impl Vm {
             frames: Vec::new(),
             reentry: 0,
             stack_base: 0,
+            gc_level: 0,
             stack_budget: DEFAULT_STACK_BUDGET,
             inspecting: Vec::new(),
             live_breaks: Vec::new(),
@@ -510,6 +514,7 @@ impl Vm {
     pub fn recover(&mut self) {
         self.frames.clear();
         self.reentry = 0;
+        self.gc_level = 0;
         self.inspecting.clear();
         self.live_breaks.clear();
         self.live_homes.clear();
@@ -1347,7 +1352,15 @@ impl Vm {
         let mut f = self.body_frame(irep, main, self.c.object.clone());
         f.home = self.new_id();
         f.is_home = true;
-        let r = self.run_frames(f).map_err(|e| self.materialize(e));
+        // the script's own loop is a safe point for collection; loops nested
+        // in natives or entered from other APIs are not
+        let outer_gc_level = self.gc_level;
+        if self.reentry == 0 {
+            self.gc_level = 1;
+        }
+        let r = self.run_frames(f);
+        self.gc_level = outer_gc_level;
+        let r = r.map_err(|e| self.materialize(e));
         match r {
             Ok(v) => Ok(v),
             Err(Unwind::Error(e)) => Err(e),
@@ -1400,6 +1413,9 @@ impl Vm {
 
     fn dispatch(&mut self, mut f: Frame, base: usize) -> VmResult {
         loop {
+            if self.heap.gc.due() && self.reentry == self.gc_level {
+                self.collect_garbage(&f);
+            }
             let at = f.pc;
             let op = f.irep.code[at];
             f.pc += 1;
@@ -1447,6 +1463,24 @@ impl Vm {
                 }
             }
         }
+    }
+
+    /// Mark-sweep collection (mruby: `mrb_full_gc`). Only called at a safe
+    /// point, where `current` and the VM's fields hold every live value.
+    fn collect_garbage(&mut self, current: &Frame) {
+        let mut m = Marker::new(&self.heap);
+        for f in self.frames.iter().chain(std::iter::once(current)) {
+            mark_frame(&mut m, f);
+        }
+        m.value(&self.main_obj);
+        for v in self.globals.values().chain(&self.at_exit) {
+            m.value(v);
+        }
+        // builtin classes are constants of Object, or reachable from those
+        m.class(&self.c.basic_object);
+        m.class(&self.c.object);
+        let marks = m.finish();
+        self.heap.sweep(marks);
     }
 
     /// Looks for a handler in `f` covering instruction `at`; `None` when one
@@ -2266,6 +2300,25 @@ impl Vm {
                 }
             }
         })
+    }
+}
+
+fn mark_frame(m: &mut Marker, f: &Frame) {
+    m.env(f.env);
+    m.value(&f.self_);
+    for v in f.block.iter().chain(&f.exc) {
+        m.value(v);
+    }
+    m.class(&f.target);
+    if let Some((owner, _)) = &f.method {
+        m.class(owner);
+    }
+    match &f.pending {
+        Some(Unwind::Error(v) | Unwind::Break { value: v, .. } | Unwind::Return { value: v, .. }) => {
+            m.value(v)
+        }
+        Some(Unwind::Raise(c, _)) => m.class(c),
+        None => {}
     }
 }
 

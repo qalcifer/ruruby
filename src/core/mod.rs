@@ -5,6 +5,7 @@
 
 pub mod array;
 pub mod enumerable;
+pub mod gc;
 pub mod hash;
 pub mod kernel;
 pub mod numeric;
@@ -29,6 +30,7 @@ pub fn init(vm: &mut Vm) {
     range::init(vm);
     enumerable::init(vm);
     reflect::init(vm);
+    gc::init(vm);
 }
 
 /// Argument `i`, or nil when missing.

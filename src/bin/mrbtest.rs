@@ -26,11 +26,12 @@ const DEFAULT_DIR: &str = "mruby/test/t";
 const TIMEOUT: Duration = Duration::from_secs(20);
 
 const USAGE: &str = "\
-Usage: mrbtest [-v] [-j N] [--top N] [FILE|DIR ...]
+Usage: mrbtest [-v] [-j N] [--top N] [--gc-stress] [FILE|DIR ...]
   Runs mruby test files (default: mruby/test/t/*.rb) and reports results.
-  -v        print every failure/crash/syntax error message
-  -j N      parallel jobs (default: number of CPUs)
-  --top N   how many of the most common errors to list (default 15)";
+  -v           print every failure/crash/syntax error message
+  -j N         parallel jobs (default: number of CPUs)
+  --top N      how many of the most common errors to list (default 15)
+  --gc-stress  collect garbage at every safe point (slow; finds GC bugs)";
 
 const STACK_SIZE: usize = 1 << 30;
 
@@ -38,10 +39,11 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("--child") {
         let file = PathBuf::from(&args[1]);
+        let gc_stress = args.get(2).map(String::as_str) == Some("--gc-stress");
         // natives calling back into Ruby recurse on the native stack
         return std::thread::Builder::new()
             .stack_size(STACK_SIZE)
-            .spawn(move || child(&file))
+            .spawn(move || child(&file, gc_stress))
             .unwrap()
             .join()
             .unwrap_or(ExitCode::FAILURE);
@@ -148,7 +150,7 @@ fn split_chunks(src: &str) -> Vec<(usize, String)> {
     chunks
 }
 
-fn child(file: &Path) -> ExitCode {
+fn child(file: &Path, gc_stress: bool) -> ExitCode {
     let src = match std::fs::read_to_string(file) {
         Ok(s) => s,
         Err(e) => {
@@ -166,6 +168,7 @@ fn child(file: &Path) -> ExitCode {
 
     let mut interp = Interpreter::new();
     interp.vm.stack_budget = STACK_SIZE - (64 << 20);
+    interp.vm.heap.gc.stress = gc_stress;
     interp.capture_output();
     if let Err(e) = interp.eval(HARNESS) {
         emit("toplevel", &format!("harness failed to load: {e}"));
@@ -277,7 +280,7 @@ struct FileResult {
     secs: f64,
 }
 
-fn run_child(exe: &Path, file: &Path) -> FileResult {
+fn run_child(exe: &Path, file: &Path, gc_stress: bool) -> FileResult {
     let name = file.file_name().unwrap().to_string_lossy().into_owned();
     let declared = std::fs::read_to_string(file)
         .map(|s| count_asserts(&s))
@@ -286,6 +289,7 @@ fn run_child(exe: &Path, file: &Path) -> FileResult {
     let mut child = Command::new(exe)
         .arg("--child")
         .arg(file)
+        .args(gc_stress.then_some("--gc-stress"))
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -414,6 +418,7 @@ fn parent(args: Vec<String>) -> ExitCode {
     let mut verbose = false;
     let mut jobs = std::thread::available_parallelism().map_or(4, |n| n.get());
     let mut top = 15;
+    let mut gc_stress = false;
     let mut paths = Vec::new();
     let mut it = args.into_iter();
     while let Some(a) = it.next() {
@@ -421,6 +426,7 @@ fn parent(args: Vec<String>) -> ExitCode {
             "-v" => verbose = true,
             "-j" => jobs = it.next().and_then(|n| n.parse().ok()).unwrap_or(jobs),
             "--top" => top = it.next().and_then(|n| n.parse().ok()).unwrap_or(top),
+            "--gc-stress" => gc_stress = true,
             "-h" | "--help" => {
                 println!("{USAGE}");
                 return ExitCode::SUCCESS;
@@ -445,7 +451,7 @@ fn parent(args: Vec<String>) -> ExitCode {
                 loop {
                     let i = next.fetch_add(1, Ordering::SeqCst);
                     let Some(f) = files.get(i) else { break };
-                    let r = run_child(&exe, f);
+                    let r = run_child(&exe, f, gc_stress);
                     results.lock().unwrap().push(r);
                 }
             })

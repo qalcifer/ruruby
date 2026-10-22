@@ -9,6 +9,7 @@ Usage: ruruby [options] [programfile] [arguments]
   -e 'code'    run one line of script
   -c           check syntax only (compile without running)
   --dump       print the compiled bytecode before running (like `mruby -v`)
+  --gc-stress  collect garbage at every safe point (slow; finds GC bugs)
   --version    print the version
   -h, --help   show this message
 With no program, reads the script from stdin, or starts a REPL on a terminal.";
@@ -30,6 +31,7 @@ fn main() -> ExitCode {
 fn run(args: Vec<String>) -> ExitCode {
     let mut dump = false;
     let mut check = false;
+    let mut gc_stress = false;
     let mut code: Option<String> = None;
     let mut file: Option<String> = None;
     let mut it = args.into_iter();
@@ -45,6 +47,7 @@ fn run(args: Vec<String>) -> ExitCode {
             },
             "--dump" | "-v" => dump = true,
             "-c" => check = true,
+            "--gc-stress" => gc_stress = true,
             "--version" => {
                 println!(
                     "ruruby {} (mruby-style Ruby interpreter in Rust)",
@@ -66,6 +69,7 @@ fn run(args: Vec<String>) -> ExitCode {
 
     let mut interp = Interpreter::new();
     interp.vm.stack_budget = STACK_SIZE - (64 << 20);
+    interp.vm.heap.gc.stress = gc_stress;
     let args = script_args.into_iter().map(|a| interp.vm.str(a)).collect();
     let argv = interp.vm.array(args);
     interp.vm.set_const("ARGV", argv);

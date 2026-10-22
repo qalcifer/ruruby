@@ -6,13 +6,23 @@
 //! `unsafe` code: a handle to a slot that has been freed and reused has a
 //! stale generation and panics on use instead of reading another object.
 //!
-//! Classes are not in the heap; they stay reference counted (`Rc<RClass>`).
+//! Classes are not in the heap; they stay reference counted (`Rc<RClass>`),
+//! and the collector traces through them to the values they hold.
+//!
+//! Collection is a stop-the-world mark-sweep (mruby's is incremental). It
+//! only runs at *safe points*: between instructions of the outermost
+//! dispatch loop of [`Vm::run_main`](crate::vm::Vm::run_main), when no
+//! native method or VM helper is on the Rust stack. So the roots are only
+//! the VM's own state (frames, globals, classes), and native code never
+//! needs to protect the values it holds (mruby's "GC arena").
 
-use crate::value::{Env, RHash, RObject, RProc, Value};
+use crate::value::{Env, Method, ProcBody, RClass, RHash, RObject, RProc, Value};
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::fmt;
 use std::marker::PhantomData;
 use std::ops::Index;
+use std::rc::Rc;
 
 /// A handle to a heap object of type `T`.
 pub struct Gc<T> {
@@ -112,6 +122,20 @@ impl<T> Arena<T> {
         self.slots.len() - self.free.len()
     }
 
+    /// Frees every live slot that isn't marked; returns how many.
+    fn sweep(&mut self, marks: &[bool]) -> usize {
+        let mut freed = 0;
+        for (i, slot) in self.slots.iter_mut().enumerate() {
+            if slot.val.is_some() && !marks.get(i).copied().unwrap_or(false) {
+                slot.val = None;
+                slot.generation = slot.generation.wrapping_add(1);
+                self.free.push(i as u32);
+                freed += 1;
+            }
+        }
+        freed
+    }
+
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -123,6 +147,7 @@ pub trait HeapObj: Sized {
     const TAG: u64;
     fn arena(h: &Heap) -> &Arena<Self>;
     fn arena_mut(h: &mut Heap) -> &mut Arena<Self>;
+    fn marks(m: &mut Marks) -> &mut Vec<bool>;
 }
 
 macro_rules! heap_types {
@@ -131,6 +156,12 @@ macro_rules! heap_types {
         #[derive(Default)]
         pub struct Heap {
             $(pub $field: Arena<$t>,)*
+            pub gc: GcState,
+        }
+
+        /// Mark bits of one collection, per arena.
+        pub struct Marks {
+            $($field: Vec<bool>,)*
         }
 
         $(impl HeapObj for $t {
@@ -141,12 +172,33 @@ macro_rules! heap_types {
             fn arena_mut(h: &mut Heap) -> &mut Arena<Self> {
                 &mut h.$field
             }
+            fn marks(m: &mut Marks) -> &mut Vec<bool> {
+                &mut m.$field
+            }
         })*
 
         impl Heap {
             /// Number of live objects of every type.
             pub fn live(&self) -> usize {
                 0 $(+ self.$field.len())*
+            }
+
+            fn new_marks(&self) -> Marks {
+                Marks {
+                    $($field: vec![false; self.$field.slots.len()],)*
+                }
+            }
+
+            /// Frees every object that `marks` doesn't mark.
+            pub fn sweep(&mut self, marks: Marks) {
+                let freed = 0 $(+ self.$field.sweep(&marks.$field))*;
+                let live = self.live();
+                let gc = &mut self.gc;
+                gc.count += 1;
+                gc.freed += freed;
+                gc.allocated = 0;
+                gc.requested = false;
+                gc.threshold = live.max(MIN_THRESHOLD);
             }
         }
     };
@@ -162,8 +214,51 @@ heap_types! {
     envs: Env = 7,
 }
 
+/// A collection runs once this many objects were allocated since the last
+/// one, or as many as were live after it if that is more (so the heap may
+/// grow to about twice its live size).
+const MIN_THRESHOLD: usize = 10_000;
+
+/// Collection policy and counters (mruby: the fields of `mrb_gc`).
+pub struct GcState {
+    /// Objects allocated since the last collection.
+    allocated: usize,
+    threshold: usize,
+    /// `GC.disable` turns collection off.
+    pub enabled: bool,
+    /// `GC.stress = true`: collect at every safe point (finds missing roots).
+    pub stress: bool,
+    /// `GC.start`: collect at the next safe point.
+    pub requested: bool,
+    /// Number of collections so far (`GC.count`).
+    pub count: usize,
+    /// Objects freed so far.
+    pub freed: usize,
+}
+
+impl Default for GcState {
+    fn default() -> Self {
+        GcState {
+            allocated: 0,
+            threshold: MIN_THRESHOLD,
+            enabled: true,
+            stress: false,
+            requested: false,
+            count: 0,
+            freed: 0,
+        }
+    }
+}
+
+impl GcState {
+    pub fn due(&self) -> bool {
+        self.enabled && (self.allocated >= self.threshold || self.requested || self.stress)
+    }
+}
+
 impl Heap {
     pub fn alloc<T: HeapObj>(&mut self, v: T) -> Gc<T> {
+        self.gc.allocated += 1;
         T::arena_mut(self).alloc(v)
     }
 
@@ -186,5 +281,184 @@ impl<T: HeapObj> Index<&Gc<T>> for Heap {
 
     fn index(&self, h: &Gc<T>) -> &T {
         self.get(*h)
+    }
+}
+
+enum Gray {
+    Val(Value),
+    Env(EnvRef),
+    Class(Rc<RClass>),
+}
+
+/// The mark phase: roots are added with [`Marker::value`] & co, then
+/// [`Marker::finish`] traces everything reachable. Tracing uses an explicit
+/// work list, not recursion, so deep structures don't need a deep stack.
+pub struct Marker<'h> {
+    heap: &'h Heap,
+    marks: Marks,
+    gray: Vec<Gray>,
+    classes: HashSet<*const RClass>,
+}
+
+impl<'h> Marker<'h> {
+    pub fn new(heap: &'h Heap) -> Self {
+        Marker {
+            heap,
+            marks: heap.new_marks(),
+            gray: Vec::new(),
+            classes: HashSet::new(),
+        }
+    }
+
+    pub fn value(&mut self, v: &Value) {
+        match v {
+            Value::Nil | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Sym(_) => {}
+            Value::Class(c) => self.class(c),
+            v => self.gray.push(Gray::Val(v.clone())),
+        }
+    }
+
+    pub fn env(&mut self, e: EnvRef) {
+        self.gray.push(Gray::Env(e));
+    }
+
+    pub fn class(&mut self, c: &Rc<RClass>) {
+        if !self.classes.contains(&Rc::as_ptr(c)) {
+            self.gray.push(Gray::Class(c.clone()));
+        }
+    }
+
+    /// Marks everything reachable from the roots given so far.
+    pub fn finish(mut self) -> Marks {
+        while let Some(g) = self.gray.pop() {
+            self.trace(g);
+        }
+        self.marks
+    }
+
+    /// Marks `h`; true the first time.
+    fn visit<T: HeapObj>(&mut self, h: Gc<T>) -> bool {
+        let bit = &mut T::marks(&mut self.marks)[h.idx as usize];
+        !std::mem::replace(bit, true)
+    }
+
+    fn trace(&mut self, g: Gray) {
+        let heap = self.heap;
+        match g {
+            Gray::Val(v) => match v {
+                Value::Str(h) => {
+                    self.visit(h);
+                }
+                Value::Array(h) => {
+                    if self.visit(h) {
+                        for x in heap[h].borrow().iter() {
+                            self.value(x);
+                        }
+                    }
+                }
+                Value::Hash(h) => {
+                    if self.visit(h) {
+                        let h = heap[h].borrow();
+                        for (k, v) in &h.pairs {
+                            self.value(k);
+                            self.value(v);
+                        }
+                        self.value(&h.default);
+                        if let Some(p) = &h.default_proc {
+                            self.value(p);
+                        }
+                    }
+                }
+                Value::Range(h) => {
+                    if self.visit(h) {
+                        let (lo, hi, _) = &heap[h];
+                        self.value(lo);
+                        self.value(hi);
+                    }
+                }
+                Value::Proc(h) => {
+                    if self.visit(h) {
+                        self.proc(&heap[h]);
+                    }
+                }
+                Value::Object(h) => {
+                    if self.visit(h) {
+                        let o = &heap[h];
+                        self.class(&o.class);
+                        for (_, v) in &o.ivars.borrow().items {
+                            self.value(v);
+                        }
+                        if let Some(s) = o.singleton.borrow().as_ref() {
+                            self.class(s);
+                        }
+                    }
+                }
+                Value::Nil
+                | Value::Bool(_)
+                | Value::Int(_)
+                | Value::Float(_)
+                | Value::Sym(_)
+                | Value::Class(_) => unreachable!("not queued"),
+            },
+            Gray::Env(e) => {
+                if self.visit(e) {
+                    let e = &heap[e];
+                    for v in e.regs.borrow().iter() {
+                        self.value(v);
+                    }
+                    if let Some(up) = e.upper {
+                        self.env(up);
+                    }
+                }
+            }
+            Gray::Class(c) => {
+                if !self.classes.insert(Rc::as_ptr(&c)) {
+                    return;
+                }
+                if let Some(s) = &c.superclass {
+                    self.class(s);
+                }
+                for m in c.includes.borrow().iter().chain(c.prepends.borrow().iter()) {
+                    self.class(m);
+                }
+                if let Some(m) = c.meta.borrow().as_ref() {
+                    self.class(m);
+                }
+                // weak links can be upgraded later, so what they reach must stay
+                if let Some(a) = c.attached_class() {
+                    self.class(&a);
+                }
+                if let Some(o) = c.outer_class() {
+                    self.class(&o);
+                }
+                for v in c.consts.borrow().values() {
+                    self.value(v);
+                }
+                for (_, v) in c.ivars.borrow().items.iter().chain(&c.cvars.borrow().items) {
+                    self.value(v);
+                }
+                for m in c.methods.borrow().values() {
+                    if let Method::Proc(p) = m {
+                        self.value(p);
+                    }
+                }
+            }
+        }
+    }
+
+    fn proc(&mut self, p: &RProc) {
+        self.value(&p.self_);
+        if let Some(b) = &p.block {
+            self.value(b);
+        }
+        if let Some((owner, _)) = &p.method {
+            self.class(owner);
+        }
+        self.class(&p.target);
+        match &p.body {
+            ProcBody::Ruby { env, .. } => self.env(*env),
+            ProcBody::Collect(buf) => self.value(&Value::Array(*buf)),
+            ProcBody::SymCall(_) => {}
+        }
     }
 }
