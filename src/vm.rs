@@ -2,10 +2,13 @@
 //! `src/class.c` / `src/error.c` in mruby.
 //!
 //! Differences from mruby worth knowing:
-//! * mruby runs Ruby→Ruby calls inside one `mrb_vm_exec` loop with an
-//!   explicit call-info stack (`mrb_callinfo`), which is what makes Fibers
-//!   possible. Here each Ruby call recurses into `execute`. Moving to an
-//!   explicit frame stack is a roadmap item.
+//! * Like mruby's `mrb_vm_exec`, one dispatch loop ([`Vm::run_frames`]) runs
+//!   Ruby→Ruby calls on an explicit frame stack (`Vm::frames`, mruby's
+//!   callinfo stack) without native recursion. A native method calling back
+//!   into Ruby (`Array#each` yielding) starts a nested loop, as mruby's C
+//!   functions do; that native recursion is bounded by `Vm::stack_budget`.
+//! * Registers live in a heap `Env` per frame (blocks capture it), not in
+//!   one contiguous value stack.
 //! * mruby unwinds with `setjmp/longjmp`; here unwinding is `Result<_, Unwind>`
 //!   propagated with `?`, and each frame consults its irep's catch table.
 
@@ -29,7 +32,16 @@ pub enum Unwind {
 
 pub type VmResult = Result<Value, Unwind>;
 
-const MAX_DEPTH: usize = 10_000;
+/// Deepest Ruby call nesting (frames on the VM stack) before SystemStackError.
+const MAX_FRAMES: usize = 10_000;
+
+/// Default for [`Vm::stack_budget`]. Ruby→Ruby calls don't use the native
+/// stack, but natives calling back into Ruby do; wasm's default stack is 1 MiB.
+pub const DEFAULT_STACK_BUDGET: usize = if cfg!(target_family = "wasm") {
+    512 << 10
+} else {
+    1 << 20
+};
 
 pub struct Classes {
     pub basic_object: Rc<RClass>,
@@ -109,7 +121,16 @@ pub struct Vm {
     /// Blocks registered with `at_exit` / `END { }`.
     pub at_exit: Vec<Value>,
     next_id: usize,
-    depth: usize,
+    /// Suspended frames: the callers of the running Ruby frame (mruby: the
+    /// callinfo stack). Nested `run_frames` loops share it.
+    frames: Vec<Frame>,
+    /// Nesting of `run_frames`, i.e. natives that called back into Ruby.
+    reentry: usize,
+    /// Native stack address at the outermost `run_frames`.
+    stack_base: usize,
+    /// Native stack (bytes) the VM may use for natives calling back into Ruby
+    /// before raising SystemStackError. Raise it when running on a big stack.
+    pub stack_budget: usize,
     /// Arrays/hashes being inspected right now, to print recursion as `[...]`.
     inspecting: Vec<usize>,
     /// Blocks whose receiving call is still running: `break` targets.
@@ -137,9 +158,41 @@ struct Frame {
     exc: Option<Value>,
     /// A `break`/`return` paused while an `ensure` clause runs; `Raise` of nil resumes it.
     pending: Option<Unwind>,
+    /// Next instruction.
+    pc: usize,
+    /// The caller's register that receives this frame's value.
+    ret: Reg,
+    /// Tag of the block passed at the call site: a `break` from it ends this call.
+    break_tag: usize,
+    /// Catches `return` from its blocks: methods, lambdas and the main script.
+    is_home: bool,
+    /// A lambda: `break` in its own body returns from it.
+    lambda: bool,
 }
 
 impl Frame {
+    fn new(irep: Rc<Irep>, env: Rc<Env>, self_: Value, target: Rc<RClass>) -> Frame {
+        Frame {
+            irep,
+            env,
+            self_,
+            block: None,
+            target,
+            method: None,
+            opt_filled: 0,
+            kw_mask: 0,
+            home: 0,
+            proc_tag: 0,
+            exc: None,
+            pending: None,
+            pc: 0,
+            ret: 0,
+            break_tag: 0,
+            is_home: false,
+            lambda: false,
+        }
+    }
+
     fn get(&self, i: Reg) -> Value {
         self.env.regs.borrow()[i].clone()
     }
@@ -147,6 +200,23 @@ impl Frame {
     fn set(&self, i: Reg, v: Value) {
         self.env.regs.borrow_mut()[i] = v;
     }
+}
+
+/// A resolved call: Ruby code to run as a new frame, or the value of a call
+/// that already ran (natives, attribute accessors).
+#[allow(clippy::large_enum_variant)] // moved, never stored: cheaper than a Box per call
+enum Call {
+    Frame(Frame),
+    Done(Value),
+}
+
+/// What the dispatch loop does after an instruction.
+#[allow(clippy::large_enum_variant)]
+enum Flow {
+    Next,
+    Return(Value),
+    /// Run this frame; its value goes to its `ret` register of the current one.
+    Call(Frame),
 }
 
 /// Bound arguments: the frame's registers plus what the prologue needs.
@@ -346,7 +416,10 @@ impl Vm {
             capture: None,
             at_exit: Vec::new(),
             next_id: 1,
-            depth: 0,
+            frames: Vec::new(),
+            reentry: 0,
+            stack_base: 0,
+            stack_budget: DEFAULT_STACK_BUDGET,
             inspecting: Vec::new(),
             live_breaks: Vec::new(),
             live_homes: Vec::new(),
@@ -367,7 +440,8 @@ impl Vm {
 
     /// Resets per-run state after a Rust panic unwound through the VM.
     pub fn recover(&mut self) {
-        self.depth = 0;
+        self.frames.clear();
+        self.reentry = 0;
         self.inspecting.clear();
         self.live_breaks.clear();
         self.live_homes.clear();
@@ -707,17 +781,37 @@ impl Vm {
         args: Vec<Value>,
         block: Option<Value>,
     ) -> VmResult {
-        match self.lookup(recv, mid) {
-            Some((m, owner)) => self.invoke(m, owner, recv.clone(), mid, args, block),
+        let call = self.start_call(recv.clone(), mid, args, block)?;
+        self.finish(call)
+    }
+
+    /// Resolves `recv.mid(*args)` (with `method_missing` as fallback).
+    fn start_call(
+        &mut self,
+        recv: Value,
+        mid: Sym,
+        args: Vec<Value>,
+        block: Option<Value>,
+    ) -> Result<Call, Unwind> {
+        match self.lookup(&recv, mid) {
+            Some((m, owner)) => self.start_invoke(m, owner, recv, mid, args, block),
             None => {
-                if let Some((m, owner)) = self.lookup(recv, self.s.method_missing) {
+                if let Some((m, owner)) = self.lookup(&recv, self.s.method_missing) {
                     let mut margs = vec![Value::Sym(mid)];
                     margs.extend(args);
                     let mm = self.s.method_missing;
-                    return self.invoke(m, owner, recv.clone(), mm, margs, block);
+                    return self.start_invoke(m, owner, recv, mm, margs, block);
                 }
-                Err(self.no_method(recv, mid))
+                Err(self.no_method(&recv, mid))
             }
+        }
+    }
+
+    /// Runs a resolved call to completion.
+    fn finish(&mut self, call: Call) -> VmResult {
+        match call {
+            Call::Done(v) => Ok(v),
+            Call::Frame(f) => self.run_frames(f),
         }
     }
 
@@ -764,18 +858,6 @@ impl Vm {
         }
     }
 
-    /// Runs a frame that blocks can `return` from.
-    fn execute_home(&mut self, frame: Frame) -> VmResult {
-        let id = frame.home;
-        self.live_homes.push(id);
-        let r = self.execute(frame);
-        self.live_homes.pop();
-        match r {
-            Err(Unwind::Return { home, value }) if home == id => Ok(value),
-            r => r,
-        }
-    }
-
     pub fn invoke(
         &mut self,
         m: Method,
@@ -785,13 +867,28 @@ impl Vm {
         args: Vec<Value>,
         block: Option<Value>,
     ) -> VmResult {
-        match m {
-            Method::Native(f) => f(self, &recv, &args, block.as_ref()),
+        let call = self.start_invoke(m, owner, recv, mid, args, block)?;
+        self.finish(call)
+    }
+
+    /// Starts calling method `m`: Ruby code becomes a frame for the caller
+    /// to run, anything else runs now.
+    fn start_invoke(
+        &mut self,
+        m: Method,
+        owner: Rc<RClass>,
+        recv: Value,
+        mid: Sym,
+        args: Vec<Value>,
+        block: Option<Value>,
+    ) -> Result<Call, Unwind> {
+        let v = match m {
+            Method::Native(f) => f(self, &recv, &args, block.as_ref())?,
             Method::AttrReader(iv) => {
                 if !args.is_empty() {
                     return Err(self.arity_err(args.len(), &ArgSpec::default()));
                 }
-                Ok(self.ivar_get(&recv, iv))
+                self.ivar_get(&recv, iv)
             }
             Method::AttrWriter(iv) => {
                 if args.len() != 1 {
@@ -805,7 +902,7 @@ impl Vm {
                 }
                 let v = args.into_iter().next().unwrap();
                 self.ivar_set(&recv, iv, v.clone())?;
-                Ok(v)
+                v
             }
             Method::Proc(p) => {
                 let call = ProcCall {
@@ -814,30 +911,23 @@ impl Vm {
                     method: Some((owner, mid)),
                     lambda: true,
                 };
-                self.call_proc(&p, args, block, call)
+                return self.start_proc(&p, args, block, call);
             }
-            Method::ProcCall => self.call_proc(&recv, args, block, ProcCall::default()),
-            Method::Undefined => Err(self.no_method(&recv, mid)),
+            Method::ProcCall => return self.start_proc(&recv, args, block, ProcCall::default()),
+            Method::Undefined => return Err(self.no_method(&recv, mid)),
             Method::Ruby(irep) => {
                 let bound = self.bind_args(&irep, &recv, args, &block, true, None)?;
-                let id = self.new_id();
-                let frame = Frame {
-                    env: bound.env,
-                    irep,
-                    self_: recv,
-                    block,
-                    target: owner.clone(),
-                    method: Some((owner, mid)),
-                    opt_filled: bound.opt_filled,
-                    kw_mask: bound.kw_mask,
-                    home: id,
-                    proc_tag: 0,
-                    exc: None,
-                    pending: None,
-                };
-                self.execute_home(frame)
+                let mut f = Frame::new(irep, bound.env, recv, owner.clone());
+                f.block = block;
+                f.method = Some((owner, mid));
+                f.opt_filled = bound.opt_filled;
+                f.kw_mask = bound.kw_mask;
+                f.home = self.new_id();
+                f.is_home = true;
+                return Ok(Call::Frame(f));
             }
-        }
+        };
+        Ok(Call::Done(v))
     }
 
     fn arity_err(&self, given: usize, spec: &ArgSpec) -> Unwind {
@@ -1006,6 +1096,17 @@ impl Vm {
         block: Option<Value>,
         call: ProcCall,
     ) -> VmResult {
+        let call = self.start_proc(blk, args, block, call)?;
+        self.finish(call)
+    }
+
+    fn start_proc(
+        &mut self,
+        blk: &Value,
+        args: Vec<Value>,
+        block: Option<Value>,
+        call: ProcCall,
+    ) -> Result<Call, Unwind> {
         let Value::Proc(p) = blk else {
             return Err(self.type_err("wrong argument type (expected Proc)"));
         };
@@ -1013,7 +1114,7 @@ impl Vm {
             ProcBody::SymCall(sym) => {
                 let mut it = args.into_iter();
                 let recv = it.next().ok_or_else(|| self.arg_err("no receiver given"))?;
-                self.call_method(&recv, *sym, it.collect(), block)
+                Ok(Call::Done(self.call_method(&recv, *sym, it.collect(), block)?))
             }
             ProcBody::Collect(buf) => {
                 let v = if args.len() == 1 {
@@ -1022,39 +1123,24 @@ impl Vm {
                     Value::array(args)
                 };
                 buf.borrow_mut().push(v);
-                Ok(Value::Nil)
+                Ok(Call::Done(Value::Nil))
             }
             ProcBody::Ruby { irep, env } => {
                 let lambda = p.lambda || call.lambda;
                 let self_ = call.self_.unwrap_or_else(|| p.self_.clone());
                 let bound =
                     self.bind_args(irep, &self_, args, &block, lambda, Some(env.clone()))?;
-                let id = if lambda { self.new_id() } else { p.home };
-                let tag = Rc::as_ptr(p) as usize;
-                let frame = Frame {
-                    env: bound.env,
-                    irep: irep.clone(),
-                    self_,
-                    block: p.block.clone(),
-                    target: call.target.unwrap_or_else(|| p.target.clone()),
-                    method: call.method.or_else(|| p.method.clone()),
-                    opt_filled: bound.opt_filled,
-                    kw_mask: bound.kw_mask,
-                    home: id,
-                    proc_tag: tag,
-                    exc: None,
-                    pending: None,
-                };
-                if !lambda {
-                    return self.execute(frame);
-                }
-                self.live_breaks.push(tag);
-                let r = self.execute_home(frame);
-                self.live_breaks.pop();
-                match r {
-                    Err(Unwind::Break { tag: t, value }) if t == tag => Ok(value),
-                    r => r,
-                }
+                let target = call.target.unwrap_or_else(|| p.target.clone());
+                let mut f = Frame::new(irep.clone(), bound.env, self_, target);
+                f.block = p.block.clone();
+                f.method = call.method.or_else(|| p.method.clone());
+                f.opt_filled = bound.opt_filled;
+                f.kw_mask = bound.kw_mask;
+                f.home = if lambda { self.new_id() } else { p.home };
+                f.proc_tag = Rc::as_ptr(p) as usize;
+                f.is_home = lambda;
+                f.lambda = lambda;
+                Ok(Call::Frame(f))
             }
         }
     }
@@ -1174,28 +1260,11 @@ impl Vm {
 
     /// Runs a top-level irep with `self = main`.
     pub fn run_main(&mut self, irep: Rc<Irep>) -> Result<Value, Value> {
-        let id = self.new_id();
         let main = self.main_obj.clone();
-        let mut regs = vec![Value::Nil; irep.nregs.max(1)];
-        regs[0] = main.clone();
-        let frame = Frame {
-            env: Rc::new(Env {
-                regs: RefCell::new(regs),
-                upper: None,
-            }),
-            irep,
-            self_: main,
-            block: None,
-            target: self.c.object.clone(),
-            method: None,
-            opt_filled: 0,
-            kw_mask: 0,
-            home: id,
-            proc_tag: 0,
-            exc: None,
-            pending: None,
-        };
-        match self.execute_home(frame) {
+        let mut f = self.body_frame(irep, main, self.c.object.clone());
+        f.home = self.new_id();
+        f.is_home = true;
+        match self.run_frames(f) {
             Ok(v) => Ok(v),
             Err(Unwind::Error(e)) => Err(e),
             Err(Unwind::Return { .. }) => {
@@ -1207,87 +1276,189 @@ impl Vm {
         }
     }
 
-    /// Runs a class body (or `class << obj` body) with self = the class.
-    fn exec_class_body(&mut self, cls: Rc<RClass>, irep: Rc<Irep>) -> VmResult {
-        let id = self.new_id();
-        let self_ = Value::Class(cls.clone());
+    /// A frame for the script or a class body (`class X`, `class << obj`).
+    fn body_frame(&mut self, irep: Rc<Irep>, self_: Value, target: Rc<RClass>) -> Frame {
         let mut regs = vec![Value::Nil; irep.nregs.max(1)];
         regs[0] = self_.clone();
-        let frame = Frame {
-            env: Rc::new(Env {
-                regs: RefCell::new(regs),
-                upper: None,
-            }),
-            irep,
-            self_,
-            block: None,
-            target: cls,
-            method: None,
-            opt_filled: 0,
-            kw_mask: 0,
-            home: id,
-            proc_tag: 0,
-            exc: None,
-            pending: None,
-        };
-        self.execute(frame)
+        let env = Rc::new(Env {
+            regs: RefCell::new(regs),
+            upper: None,
+        });
+        let mut f = Frame::new(irep, env, self_, target);
+        f.home = self.new_id();
+        f
     }
 
-    fn execute(&mut self, mut f: Frame) -> VmResult {
-        if self.depth >= MAX_DEPTH {
+    /// Runs `frame` and every Ruby frame it calls in one loop, without
+    /// native recursion (mruby: `mrb_vm_exec`). Returns when `frame` returns,
+    /// or with the unwind that leaves it.
+    fn run_frames(&mut self, frame: Frame) -> VmResult {
+        // natives calling back into Ruby nest this loop: bound the native stack
+        let marker = 0u8;
+        let sp = std::hint::black_box(&marker) as *const u8 as usize;
+        if self.reentry == 0 {
+            self.stack_base = sp;
+        } else if self.stack_base.saturating_sub(sp) > self.stack_budget
+            || self.frames.len() >= MAX_FRAMES
+        {
             return Err(self.err(&self.c.stack_error, "stack level too deep"));
         }
-        self.depth += 1;
-        let r = self.run(&mut f);
-        self.depth -= 1;
+        self.reentry += 1;
+        let base = self.frames.len();
+        self.enter_frame(&frame);
+        let r = self.dispatch(frame, base);
+        self.reentry -= 1;
         r
     }
 
-    fn run(&mut self, f: &mut Frame) -> VmResult {
-        let mut pc = 0;
+    fn dispatch(&mut self, mut f: Frame, base: usize) -> VmResult {
         loop {
-            let cur = pc;
-            let op = f.irep.code[pc];
-            pc += 1;
-            match self.step(f, op, &mut pc) {
-                Ok(None) => {}
-                Ok(Some(v)) => return Ok(v),
-                Err(Unwind::Error(exc)) => {
-                    // look for a rescue/ensure handler covering this pc
-                    let handler = f
-                        .irep
-                        .catch
-                        .iter()
-                        .find(|h| h.start <= cur && cur < h.end)
-                        .map(|h| h.target);
-                    match handler {
-                        Some(target) => {
-                            f.exc = Some(exc);
-                            pc = target;
-                        }
-                        None => return Err(Unwind::Error(exc)),
-                    }
+            let at = f.pc;
+            let op = f.irep.code[at];
+            f.pc += 1;
+            let mut result = match self.step(&mut f, op) {
+                Ok(Flow::Next) => continue,
+                Ok(Flow::Call(callee)) if self.frames.len() < MAX_FRAMES => {
+                    self.enter_frame(&callee);
+                    let caller = std::mem::replace(&mut f, callee);
+                    self.frames.push(caller);
+                    continue;
                 }
-                // a break/return of this frame's own already ran its ensure clauses (codegen inlines them)
-                Err(e) if matches!(op, Op::Break(_) | Op::ReturnBlk(_)) => return Err(e),
-                Err(e) => {
-                    // break/return from a callee passing through: run the ensure clauses on the way
-                    let handler = f
-                        .irep
-                        .catch
-                        .iter()
-                        .find(|h| h.ensure && h.start <= cur && cur < h.end)
-                        .map(|h| h.target);
-                    match handler {
-                        Some(target) => {
-                            f.pending = Some(e);
-                            f.exc = None;
-                            pc = target;
+                Ok(Flow::Call(_)) => Err(self.err(&self.c.stack_error, "stack level too deep")),
+                Ok(Flow::Return(v)) => Ok(v),
+                Err(e) => Err(e),
+            };
+            if let Err(e) = result {
+                // a break/return of this frame's own already ran its ensure
+                // clauses (codegen inlines them)
+                let own = matches!(op, Op::Break(_) | Op::ReturnBlk(_));
+                match self.catch(&mut f, e, at, own) {
+                    None => continue,
+                    Some(e) => result = Err(e),
+                }
+            }
+            // `f` is done: give its value to the caller, or keep unwinding
+            loop {
+                result = self.leave_frame(&f, result);
+                if self.frames.len() == base {
+                    return result;
+                }
+                let caller = self.frames.pop().unwrap();
+                let done = std::mem::replace(&mut f, caller);
+                match result {
+                    Ok(v) => {
+                        f.set(done.ret, v);
+                        break;
+                    }
+                    Err(e) => {
+                        let at = f.pc - 1; // the call instruction
+                        match self.catch(&mut f, e, at, false) {
+                            None => break,
+                            Some(e) => result = Err(e),
                         }
-                        None => return Err(e),
                     }
                 }
             }
+        }
+    }
+
+    /// Looks for a handler in `f` covering instruction `at`; `None` when one
+    /// took the unwind (and `f` continues there). Exceptions go to any
+    /// handler, `break`/`return` passing through only run `ensure` clauses.
+    fn catch(&mut self, f: &mut Frame, e: Unwind, at: usize, own: bool) -> Option<Unwind> {
+        let covers = |h: &&crate::opcode::CatchHandler| h.start <= at && at < h.end;
+        match e {
+            Unwind::Error(exc) => match f.irep.catch.iter().find(covers).map(|h| h.target) {
+                Some(target) => {
+                    f.pc = target;
+                    f.exc = Some(exc);
+                    None
+                }
+                None => Some(Unwind::Error(exc)),
+            },
+            e if own => Some(e),
+            e => {
+                let ensure = f.irep.catch.iter().filter(|h| h.ensure).find(covers);
+                match ensure.map(|h| h.target) {
+                    Some(target) => {
+                        f.pc = target;
+                        f.pending = Some(e);
+                        f.exc = None;
+                        None
+                    }
+                    None => Some(e),
+                }
+            }
+        }
+    }
+
+    /// Registers the `break`/`return` targets of a starting frame.
+    fn enter_frame(&mut self, f: &Frame) {
+        if f.break_tag != 0 {
+            self.live_breaks.push(f.break_tag);
+        }
+        if f.lambda {
+            self.live_breaks.push(f.proc_tag);
+        }
+        if f.is_home {
+            self.live_homes.push(f.home);
+        }
+    }
+
+    /// Unregisters a finished frame and catches the `break`/`return` aimed at it.
+    fn leave_frame(&mut self, f: &Frame, r: VmResult) -> VmResult {
+        if f.is_home {
+            self.live_homes.pop();
+        }
+        if f.lambda {
+            self.live_breaks.pop();
+        }
+        if f.break_tag != 0 {
+            self.live_breaks.pop();
+        }
+        match r {
+            Err(Unwind::Return { home, value }) if f.is_home && home == f.home => Ok(value),
+            Err(Unwind::Break { tag, value })
+                if tag != 0 && (tag == f.break_tag || (f.lambda && tag == f.proc_tag)) =>
+            {
+                Ok(value)
+            }
+            r => r,
+        }
+    }
+
+    /// A call made by the instruction that writes register `a`: Ruby code
+    /// continues in the dispatch loop as a new frame, natives run now. A
+    /// `break` from the passed block (`tag`) ends the call with its value.
+    fn call_flow(
+        &mut self,
+        f: &Frame,
+        a: Reg,
+        tag: usize,
+        start: impl FnOnce(&mut Self) -> Result<Call, Unwind>,
+    ) -> Result<Flow, Unwind> {
+        if tag != 0 {
+            self.live_breaks.push(tag);
+        }
+        let r = start(self);
+        if tag != 0 {
+            self.live_breaks.pop();
+        }
+        match r {
+            Ok(Call::Frame(mut callee)) => {
+                callee.ret = a;
+                callee.break_tag = tag;
+                Ok(Flow::Call(callee))
+            }
+            Ok(Call::Done(v)) => {
+                f.set(a, v);
+                Ok(Flow::Next)
+            }
+            Err(Unwind::Break { tag: t, value }) if tag != 0 && t == tag => {
+                f.set(a, value);
+                Ok(Flow::Next)
+            }
+            Err(e) => Err(e),
         }
     }
 
@@ -1298,8 +1469,8 @@ impl Vm {
         }
     }
 
-    /// Executes one instruction. `Ok(Some(v))` means the frame returns `v`.
-    fn step(&mut self, f: &mut Frame, op: Op, pc: &mut usize) -> Result<Option<Value>, Unwind> {
+    /// Executes one instruction.
+    fn step(&mut self, f: &mut Frame, op: Op) -> Result<Flow, Unwind> {
         match op {
             Op::Nop => {}
             Op::Move(a, b) => f.set(a, f.get(b)),
@@ -1372,30 +1543,30 @@ impl Vm {
                 let env = upvar_env(f, depth);
                 env.regs.borrow_mut()[idx] = f.get(a);
             }
-            Op::Jmp(t) => *pc = t,
+            Op::Jmp(t) => f.pc = t,
             Op::JmpIf(a, t) => {
                 if f.get(a).truthy() {
-                    *pc = t;
+                    f.pc = t;
                 }
             }
             Op::JmpNot(a, t) => {
                 if !f.get(a).truthy() {
-                    *pc = t;
+                    f.pc = t;
                 }
             }
             Op::JmpNil(a, t) => {
                 if f.get(a).is_nil() {
-                    *pc = t;
+                    f.pc = t;
                 }
             }
             Op::OptArg(n, t) => {
                 if n < f.opt_filled {
-                    *pc = t;
+                    f.pc = t;
                 }
             }
             Op::KwArg(n, t) => {
                 if f.kw_mask & (1 << n.min(63)) != 0 {
-                    *pc = t;
+                    f.pc = t;
                 }
             }
             Op::Except(a) => {
@@ -1437,8 +1608,8 @@ impl Vm {
                 } else {
                     None
                 };
-                let v = self.call_with_block(&recv, mid, args, blk)?;
-                f.set(a, v);
+                let tag = proc_tag(&blk);
+                return self.call_flow(f, a, tag, |vm| vm.start_call(recv, mid, args, blk));
             }
             Op::SendV(a, mid, has_block) => {
                 let recv = f.get(a);
@@ -1448,20 +1619,18 @@ impl Vm {
                 } else {
                     None
                 };
-                let v = self.call_with_block(&recv, mid, args, blk)?;
-                f.set(a, v);
+                let tag = proc_tag(&blk);
+                return self.call_flow(f, a, tag, |vm| vm.start_call(recv, mid, args, blk));
             }
             Op::Super(a, argc) => {
                 let args: Vec<Value> = (0..argc).map(|i| f.get(a + 1 + i)).collect();
                 let blk = self.block_from(f.get(a + argc + 1))?;
-                let v = self.super_call(f, args, blk)?;
-                f.set(a, v);
+                return self.super_flow(f, a, args, blk);
             }
             Op::SuperV(a) => {
                 let args = self.args_from_array(f.get(a + 1));
                 let blk = self.block_from(f.get(a + 2))?;
-                let v = self.super_call(f, args, blk)?;
-                f.set(a, v);
+                return self.super_flow(f, a, args, blk);
             }
             Op::BlkPush(a, required) => match &f.block {
                 Some(b) => f.set(a, b.clone()),
@@ -1471,7 +1640,7 @@ impl Vm {
                 None => f.set(a, Value::Nil),
             },
             Op::BlockGiven(a) => f.set(a, Value::Bool(f.block.is_some())),
-            Op::Return(a) => return Ok(Some(f.get(a))),
+            Op::Return(a) => return Ok(Flow::Return(f.get(a))),
             Op::ReturnBlk(a) => {
                 if !self.live_homes.contains(&f.home) {
                     return Err(self.err(&self.c.local_jump_error, "unexpected return"));
@@ -1490,19 +1659,19 @@ impl Vm {
                     value: f.get(a),
                 });
             }
-            Op::Add(a) => self.arith_op(f, a, Arith::Add, self.s.add)?,
-            Op::Sub(a) => self.arith_op(f, a, Arith::Sub, self.s.sub)?,
-            Op::Mul(a) => self.arith_op(f, a, Arith::Mul, self.s.mul)?,
-            Op::Div(a) => self.arith_op(f, a, Arith::Div, self.s.div)?,
+            Op::Add(a) => return self.arith_flow(f, a, Arith::Add, self.s.add),
+            Op::Sub(a) => return self.arith_flow(f, a, Arith::Sub, self.s.sub),
+            Op::Mul(a) => return self.arith_flow(f, a, Arith::Mul, self.s.mul),
+            Op::Div(a) => return self.arith_flow(f, a, Arith::Div, self.s.div),
             Op::Eq(a) => {
                 let (x, y) = (f.get(a), f.get(a + 1));
                 let v = self.equal(&x, &y)?;
                 f.set(a, Value::Bool(v));
             }
-            Op::Lt(a) => self.cmp_op(f, a, self.s.lt, Ordering::is_lt)?,
-            Op::Le(a) => self.cmp_op(f, a, self.s.le, Ordering::is_le)?,
-            Op::Gt(a) => self.cmp_op(f, a, self.s.gt, Ordering::is_gt)?,
-            Op::Ge(a) => self.cmp_op(f, a, self.s.ge, Ordering::is_ge)?,
+            Op::Lt(a) => return self.cmp_flow(f, a, self.s.lt, Ordering::is_lt),
+            Op::Le(a) => return self.cmp_flow(f, a, self.s.le, Ordering::is_le),
+            Op::Gt(a) => return self.cmp_flow(f, a, self.s.gt, Ordering::is_gt),
+            Op::Ge(a) => return self.cmp_flow(f, a, self.s.ge, Ordering::is_ge),
             Op::Not(a) => f.set(a, Value::Bool(!f.get(a).truthy())),
             Op::Array(a, b, n) => {
                 let v = (0..n).map(|i| f.get(b + i)).collect();
@@ -1640,8 +1809,10 @@ impl Vm {
                 let Value::Class(cls) = f.get(a) else {
                     unreachable!()
                 };
-                let v = self.exec_class_body(cls, f.irep.reps[idx].clone())?;
-                f.set(a, v);
+                let target = cls.clone();
+                let mut body = self.body_frame(f.irep.reps[idx].clone(), Value::Class(cls), target);
+                body.ret = a;
+                return Ok(Flow::Call(body));
             }
             Op::Alias(new, old) => self.alias_method(&f.target, new, old)?,
             Op::GAlias(new, old) => {
@@ -1662,31 +1833,32 @@ impl Vm {
                 f.set(a, v);
             }
         }
-        Ok(None)
+        Ok(Flow::Next)
     }
 
-    fn super_call(&mut self, f: &Frame, args: Vec<Value>, blk: Option<Value>) -> VmResult {
+    fn super_flow(
+        &mut self,
+        f: &Frame,
+        a: Reg,
+        args: Vec<Value>,
+        blk: Option<Value>,
+    ) -> Result<Flow, Unwind> {
         let Some((owner, mid)) = f.method.clone() else {
             return Err(self.err(&self.c.no_method_error, "super called outside of method"));
         };
-        let Some((m, o)) = self.find_super(&f.self_, &owner, mid) else {
-            if let Some((mm, mo)) = self.lookup(&f.self_, self.s.method_missing) {
-                let mut margs = vec![Value::Sym(mid)];
-                margs.extend(args);
-                let name = self.s.method_missing;
-                return self.invoke(mm, mo, f.self_.clone(), name, margs, blk);
-            }
-            let msg = format!("super: no superclass method '{}'", self.sym_name(mid));
-            return Err(self.err(&self.c.no_method_error, msg));
-        };
+        let self_ = f.self_.clone();
         let tag = proc_tag(&blk);
-        self.live_breaks.push(tag);
-        let r = self.invoke(m, o, f.self_.clone(), mid, args, blk);
-        self.live_breaks.pop();
-        match r {
-            Err(Unwind::Break { tag: t, value }) if tag != 0 && t == tag => Ok(value),
-            r => r,
+        if let Some((m, o)) = self.find_super(&self_, &owner, mid) {
+            return self.call_flow(f, a, tag, |vm| vm.start_invoke(m, o, self_, mid, args, blk));
         }
+        if let Some((mm, mo)) = self.lookup(&self_, self.s.method_missing) {
+            let mut margs = vec![Value::Sym(mid)];
+            margs.extend(args);
+            let name = self.s.method_missing;
+            return self.call_flow(f, a, tag, |vm| vm.start_invoke(mm, mo, self_, name, margs, blk));
+        }
+        let msg = format!("super: no superclass method '{}'", self.sym_name(mid));
+        Err(self.err(&self.c.no_method_error, msg))
     }
 
     pub fn alias_method(&self, target: &Rc<RClass>, new: Sym, old: Sym) -> Result<(), Unwind> {
@@ -1868,32 +2040,30 @@ impl Vm {
         })
     }
 
-    fn arith_op(&mut self, f: &Frame, a: Reg, op: Arith, mid: Sym) -> Result<(), Unwind> {
+    /// `R[a] op R[a+1]`: numbers directly, anything else as a method call.
+    fn arith_flow(&mut self, f: &Frame, a: Reg, op: Arith, mid: Sym) -> Result<Flow, Unwind> {
         let (x, y) = (f.get(a), f.get(a + 1));
-        let v = if x.is_numeric() && y.is_numeric() {
-            self.arith(op, &x, &y)?
-        } else {
-            self.call_method(&x, mid, vec![y], None)?
-        };
-        f.set(a, v);
-        Ok(())
+        if x.is_numeric() && y.is_numeric() {
+            let v = self.arith(op, &x, &y)?;
+            f.set(a, v);
+            return Ok(Flow::Next);
+        }
+        self.call_flow(f, a, 0, |vm| vm.start_call(x, mid, vec![y], None))
     }
 
-    fn cmp_op(
+    fn cmp_flow(
         &mut self,
         f: &Frame,
         a: Reg,
         mid: Sym,
         pred: fn(Ordering) -> bool,
-    ) -> Result<(), Unwind> {
+    ) -> Result<Flow, Unwind> {
         let (x, y) = (f.get(a), f.get(a + 1));
-        let v = if x.is_numeric() && y.is_numeric() {
-            Value::Bool(num_cmp(&x, &y).is_some_and(pred))
-        } else {
-            self.call_method(&x, mid, vec![y], None)?
-        };
-        f.set(a, v);
-        Ok(())
+        if x.is_numeric() && y.is_numeric() {
+            f.set(a, Value::Bool(num_cmp(&x, &y).is_some_and(pred)));
+            return Ok(Flow::Next);
+        }
+        self.call_flow(f, a, 0, |vm| vm.start_call(x, mid, vec![y], None))
     }
 
     /// `a == b`, dispatching to user-defined `==` for objects.

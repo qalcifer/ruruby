@@ -32,13 +32,15 @@ Usage: mrbtest [-v] [-j N] [--top N] [FILE|DIR ...]
   -j N      parallel jobs (default: number of CPUs)
   --top N   how many of the most common errors to list (default 15)";
 
+const STACK_SIZE: usize = 1 << 30;
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("--child") {
         let file = PathBuf::from(&args[1]);
-        // Ruby calls recurse on the native stack; give the interpreter room.
+        // natives calling back into Ruby recurse on the native stack
         return std::thread::Builder::new()
-            .stack_size(1 << 30)
+            .stack_size(STACK_SIZE)
             .spawn(move || child(&file))
             .unwrap()
             .join()
@@ -163,6 +165,7 @@ fn child(file: &Path) -> ExitCode {
     }
 
     let mut interp = Interpreter::new();
+    interp.vm.stack_budget = STACK_SIZE - (64 << 20);
     interp.capture_output();
     if let Err(e) = interp.eval(HARNESS) {
         emit("toplevel", &format!("harness failed to load: {e}"));

@@ -13,11 +13,14 @@ Usage: ruruby [options] [programfile] [arguments]
   -h, --help   show this message
 With no program, reads the script from stdin, or starts a REPL on a terminal.";
 
+/// Native stack for the interpreter thread. Ruby→Ruby calls don't use it,
+/// but natives calling back into Ruby (`each` with a block) do.
+const STACK_SIZE: usize = 1 << 30;
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    // Ruby calls recurse on the native stack, so give the interpreter a big one.
     std::thread::Builder::new()
-        .stack_size(1 << 30)
+        .stack_size(STACK_SIZE)
         .spawn(move || run(args))
         .expect("failed to spawn interpreter thread")
         .join()
@@ -62,6 +65,7 @@ fn run(args: Vec<String>) -> ExitCode {
     }
 
     let mut interp = Interpreter::new();
+    interp.vm.stack_budget = STACK_SIZE - (64 << 20);
     let argv = Value::array(script_args.into_iter().map(Value::str).collect());
     interp.vm.set_const("ARGV", argv);
 
