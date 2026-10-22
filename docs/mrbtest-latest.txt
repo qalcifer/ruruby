@@ -13,7 +13,7 @@ env.rb                       8      0     0      8       0     0     0      0   
 exception.rb                39     31     2      6       0     0     0      0   79.5%  
 false.rb                     6      6     0      0       0     0     0      0  100.0%  
 float.rb                    31     22     8      1       0     0     0      0   71.0%  
-gc.rb                       27      0     0     27       0     0     0      0    0.0%  
+gc.rb                       27      2     0     25       0     0     0      0    7.4%  
 hash.rb                     48      6     4     38       0     0     0      1   12.5%  
 indexerror.rb                1      1     0      0       0     0     0      0  100.0%  
 integer.rb                  45     31    10      4       0     0     0      0   68.9%  
@@ -48,7 +48,7 @@ unicode.rb                   3      3     0      0       0     0     0      0  1
 version.rb                   1      0     0      1       0     0     0      0    0.0%  
 vformat.rb                   1      0     0      1       0     0     0      0    0.0%  
 ----------------------------------------------------------------------------------------------------
-TOTAL                      970    593   144    186       2     3     0      8   61.1%
+TOTAL                      970    595   144    184       2     3     0      8   61.3%
 
 Most common syntax errors (asserts affected):
       2  a heredoc can't start inside string interpolation
@@ -57,9 +57,9 @@ Most common syntax errors (asserts affected):
 Most common exceptions inside asserts:
      32  ArgumentError: wrong number of arguments (given 7, expected 1)
      17  NoMethodError: undefined method 'stress' for main:Object
-     12  NameError: uninitialized constant GC
       5  NameError: uninitialized constant TestNotImplement
       5  NoMethodError: undefined method '[]=' for an instance of String
+      4  NoMethodError: undefined method 'malloc_threshold' for module GC
       4  NoMethodError: undefined method 'rindex' for an instance of String
       3  NoMethodError: undefined method 'downcase!' for an instance of String
       3  NoMethodError: undefined method 'message' for nil

@@ -26,8 +26,9 @@ cargo run --release --bin mrbtest   # run mruby's own test suite (needs ./mruby)
 | `src/opcode.rs` | `Op`, `Irep`, disassembler | `include/mruby/ops.h`, `irep.h`, `src/codedump.c` |
 | `src/vm.rs` | Dispatch loop, method lookup, calls, exceptions | `src/vm.c`, `state.c`, `class.c`, `error.c` |
 | `src/value.rs` | `Value`, classes, objects, procs, hashes | `include/mruby/value.h`, `object.h`, `class.h`, `proc.h` |
+| `src/gc.rs` | Heap arenas, `Gc` handles, mark-sweep collector | `src/gc.c` |
 | `src/symbol.rs` | Symbol interning | `src/symbol.c` |
-| `src/core/` | Built-in classes and methods (`reflect.rs`: singleton classes, `define_method`, `class_eval`, …) | `src/{kernel,numeric,string,array,hash,range}.c`, `mrblib/`, default gems |
+| `src/core/` | Built-in classes and methods (`reflect.rs`: singleton classes, `define_method`, `class_eval`, …; `prelude.rb`: iterators written in Ruby) | `src/{kernel,numeric,string,array,hash,range}.c`, `mrblib/`, default gems |
 | `src/main.rs` | CLI + REPL | `mruby`, `mirb` |
 
 See **[docs/MRUBY_TO_RUST.md](docs/MRUBY_TO_RUST.md)** for the mruby analysis, the
