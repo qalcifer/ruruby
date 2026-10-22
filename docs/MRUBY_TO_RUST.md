@@ -210,8 +210,15 @@ Each step can be checked against mruby's own tests.
    `fib(30)` in 0.14 s. Tried without gain (reverted): 16/24-byte instructions,
    compare-with-immediate instructions, splitting rare instructions out of the
    dispatch loop — each changed the large dispatch function's code for the
-   worse. Next: NaN-boxed 8-byte `Value`, fewer `Rc<Irep>` updates per call,
-   then a profile-guided look at the dispatch loop's generated code.
+   worse. An instruction-level profile (`tools/pcprof.py`, lldb-based) and the
+   loop's disassembly then showed the collector and the exception handler
+   inlined into the dispatch loop; moving them out made the loop 17% faster
+   (0.54 s now, beating CRuby 2.6). The profile also shows the loop keeping
+   `self`, the frame and `pc` on the stack (one ~37 KB function, too many live
+   values for the registers) and ~13% of a call spent copying 208-byte frames
+   (boxing them was worse: one more indirection per field access). Next:
+   NaN-boxed 8-byte `Value`; a smaller dispatch function (handlers as separate
+   functions); fewer `Rc<Irep>` updates per call.
 7. **Numbers.** Bignum (`num-bigint`, matching `mruby-bigint`), Rational, Complex.
 8. **Enumerators.** `Enumerator`, external iteration (needs Fibers), `lazy`.
 9. **Standard gems** as Cargo features: `mruby-io`/`mruby-dir`, `mruby-time`,
