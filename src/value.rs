@@ -56,20 +56,20 @@ impl IvTable {
     }
 }
 
-thread_local! {
-    static METHOD_EPOCH: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-}
-
 /// Changes whenever method lookup could find something else: a method
-/// table, include or prepend list changed, or a class was created (so a
-/// cache keyed by a class's address can't outlive it). Inline caches on
-/// `Send` are valid only for the epoch they were filled in.
+/// table, include or prepend list changed, or a class was created. Inline
+/// caches on `Send` are valid only for the epoch they were filled in. One
+/// counter for all VMs (a change in one only invalidates the others' caches
+/// needlessly); an atomic rather than a thread-local because macOS makes
+/// every thread-local read a function call, and this is read on every call.
+static METHOD_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 pub fn method_epoch() -> u64 {
-    METHOD_EPOCH.with(|e| e.get())
+    METHOD_EPOCH.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 fn methods_changed() {
-    METHOD_EPOCH.with(|e| e.set(e.get() + 1));
+    METHOD_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// A class's methods. Mutation goes through `insert`/`remove`, which
