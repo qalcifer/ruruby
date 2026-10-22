@@ -419,6 +419,7 @@ impl Parser {
 
     /// Recognizes `a, b = ...`, `*a = ...`, `(a, b), c = ...` by a quick scan,
     /// then parses the left-hand side speculatively.
+    #[inline(never)]
     fn try_masgn(&mut self) -> PResult<Option<Node>> {
         if !self.looks_like_masgn() {
             return Ok(None);
@@ -1647,18 +1648,7 @@ impl Parser {
             Kw::Def => self.parse_def(),
             Kw::Class => self.parse_class(false),
             Kw::Module => self.parse_class(true),
-            Kw::Begin => {
-                let n = self.parse_body_rescue()?;
-                Ok(match n {
-                    n @ Node::Begin { .. } => n,
-                    n => Node::Begin {
-                        body: b(n),
-                        rescues: vec![],
-                        else_body: None,
-                        ensure: None,
-                    },
-                })
-            }
+            Kw::Begin => self.parse_begin(),
             Kw::Return => Ok(Node::Return(self.jump_value()?)),
             Kw::Break => Ok(Node::Break(self.jump_value()?)),
             Kw::Next => Ok(Node::Next(self.jump_value()?)),
@@ -1668,53 +1658,79 @@ impl Parser {
                 let args = self.parse_bare_args()?.map(|(a, _)| a).unwrap_or_default();
                 Ok(Node::Yield(args))
             }
-            Kw::Super => {
-                let (args, block_arg) = match self.parse_bare_args()? {
-                    Some((a, ba)) => (Some(a), ba),
-                    None => (None, None),
-                };
-                let block = if block_arg.is_none() {
-                    self.parse_block_opt(true)?
-                } else {
-                    None
-                };
-                Ok(Node::Super {
-                    args,
-                    block,
-                    block_arg,
-                })
-            }
+            Kw::Super => self.parse_super(),
             Kw::Not => Ok(Node::Not(b(self.parse_expr()?))),
             Kw::Defined => {
                 self.pos -= 1;
                 self.parse_operand()
             }
-            Kw::Alias => {
-                if let Tok::GVar(new) = self.peek().clone() {
-                    self.advance();
-                    let Tok::GVar(old) = self.advance() else {
-                        return Err(self.err("expected global variable"));
-                    };
-                    return Ok(Node::GAlias(new, old));
-                }
-                let new = self.parse_method_ref()?;
-                let old = self.parse_method_ref()?;
-                Ok(Node::Alias(new, old))
-            }
-            Kw::Undef => {
-                self.skip_nl();
-                let mut names = vec![self.parse_method_ref()?];
-                while self.eat(&Tok::Comma) {
-                    self.skip_nl();
-                    names.push(self.parse_method_ref()?);
-                }
-                Ok(Node::Undef(names))
-            }
+            Kw::Alias => self.parse_alias(),
+            Kw::Undef => self.parse_undef(),
             _ => {
                 self.pos -= 1;
                 Err(self.err("unexpected keyword"))
             }
         }
+    }
+
+    // The helpers below are marked `inline(never)` so their locals don't
+    // enlarge the frames of parse_keyword/parse_primary, which are on the
+    // recursive path of every nested expression.
+
+    #[inline(never)]
+    fn parse_begin(&mut self) -> PResult<Node> {
+        Ok(match self.parse_body_rescue()? {
+            n @ Node::Begin { .. } => n,
+            n => Node::Begin {
+                body: b(n),
+                rescues: vec![],
+                else_body: None,
+                ensure: None,
+            },
+        })
+    }
+
+    #[inline(never)]
+    fn parse_super(&mut self) -> PResult<Node> {
+        let (args, block_arg) = match self.parse_bare_args()? {
+            Some((a, ba)) => (Some(a), ba),
+            None => (None, None),
+        };
+        let block = if block_arg.is_none() {
+            self.parse_block_opt(true)?
+        } else {
+            None
+        };
+        Ok(Node::Super {
+            args,
+            block,
+            block_arg,
+        })
+    }
+
+    #[inline(never)]
+    fn parse_alias(&mut self) -> PResult<Node> {
+        if let Tok::GVar(new) = self.peek().clone() {
+            self.advance();
+            let Tok::GVar(old) = self.advance() else {
+                return Err(self.err("expected global variable"));
+            };
+            return Ok(Node::GAlias(new, old));
+        }
+        let new = self.parse_method_ref()?;
+        let old = self.parse_method_ref()?;
+        Ok(Node::Alias(new, old))
+    }
+
+    #[inline(never)]
+    fn parse_undef(&mut self) -> PResult<Node> {
+        self.skip_nl();
+        let mut names = vec![self.parse_method_ref()?];
+        while self.eat(&Tok::Comma) {
+            self.skip_nl();
+            names.push(self.parse_method_ref()?);
+        }
+        Ok(Node::Undef(names))
     }
 
     /// A method name in `alias`/`undef`: `foo`, `:foo`, `+`, `[]=`, `foo=`.
@@ -1744,6 +1760,7 @@ impl Parser {
     }
 
     /// Arguments of `yield` / `super`: `(a, b)`, `a, b`, or none (None).
+    #[inline(never)]
     fn parse_bare_args(&mut self) -> PResult<Option<ArgList>> {
         if self.at(&Tok::LParen) && !self.spc() {
             self.advance();
@@ -1776,6 +1793,7 @@ impl Parser {
 
     /// `for a, b in expr do body end` → `expr.each { |%for| a, b = %for; body }`.
     /// The loop variables and body locals belong to the enclosing scope.
+    #[inline(never)]
     fn parse_for(&mut self) -> PResult<Node> {
         let saved_in = std::mem::replace(&mut self.no_in, true);
         let lhs = self.parse_mlhs(&[Tok::Kw(Kw::In)]);
@@ -1812,6 +1830,7 @@ impl Parser {
     }
 
     /// `case/when` is desugared into an `if` chain using `===`, as Ruby defines it.
+    #[inline(never)]
     fn parse_case(&mut self) -> PResult<Node> {
         let subject = if matches!(self.peek(), Tok::Newline | Tok::Semi) {
             None
@@ -1874,6 +1893,7 @@ impl Parser {
         self.parse_ternary()
     }
 
+    #[inline(never)]
     fn parse_def(&mut self) -> PResult<Node> {
         // singleton target: `def self.x`, `def obj.x`, `def Const.x`, `def (expr).x`
         let mut recv = None;
@@ -1979,6 +1999,7 @@ impl Parser {
         })
     }
 
+    #[inline(never)]
     fn parse_class(&mut self, is_module: bool) -> PResult<Node> {
         if !is_module && self.eat(&Tok::Shl) {
             // `class << obj`
@@ -2039,6 +2060,7 @@ impl Parser {
     }
 
     /// Body with optional `rescue`/`else`/`ensure` clauses, up to and including `end`.
+    #[inline(never)]
     fn parse_body_rescue(&mut self) -> PResult<Node> {
         let body = self.parse_stmts()?;
         let mut rescues = Vec::new();
@@ -2098,6 +2120,7 @@ impl Parser {
         })
     }
 
+    #[inline(never)]
     fn parse_lambda(&mut self) -> PResult<Node> {
         self.push_scope(false);
         let params = if self.at(&Tok::LParen) {
@@ -2127,6 +2150,7 @@ impl Parser {
         Ok(Node::Lambda(Box::new(block)))
     }
 
+    #[inline(never)]
     fn parse_hash_literal(&mut self) -> PResult<Node> {
         let mut items = Vec::new();
         self.skip_nl();
@@ -2175,6 +2199,7 @@ impl Parser {
         Ok(Node::Hash(items, false))
     }
 
+    #[inline(never)]
     fn string_node(&mut self, parts: Vec<StrPart>) -> PResult<Node> {
         let mut nodes: Vec<Node> = Vec::new();
         for p in parts {

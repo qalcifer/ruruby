@@ -64,6 +64,7 @@ fn call(recv: Node, name: &str, args: Vec<Node>) -> Node {
 
 impl Parser {
     /// `case subject; in pat [if guard] then body ... else ... end`
+    #[inline(never)]
     pub(super) fn parse_case_in(&mut self, subject: Node) -> PResult<Node> {
         let tmp = self.fresh("pm");
         self.declare_here(&tmp);
