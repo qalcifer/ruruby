@@ -816,6 +816,7 @@ impl Vm {
                 };
                 self.call_proc(&p, args, block, call)
             }
+            Method::ProcCall => self.call_proc(&recv, args, block, ProcCall::default()),
             Method::Undefined => Err(self.no_method(&recv, mid)),
             Method::Ruby(irep) => {
                 let bound = self.bind_args(&irep, &recv, args, &block, true, None)?;

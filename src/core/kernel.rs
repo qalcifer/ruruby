@@ -483,11 +483,10 @@ fn init_exception(vm: &mut Vm) {
 
 fn init_misc(vm: &mut Vm) {
     let p = vm.c.proc_.clone();
-    let call: NativeFn = |vm, s, a, b| vm.call_proc(s, a.to_vec(), b.cloned(), Default::default());
-    vm.def(&p, "call", call);
-    vm.def(&p, "()", call);
-    vm.def(&p, "yield", call);
-    vm.def(&p, "[]", call);
+    for name in ["call", "()", "yield", "[]"] {
+        let s = vm.intern(name);
+        p.methods.borrow_mut().insert(s, Method::ProcCall);
+    }
     vm.def(&p, "to_proc", |_, s, _, _| Ok(s.clone()));
     vm.def(&p, "arity", |_, s, _, _| match s {
         Value::Proc(p) => Ok(Value::Int(match &p.body {

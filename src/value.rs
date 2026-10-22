@@ -26,6 +26,10 @@ pub enum Method {
     AttrWriter(Sym),
     /// `define_method(:name) { ... }`
     Proc(Value),
+    /// `Proc#call` (also `()`, `yield`, `[]`): runs the receiver. A marker
+    /// rather than a native so the VM can run Ruby blocks without recursing
+    /// (mruby: the OP_CALL irep behind `Proc#call`).
+    ProcCall,
     /// `undef_method` marker: stops the lookup.
     Undefined,
 }
