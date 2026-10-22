@@ -237,3 +237,17 @@ fn line_continuation() {
     "##;
     assert_eq!(run(src), "5\n1\n:mod\n3\n");
 }
+
+#[test]
+fn interpolation_is_lexed_as_code() {
+    let src = r##"
+        x = 3
+        p "a#{ "}" }b", "#{ ?} }", "#{ {k: x}[:k] }", "o#{ "i#{x}i" }o"
+        s = "#{ x + # a } in a comment
+          1 }"
+        p s
+    "##;
+    assert_eq!(run(src), "\"a}b\"\n\"}\"\n\"3\"\n\"oi3io\"\n\"4\"\n");
+    let err = run_capture("p \"#{<<A}\"\nx\nA\n").unwrap_err().to_string();
+    assert!(err.contains("heredoc can't start inside string interpolation"), "{err}");
+}

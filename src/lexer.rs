@@ -103,8 +103,9 @@ impl Kw {
 #[derive(Debug, Clone, PartialEq)]
 pub enum StrPart {
     Lit(String),
-    /// Source code of a `#{...}` interpolation, parsed later by the parser.
-    Code(String),
+    /// Tokens of a `#{...}` interpolation (ending with `Eof`), parsed in the
+    /// scope of the enclosing code.
+    Code(Vec<Token>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -181,7 +182,7 @@ pub enum Tok {
     Eof,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Token {
     pub tok: Tok,
     pub line: u32,
@@ -342,12 +343,19 @@ impl Lexer {
                 self.push(Tok::Eof, spc);
                 return Ok(self.toks);
             }
+            self.token(spc)?;
+        }
+    }
+
+    /// Lexes one token (or line break) at a non-blank position.
+    fn token(&mut self, spc: bool) -> Result<(), String> {
+        {
             let c = self.peek();
             if c == '\n' {
                 self.bump();
                 self.read_heredoc_bodies()?;
                 self.newline();
-                continue;
+                return Ok(());
             }
             let tok = if c.is_ascii_digit() {
                 self.number()?
@@ -411,6 +419,7 @@ impl Lexer {
             };
             self.push(tok, spc);
         }
+        Ok(())
     }
 
     fn at_data_end(&self) -> bool {
@@ -917,7 +926,16 @@ impl Lexer {
                         name.push(self.bump());
                     }
                     name.push_str(&self.read_ident());
-                    parts.push(StrPart::Code(name));
+                    let tok = match name.as_bytes() {
+                        [b'$', ..] => Tok::GVar(name),
+                        [b'@', b'@', ..] => Tok::CVar(name),
+                        _ => Tok::IVar(name),
+                    };
+                    let line = self.line;
+                    parts.push(StrPart::Code(vec![
+                        Token { tok, line, spc: false },
+                        Token { tok: Tok::Eof, line, spc: false },
+                    ]));
                 }
                 _ => cur.push(self.bump()),
             }
@@ -929,33 +947,39 @@ impl Lexer {
         Ok(parts)
     }
 
-    /// Raw source of `#{ ... }` up to the matching brace.
-    fn interpolation(&mut self) -> Result<String, String> {
-        let mut depth = 1;
-        let mut code = String::new();
+    /// Tokens of `#{ ... }` up to the matching brace, lexed by the main
+    /// tokenizer so anything valid in code is valid here.
+    fn interpolation(&mut self) -> Result<Vec<Token>, String> {
+        let outer = std::mem::take(&mut self.toks);
+        let outer_heredocs = std::mem::take(&mut self.heredocs);
+        let r = self.interpolation_tokens();
+        let started_heredoc = !std::mem::replace(&mut self.heredocs, outer_heredocs).is_empty();
+        let toks = std::mem::replace(&mut self.toks, outer);
+        r?;
+        if started_heredoc {
+            return Err(self.err("a heredoc can't start inside string interpolation"));
+        }
+        Ok(toks)
+    }
+
+    fn interpolation_tokens(&mut self) -> Result<(), String> {
+        let mut depth = 0usize;
         loop {
-            match self.peek() {
-                '\0' if self.at_end() => return Err(self.err("unterminated string interpolation")),
-                '{' => depth += 1,
-                '}' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        self.bump();
-                        return Ok(code);
-                    }
-                }
-                q @ ('"' | '\'') => {
-                    code.push(self.bump());
-                    while !self.at_end() && self.peek() != q {
-                        if self.peek() == '\\' {
-                            code.push(self.bump());
-                        }
-                        code.push(self.bump());
-                    }
-                }
+            let spc = self.skip_space();
+            if self.at_end() {
+                return Err(self.err("unterminated string interpolation"));
+            }
+            if self.peek() == '}' && depth == 0 {
+                self.bump();
+                self.push(Tok::Eof, spc);
+                return Ok(());
+            }
+            self.token(spc)?;
+            match self.last_tok() {
+                Some(Tok::LBrace) => depth += 1,
+                Some(Tok::RBrace) => depth -= 1,
                 _ => {}
             }
-            code.push(self.bump());
         }
     }
 

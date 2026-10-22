@@ -8,7 +8,7 @@
 mod pattern;
 
 use crate::ast::*;
-use crate::lexer::{Kw, StrPart, Tok, Token, lex, lex_at};
+use crate::lexer::{Kw, StrPart, Tok, Token, lex_at};
 
 type PResult<T> = Result<T, String>;
 
@@ -2256,7 +2256,7 @@ impl Parser {
                     Some(Node::Str(prev)) => prev.push_str(&s),
                     _ => nodes.push(Node::Str(s)),
                 },
-                StrPart::Code(src) => nodes.push(self.parse_sub(&src)?),
+                StrPart::Code(toks) => nodes.push(self.parse_sub(toks)?),
             }
         }
         Ok(match nodes.len() {
@@ -2267,8 +2267,7 @@ impl Parser {
     }
 
     /// Parses `#{...}` code in the current scope (so it sees local variables).
-    fn parse_sub(&mut self, src: &str) -> PResult<Node> {
-        let toks = lex(src)?;
+    fn parse_sub(&mut self, toks: Vec<Token>) -> PResult<Node> {
         let saved_toks = std::mem::replace(&mut self.toks, toks);
         let saved_pos = std::mem::replace(&mut self.pos, 0);
         let saved_in = std::mem::replace(&mut self.no_in, false);
