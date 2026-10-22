@@ -37,6 +37,9 @@ pub enum Unwind {
 
 pub type VmResult = Result<Value, Unwind>;
 
+/// Arguments a native call can take without a heap-allocated argument list.
+const MAX_INLINE_ARGS: usize = 4;
+
 /// Deepest Ruby call nesting (frames on the VM stack) before SystemStackError.
 const MAX_FRAMES: usize = 10_000;
 
@@ -491,10 +494,12 @@ impl Vm {
         env
     }
 
+    #[inline]
     fn reg(&self, f: &Frame, i: Reg) -> Value {
         self.heap[f.env].regs.borrow()[i].clone()
     }
 
+    #[inline]
     fn set_reg(&self, f: &Frame, i: Reg, v: Value) {
         self.heap[f.env].regs.borrow_mut()[i] = v;
     }
@@ -1723,14 +1728,31 @@ impl Vm {
             }
             Op::Send(a, mid, argc, has_block) => {
                 let recv = self.reg(f, a);
-                let args = (0..argc).map(|i| self.reg(f, a + 1 + i)).collect();
                 let blk = if has_block {
                     self.block_from(self.reg(f, a + argc + 1))?
                 } else {
                     None
                 };
                 let tag = proc_tag(&blk);
-                return self.call_flow(f, a, tag, |vm| vm.start_call(recv, mid, args, blk));
+                let Some((m, owner)) = self.lookup(&recv, mid) else {
+                    let args = (0..argc).map(|i| self.reg(f, a + 1 + i)).collect();
+                    return self.call_flow(f, a, tag, |vm| vm.start_call(recv, mid, args, blk));
+                };
+                // natives take their arguments as a slice: no Vec for the common case
+                if let Method::Native(native) = m
+                    && argc <= MAX_INLINE_ARGS
+                {
+                    let mut buf: [Value; MAX_INLINE_ARGS] = Default::default();
+                    let regs = self.heap[f.env].regs.borrow();
+                    buf[..argc].clone_from_slice(&regs[a + 1..a + 1 + argc]);
+                    drop(regs);
+                    let args = &buf[..argc];
+                    return self.call_flow(f, a, tag, |vm| {
+                        Ok(Call::Done(native(vm, &recv, args, blk.as_ref())?))
+                    });
+                }
+                let args = (0..argc).map(|i| self.reg(f, a + 1 + i)).collect();
+                return self.call_flow(f, a, tag, |vm| vm.start_invoke(m, owner, recv, mid, args, blk));
             }
             Op::SendV(a, mid, has_block) => {
                 let recv = self.reg(f, a);

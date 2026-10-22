@@ -168,7 +168,7 @@ fn child(file: &Path, gc_stress: bool) -> ExitCode {
 
     let mut interp = Interpreter::new();
     interp.vm.stack_budget = STACK_SIZE - (64 << 20);
-    interp.vm.heap.gc.stress = gc_stress;
+    interp.vm.heap.gc.set_stress(gc_stress);
     interp.capture_output();
     if let Err(e) = interp.eval(HARNESS) {
         emit("toplevel", &format!("harness failed to load: {e}"));

@@ -69,7 +69,7 @@ fn run(args: Vec<String>) -> ExitCode {
 
     let mut interp = Interpreter::new();
     interp.vm.stack_budget = STACK_SIZE - (64 << 20);
-    interp.vm.heap.gc.stress = gc_stress;
+    interp.vm.heap.gc.set_stress(gc_stress);
     let args = script_args.into_iter().map(|a| interp.vm.str(a)).collect();
     let argv = interp.vm.array(args);
     interp.vm.set_const("ARGV", argv);

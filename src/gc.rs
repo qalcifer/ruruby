@@ -110,6 +110,7 @@ impl<T> Arena<T> {
         }
     }
 
+    #[inline]
     fn get(&self, h: Gc<T>) -> &T {
         match self.slots.get(h.idx as usize) {
             Some(Slot { generation, val: Some(v) }) if *generation == h.generation => v,
@@ -196,9 +197,7 @@ macro_rules! heap_types {
                 let gc = &mut self.gc;
                 gc.count += 1;
                 gc.freed += freed;
-                gc.allocated = 0;
-                gc.requested = false;
-                gc.threshold = live.max(MIN_THRESHOLD);
+                gc.budget = if gc.stress { 0 } else { live.max(MIN_THRESHOLD) as isize };
             }
         }
     };
@@ -221,15 +220,13 @@ const MIN_THRESHOLD: usize = 10_000;
 
 /// Collection policy and counters (mruby: the fields of `mrb_gc`).
 pub struct GcState {
-    /// Objects allocated since the last collection.
-    allocated: usize,
-    threshold: usize,
+    /// Allocations left before the next collection is due; checked at
+    /// every safe point, so it is a single counter.
+    budget: isize,
     /// `GC.disable` turns collection off.
     pub enabled: bool,
     /// `GC.stress = true`: collect at every safe point (finds missing roots).
-    pub stress: bool,
-    /// `GC.start`: collect at the next safe point.
-    pub requested: bool,
+    stress: bool,
     /// Number of collections so far (`GC.count`).
     pub count: usize,
     /// Objects freed so far.
@@ -239,11 +236,9 @@ pub struct GcState {
 impl Default for GcState {
     fn default() -> Self {
         GcState {
-            allocated: 0,
-            threshold: MIN_THRESHOLD,
+            budget: MIN_THRESHOLD as isize,
             enabled: true,
             stress: false,
-            requested: false,
             count: 0,
             freed: 0,
         }
@@ -251,17 +246,35 @@ impl Default for GcState {
 }
 
 impl GcState {
+    #[inline]
     pub fn due(&self) -> bool {
-        self.enabled && (self.allocated >= self.threshold || self.requested || self.stress)
+        self.budget <= 0 && self.enabled
+    }
+
+    /// `GC.start`: collect at the next safe point.
+    pub fn request(&mut self) {
+        self.budget = 0;
+    }
+
+    pub fn stress(&self) -> bool {
+        self.stress
+    }
+
+    pub fn set_stress(&mut self, on: bool) {
+        self.stress = on;
+        if on {
+            self.budget = 0;
+        }
     }
 }
 
 impl Heap {
     pub fn alloc<T: HeapObj>(&mut self, v: T) -> Gc<T> {
-        self.gc.allocated += 1;
+        self.gc.budget -= 1;
         T::arena_mut(self).alloc(v)
     }
 
+    #[inline]
     pub fn get<T: HeapObj>(&self, h: Gc<T>) -> &T {
         T::arena(self).get(h)
     }
@@ -270,6 +283,7 @@ impl Heap {
 impl<T: HeapObj> Index<Gc<T>> for Heap {
     type Output = T;
 
+    #[inline]
     fn index(&self, h: Gc<T>) -> &T {
         self.get(h)
     }
@@ -279,6 +293,7 @@ impl<T: HeapObj> Index<Gc<T>> for Heap {
 impl<T: HeapObj> Index<&Gc<T>> for Heap {
     type Output = T;
 
+    #[inline]
     fn index(&self, h: &Gc<T>) -> &T {
         self.get(*h)
     }
