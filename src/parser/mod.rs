@@ -715,10 +715,10 @@ impl Parser {
         // beginless range: `..10`
         if matches!(self.peek(), Tok::Dot2 | Tok::Dot3) {
             let excl = self.advance() == Tok::Dot3;
-            let hi = self.parse_oror()?;
+            let hi = self.parse_binary(PREC_OROR)?;
             return Ok(Node::Range(b(Node::Nil), b(hi), excl));
         }
-        let l = self.parse_oror()?;
+        let l = self.parse_binary(PREC_OROR)?;
         let excl = match self.peek() {
             Tok::Dot2 => false,
             Tok::Dot3 => true,
@@ -727,126 +727,53 @@ impl Parser {
         self.advance();
         // endless range: `a..`
         let r = if self.starts_value() && !matches!(self.peek(), Tok::Comma | Tok::Kw(Kw::Then)) {
-            self.parse_oror()?
+            self.parse_binary(PREC_OROR)?
         } else {
             Node::Nil
         };
         Ok(Node::Range(b(l), b(r), excl))
     }
 
-    fn parse_oror(&mut self) -> PResult<Node> {
-        let mut l = self.parse_andand()?;
-        while self.eat(&Tok::OrOr) {
-            self.skip_nl();
-            l = Node::Or(b(l), b(self.parse_andand()?));
-        }
-        Ok(l)
-    }
-
-    fn parse_andand(&mut self) -> PResult<Node> {
-        let mut l = self.parse_notop()?;
-        while self.eat(&Tok::AndAnd) {
-            self.skip_nl();
-            l = Node::And(b(l), b(self.parse_notop()?));
-        }
-        Ok(l)
-    }
-
-    /// `not` binds looser than `==` but `defined?` lives here too.
-    fn parse_notop(&mut self) -> PResult<Node> {
-        if self.at_kw(Kw::Defined) {
-            self.advance();
-            let e = if self.at(&Tok::LParen) {
-                self.advance();
-                self.skip_nl();
-                let e = self.with_no_do(false, |p| p.parse_expr())?;
-                self.skip_nl();
-                self.expect(&Tok::RParen)?;
-                self.parse_postfix(Node::Defined(b(e)))?
-            } else {
-                Node::Defined(b(self.parse_eq()?))
-            };
-            return Ok(e);
-        }
-        self.parse_eq()
-    }
-
-    fn parse_eq(&mut self) -> PResult<Node> {
-        let mut l = self.parse_cmp()?;
+    /// Binary operators from `||` to `* / %`, by precedence climbing: one
+    /// frame per operator actually present instead of one per tier, which
+    /// keeps deeply nested code within a small (wasm) stack.
+    fn parse_binary(&mut self, min: u8) -> PResult<Node> {
+        let mut l = self.parse_operand()?;
         loop {
-            let name = match self.peek() {
-                Tok::EqEq => "==",
-                Tok::NotEq => "!=",
-                Tok::Eqq => "===",
-                Tok::Cmp => "<=>",
-                Tok::Match => "=~",
-                Tok::NotMatch => "!~",
-                _ => return Ok(l),
+            let Some((prec, op)) = binary_op(self.peek()) else {
+                return Ok(l);
             };
+            if prec < min {
+                return Ok(l);
+            }
             self.advance();
             self.skip_nl();
-            let r = self.parse_cmp()?;
-            l = match name {
-                "!=" => ast::call(Some(l), "!=", vec![r]),
+            // all of these are left-associative
+            let r = self.parse_binary(prec + 1)?;
+            l = match op {
+                "||" => Node::Or(b(l), b(r)),
+                "&&" => Node::And(b(l), b(r)),
                 "!~" => Node::Not(b(ast::call(Some(l), "=~", vec![r]))),
-                _ => ast::call(Some(l), name, vec![r]),
+                _ => ast::call(Some(l), op, vec![r]),
             };
         }
     }
 
-    fn binary(
-        &mut self,
-        next: fn(&mut Self) -> PResult<Node>,
-        ops: &[(Tok, &str)],
-    ) -> PResult<Node> {
-        let mut l = next(self)?;
-        'outer: loop {
-            for (t, name) in ops {
-                if self.at(t) {
-                    self.advance();
-                    self.skip_nl();
-                    let r = next(self)?;
-                    l = ast::call(Some(l), name, vec![r]);
-                    continue 'outer;
-                }
-            }
-            return Ok(l);
+    /// An operand of a binary operator; `defined? x` binds looser than `==`.
+    fn parse_operand(&mut self) -> PResult<Node> {
+        if !self.at_kw(Kw::Defined) {
+            return self.parse_uminus();
         }
-    }
-
-    fn parse_cmp(&mut self) -> PResult<Node> {
-        self.binary(
-            Self::parse_bitor,
-            &[
-                (Tok::Lt, "<"),
-                (Tok::Le, "<="),
-                (Tok::Gt, ">"),
-                (Tok::Ge, ">="),
-            ],
-        )
-    }
-
-    fn parse_bitor(&mut self) -> PResult<Node> {
-        self.binary(Self::parse_bitand, &[(Tok::Pipe, "|"), (Tok::Caret, "^")])
-    }
-
-    fn parse_bitand(&mut self) -> PResult<Node> {
-        self.binary(Self::parse_shift, &[(Tok::Amp, "&")])
-    }
-
-    fn parse_shift(&mut self) -> PResult<Node> {
-        self.binary(Self::parse_add, &[(Tok::Shl, "<<"), (Tok::Shr, ">>")])
-    }
-
-    fn parse_add(&mut self) -> PResult<Node> {
-        self.binary(Self::parse_mul, &[(Tok::Plus, "+"), (Tok::Minus, "-")])
-    }
-
-    fn parse_mul(&mut self) -> PResult<Node> {
-        self.binary(
-            Self::parse_uminus,
-            &[(Tok::Star, "*"), (Tok::Slash, "/"), (Tok::Percent, "%")],
-        )
+        self.advance();
+        if self.at(&Tok::LParen) {
+            self.advance();
+            self.skip_nl();
+            let e = self.with_no_do(false, |p| p.parse_expr())?;
+            self.skip_nl();
+            self.expect(&Tok::RParen)?;
+            return self.parse_postfix(Node::Defined(b(e)));
+        }
+        Ok(Node::Defined(b(self.parse_binary(PREC_EQ)?)))
     }
 
     fn parse_uminus(&mut self) -> PResult<Node> {
@@ -1760,7 +1687,7 @@ impl Parser {
             Kw::Not => Ok(Node::Not(b(self.parse_expr()?))),
             Kw::Defined => {
                 self.pos -= 1;
-                self.parse_notop()
+                self.parse_operand()
             }
             Kw::Alias => {
                 if let Tok::GVar(new) = self.peek().clone() {
@@ -2287,6 +2214,40 @@ impl Parser {
 use crate::ast;
 
 /// Method names spelled with operator tokens (`a.+(b)`, `def <=>`, `alias`).
+// Binary operator precedence, loosest first (`..` and `? :` are looser).
+const PREC_OROR: u8 = 1;
+const PREC_EQ: u8 = 3;
+const PREC_ADD: u8 = 8;
+
+/// Precedence and method name of a binary operator token.
+fn binary_op(t: &Tok) -> Option<(u8, &'static str)> {
+    Some(match t {
+        Tok::OrOr => (PREC_OROR, "||"),
+        Tok::AndAnd => (2, "&&"),
+        Tok::EqEq => (PREC_EQ, "=="),
+        Tok::NotEq => (PREC_EQ, "!="),
+        Tok::Eqq => (PREC_EQ, "==="),
+        Tok::Cmp => (PREC_EQ, "<=>"),
+        Tok::Match => (PREC_EQ, "=~"),
+        Tok::NotMatch => (PREC_EQ, "!~"),
+        Tok::Lt => (4, "<"),
+        Tok::Le => (4, "<="),
+        Tok::Gt => (4, ">"),
+        Tok::Ge => (4, ">="),
+        Tok::Pipe => (5, "|"),
+        Tok::Caret => (5, "^"),
+        Tok::Amp => (6, "&"),
+        Tok::Shl => (7, "<<"),
+        Tok::Shr => (7, ">>"),
+        Tok::Plus => (PREC_ADD, "+"),
+        Tok::Minus => (PREC_ADD, "-"),
+        Tok::Star => (9, "*"),
+        Tok::Slash => (9, "/"),
+        Tok::Percent => (9, "%"),
+        _ => return None,
+    })
+}
+
 fn op_method_name(t: &Tok) -> Option<&'static str> {
     Some(match t {
         Tok::Plus => "+",

@@ -253,3 +253,17 @@ fn interpolation_is_lexed_as_code() {
     let err = run_capture("p \"#{<<A}\"\nx\nA\n").unwrap_err().to_string();
     assert!(err.contains("heredoc can't start inside string interpolation"), "{err}");
 }
+
+#[test]
+fn operator_precedence() {
+    let src = r##"
+        p 1 + 2 * 3 - 4 / 2, 5 - 2 - 1, 2 * 3 % 4, 1 << 2 + 1
+        p 1 < 2 == true, 1 | 2 & 3, 6 ^ 3 | 8, 2 ** 3 ** 2, -2 ** 2
+        p !true && false, 1 == 1 && 2 != 3 || nil, nil || false && 1
+        p "ab" != "x" ? 1 : 2, (a = 1 || 2), a
+    "##;
+    assert_eq!(
+        run(src),
+        "5\n2\n2\n8\ntrue\n3\n13\n512\n-4\nfalse\ntrue\nfalse\n1\n1\n1\n"
+    );
+}

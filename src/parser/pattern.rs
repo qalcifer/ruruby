@@ -4,7 +4,7 @@
 //! `deconstruct` / `deconstruct_keys` calls, local assignments and a loop for
 //! find patterns. The code generator and VM need nothing special.
 
-use super::{PResult, Parser, b};
+use super::{PREC_ADD, PResult, Parser, b};
 use crate::ast::{self, Node};
 use crate::lexer::{Kw, Tok};
 
@@ -261,7 +261,7 @@ impl Parser {
                 let v = if matches!(self.peek(), Tok::Dot2 | Tok::Dot3) {
                     Node::Nil
                 } else {
-                    self.parse_add()?
+                    self.parse_binary(PREC_ADD)?
                 };
                 self.range_pattern(v)
             }
@@ -283,7 +283,7 @@ impl Parser {
             ) {
             Node::Nil
         } else {
-            self.parse_add()?
+            self.parse_binary(PREC_ADD)?
         };
         Ok(Pat::Value(Node::Range(b(lo), b(hi), excl)))
     }
