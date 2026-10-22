@@ -1973,7 +1973,7 @@ impl Parser {
         Ok(Node::Def {
             recv,
             name,
-            params,
+            params: Box::new(params),
             body: b(body),
             locals,
         })

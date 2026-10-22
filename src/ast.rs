@@ -79,7 +79,8 @@ pub enum Node {
         /// `def recv.name` (singleton method)
         recv: Option<Box<Node>>,
         name: String,
-        params: Params,
+        /// boxed: `Params` is large and would make every `Node` large
+        params: Box<Params>,
         body: Box<Node>,
         locals: Vec<String>,
     },
