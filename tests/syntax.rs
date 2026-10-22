@@ -246,8 +246,10 @@ fn interpolation_is_lexed_as_code() {
         s = "#{ x + # a } in a comment
           1 }"
         p s
+        $10 = :ten
+        p $10, $1
     "##;
-    assert_eq!(run(src), "\"a}b\"\n\"}\"\n\"3\"\n\"oi3io\"\n\"4\"\n");
+    assert_eq!(run(src), "\"a}b\"\n\"}\"\n\"3\"\n\"oi3io\"\n\"4\"\n:ten\nnil\n");
     let err = run_capture("p \"#{<<A}\"\nx\nA\n").unwrap_err().to_string();
     assert!(err.contains("heredoc can't start inside string interpolation"), "{err}");
 }

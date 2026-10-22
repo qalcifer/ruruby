@@ -373,6 +373,13 @@ impl Lexer {
                 self.bump();
                 let name = if is_ident_start(self.peek()) {
                     self.read_ident()
+                } else if self.peek().is_ascii_digit() {
+                    // `$1`, `$10`: regexp groups
+                    let mut n = String::new();
+                    while self.peek().is_ascii_digit() {
+                        n.push(self.bump());
+                    }
+                    n
                 } else {
                     self.bump().to_string()
                 };
