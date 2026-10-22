@@ -80,6 +80,39 @@ fn binop(name: &str) -> Option<fn(Reg) -> Op> {
     })
 }
 
+/// Whether compiling `node` into a register writes that register only at
+/// the end, after every variable it reads. Then a local can be its own
+/// destination (`x = x + 1`). Conditionals and sequences write their
+/// destination early (the condition, the first statement), so they can't.
+fn fills_dst_last(node: &Node) -> bool {
+    matches!(
+        node,
+        Node::Nil
+            | Node::True
+            | Node::False
+            | Node::SelfRef
+            | Node::Int(_)
+            | Node::Float(_)
+            | Node::Str(_)
+            | Node::DStr(_)
+            | Node::Sym(_)
+            | Node::DSym(_)
+            | Node::Array(_)
+            | Node::Hash(..)
+            | Node::Range(..)
+            | Node::LVar(_)
+            | Node::IVar(_)
+            | Node::GVar(_)
+            | Node::CVar(_)
+            | Node::Const(_)
+            | Node::Colon3(_)
+            | Node::Call { .. }
+            | Node::Super { .. }
+            | Node::Yield(_)
+            | Node::Lambda(_)
+    )
+}
+
 fn has_splat(args: &[Node]) -> bool {
     args.iter().any(|a| matches!(a, Node::Splat(_)))
 }
@@ -282,7 +315,16 @@ impl Codegen<'_> {
             },
             Node::LAsgn(name, val) => match self.lookup(name) {
                 Some((0, reg)) => {
-                    self.expr(val, reg)?;
+                    if fills_dst_last(val) {
+                        self.expr(val, reg)?;
+                    } else {
+                        // `x = (c ? x * 2 : x)` writes its destination before it
+                        // reads `x`: compute it elsewhere first
+                        let t = self.alloc();
+                        self.expr(val, t)?;
+                        self.emit(Op::Move(reg, t));
+                        self.free_to(t);
+                    }
                     if reg != dst {
                         self.emit(Op::Move(dst, reg));
                     }

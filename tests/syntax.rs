@@ -315,8 +315,21 @@ fn operations_never_clobber_locals() {
         z = 3
         z = z.times.map { |i| i + z } rescue z = [z, z]
         p x, y, f(3), s, z
+        # right-hand sides that write their destination early (a condition,
+        # a first statement) must not be computed in the local itself
+        a = 5; a = (a > 0 ? a * 2 : a)
+        b = 3; b = (b if b > 1)
+        c = 2; c = (c == 2 && c + 1)
+        d = 1; d = (d.nil? || d + 1)
+        e = 2; e = (case e when 2 then e * 5 end)
+        g = 2; g = (1; g)
+        h = 6; h = (h > 0 and h)
+        p [a, b, c, d, e, g, h]
     "##;
-    assert_eq!(run(src), "3\n[5, 10, -2]\n49\n\"abAB\"\n[3, 3]\n");
+    assert_eq!(
+        run(src),
+        "3\n[5, 10, -2]\n49\n\"abAB\"\n[3, 3]\n[10, 3, 3, 2, 10, 2, 6]\n"
+    );
 }
 
 #[test]
