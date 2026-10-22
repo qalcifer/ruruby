@@ -299,3 +299,22 @@ fn deep_nesting_is_a_syntax_error_not_a_crash() {
         .join()
         .unwrap();
 }
+
+#[test]
+fn operations_never_clobber_locals() {
+    // codegen computes an operation directly in its destination register
+    // only when that is a temporary; a local must be read before it's written
+    let src = r##"
+        x = 2
+        x = 1 + x
+        y = 5
+        y = [y, y * 2, x - y]
+        def f(a) = (a = 10 - a; a * a)
+        s = "ab"
+        s = s + s.upcase
+        z = 3
+        z = z.times.map { |i| i + z } rescue z = [z, z]
+        p x, y, f(3), s, z
+    "##;
+    assert_eq!(run(src), "3\n[5, 10, -2]\n49\n\"abAB\"\n[3, 3]\n");
+}

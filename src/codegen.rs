@@ -35,6 +35,8 @@ struct Scope {
     locals: Vec<String>,
     kind: Kind,
     sp: Reg,
+    /// The first temporary (registers below it are self and locals).
+    first_temp: Reg,
     loops: Vec<LoopCtx>,
     /// method parameters, for `super` without arguments
     params: Option<Params>,
@@ -98,6 +100,7 @@ impl Codegen<'_> {
             locals: locals.to_vec(),
             kind,
             sp: nlocals,
+            first_temp: nlocals,
             loops: vec![],
             params,
             ensures: vec![],
@@ -138,6 +141,30 @@ impl Codegen<'_> {
 
     fn free_to(&mut self, r: Reg) {
         self.cur().sp = r;
+    }
+
+    /// The register to compute an operation in: `dst` itself when it is the
+    /// topmost temporary (so no `Move` is needed afterwards), else a new
+    /// temporary. A local's register is never used: in `x = 1 + x` the `1`
+    /// would overwrite `x` before it is read.
+    fn op_reg(&mut self, dst: Reg) -> Reg {
+        let s = self.scopes.last().unwrap();
+        if dst + 1 == s.sp && dst >= s.first_temp {
+            dst
+        } else {
+            self.alloc()
+        }
+    }
+
+    /// Ends an operation computed in `a` (from [`Self::op_reg`]): its value
+    /// goes to `dst` and the temporaries above are freed.
+    fn op_done(&mut self, a: Reg, dst: Reg) {
+        if a == dst {
+            self.free_to(dst + 1);
+        } else {
+            self.emit(Op::Move(dst, a));
+            self.free_to(a);
+        }
     }
 
     fn emit(&mut self, op: Op) -> usize {
@@ -331,15 +358,14 @@ impl Codegen<'_> {
                 block_arg,
             } => self.super_call(args.as_deref(), block.as_deref(), block_arg.as_deref(), dst)?,
             Node::Yield(args) => {
-                let a = self.alloc();
+                let a = self.op_reg(dst);
                 self.emit(Op::BlkPush(a, true));
                 let call = self.sym("call");
                 match self.args(args)? {
                     None => _ = self.emit(Op::SendV(a, call, false)),
                     Some(n) => _ = self.emit(Op::Send(a, call, n, false)),
                 }
-                self.emit(Op::Move(dst, a));
-                self.free_to(a);
+                self.op_done(a, dst);
             }
             Node::BlockGiven => _ = self.emit(Op::BlockGiven(dst)),
             Node::CurrentMethod => _ = self.emit(Op::CurMethod(dst)),
@@ -680,16 +706,15 @@ impl Codegen<'_> {
             (recv, args, block, block_arg, safe, binop(name))
             && !matches!(arg, Node::Splat(_))
         {
-            let a = self.alloc();
+            let a = self.op_reg(dst);
             self.expr(recv, a)?;
             let r = self.alloc();
             self.expr(arg, r)?;
             self.emit(op(a));
-            self.emit(Op::Move(dst, a));
-            self.free_to(a);
+            self.op_done(a, dst);
             return Ok(());
         }
-        let a = self.alloc();
+        let a = self.op_reg(dst);
         match recv {
             Some(r) => self.expr(r, a)?,
             None => _ = self.emit(Op::LoadSelf(a)),
@@ -709,8 +734,7 @@ impl Codegen<'_> {
         if let Some(j) = skip {
             self.patch(j);
         }
-        self.emit(Op::Move(dst, a));
-        self.free_to(a);
+        self.op_done(a, dst);
         Ok(())
     }
 
@@ -726,7 +750,7 @@ impl Codegen<'_> {
             // outside a method this fails at run time, as in Ruby
             None => self.zsuper_args().unwrap_or_default(),
         };
-        let a = self.alloc();
+        let a = self.op_reg(dst);
         self.emit(Op::LoadSelf(a));
         let argc = self.args(&args)?;
         if !self.block_arg(block, block_arg)? {
@@ -737,8 +761,7 @@ impl Codegen<'_> {
             Some(n) => self.emit(Op::Super(a, n)),
             None => self.emit(Op::SuperV(a)),
         };
-        self.emit(Op::Move(dst, a));
-        self.free_to(a);
+        self.op_done(a, dst);
         Ok(())
     }
 
