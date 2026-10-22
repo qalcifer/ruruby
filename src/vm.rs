@@ -7,8 +7,9 @@
 //!   callinfo stack) without native recursion. A native method calling back
 //!   into Ruby (`Array#each` yielding) starts a nested loop, as mruby's C
 //!   functions do; that native recursion is bounded by `Vm::stack_budget`.
-//! * Registers live in a heap `Env` per frame (blocks capture it), not in
-//!   one contiguous value stack.
+//! * As in mruby, the registers of all live frames are windows of one value
+//!   stack (`Vm::stack`). A frame whose locals a block captures gets an
+//!   `Env` that points into its window and copies it when the frame returns.
 //! * mruby unwinds with `setjmp/longjmp`; here unwinding is `Result<_, Unwind>`
 //!   propagated with `?`, and each frame consults its irep's catch table.
 
@@ -120,6 +121,9 @@ pub struct CommonSyms {
 
 pub struct Vm {
     pub heap: Heap,
+    /// Registers of all live frames, each frame a window at its `base`
+    /// (mruby: the VM stack).
+    stack: Vec<Value>,
     pub syms: SymbolTable,
     pub c: Classes,
     pub s: CommonSyms,
@@ -153,7 +157,12 @@ pub struct Vm {
 
 struct Frame {
     irep: Rc<Irep>,
-    env: EnvRef,
+    /// Stack index of the frame's register 0 (`self`).
+    base: usize,
+    /// The env of this frame's own locals, made when a block captures them.
+    env: Option<EnvRef>,
+    /// For a block: the env of the scope it was created in (upvars).
+    upper: Option<EnvRef>,
     self_: Value,
     block: Option<Value>,
     /// Where `def` puts methods and where constants are looked up first.
@@ -183,10 +192,12 @@ struct Frame {
 }
 
 impl Frame {
-    fn new(irep: Rc<Irep>, env: EnvRef, self_: Value, target: Rc<RClass>) -> Frame {
+    fn new(irep: Rc<Irep>, base: usize, self_: Value, target: Rc<RClass>) -> Frame {
         Frame {
             irep,
-            env,
+            base,
+            env: None,
+            upper: None,
             self_,
             block: None,
             target,
@@ -225,7 +236,7 @@ enum Flow {
 
 /// Bound arguments: the frame's registers plus what the prologue needs.
 struct Bound {
-    env: EnvRef,
+    base: usize,
     opt_filled: usize,
     kw_mask: u64,
 }
@@ -414,6 +425,7 @@ impl Vm {
         let main_obj = Value::Object(heap.alloc(RObject::new(c.object.clone())));
         let mut vm = Vm {
             heap,
+            stack: Vec::new(),
             syms,
             c,
             s,
@@ -486,23 +498,71 @@ impl Vm {
         }
     }
 
-    /// The env `depth + 1` levels out from the frame's (a block's outer scopes).
+    /// The env `depth` levels out from a block's own (its outer scopes).
     fn upvar_env(&self, f: &Frame, depth: usize) -> EnvRef {
-        let mut env = self.heap[f.env].upper.expect("upvar outside of block");
+        let mut env = f.upper.expect("upvar outside of block");
         for _ in 0..depth {
             env = self.heap[env].upper.expect("upvar depth");
         }
         env
     }
 
-    #[inline]
-    fn reg(&self, f: &Frame, i: Reg) -> Value {
-        self.heap[f.env].regs.borrow()[i].clone()
+    fn env_get(&self, e: EnvRef, i: usize) -> Value {
+        match &*self.heap[e].regs.borrow() {
+            EnvRegs::Stack { base, .. } => self.stack[base + i].clone(),
+            EnvRegs::Heap(vals) => vals[i].clone(),
+        }
+    }
+
+    fn env_set(&mut self, e: EnvRef, i: usize, v: Value) {
+        let on_stack = match &*self.heap[e].regs.borrow() {
+            EnvRegs::Stack { base, .. } => Some(base + i),
+            EnvRegs::Heap(_) => None,
+        };
+        match on_stack {
+            Some(at) => self.stack[at] = v,
+            None => {
+                if let EnvRegs::Heap(vals) = &mut *self.heap[e].regs.borrow_mut() {
+                    vals[i] = v;
+                }
+            }
+        }
+    }
+
+    /// The env of `f`'s locals, made on first use (a block captures them).
+    fn frame_env(&mut self, f: &mut Frame) -> EnvRef {
+        if let Some(e) = f.env {
+            return e;
+        }
+        let len = f.irep.nregs.max(1 + f.irep.spec.nparams());
+        let e = self.heap.alloc(Env {
+            regs: RefCell::new(EnvRegs::Stack { base: f.base, len }),
+            upper: f.upper,
+        });
+        f.env = Some(e);
+        e
+    }
+
+    /// A finished frame gives back its stack window; an env its blocks
+    /// captured keeps a copy of the registers.
+    fn release_frame(&mut self, f: &Frame) {
+        if let Some(e) = f.env {
+            let mut regs = self.heap[e].regs.borrow_mut();
+            if let EnvRegs::Stack { base, len } = *regs {
+                *regs = EnvRegs::Heap(self.stack[base..base + len].to_vec());
+            }
+        }
+        self.stack.truncate(f.base);
     }
 
     #[inline]
-    fn set_reg(&self, f: &Frame, i: Reg, v: Value) {
-        self.heap[f.env].regs.borrow_mut()[i] = v;
+    fn reg(&self, f: &Frame, i: Reg) -> Value {
+        self.stack[f.base + i].clone()
+    }
+
+    #[inline]
+    fn set_reg(&mut self, f: &Frame, i: Reg, v: Value) {
+        self.stack[f.base + i] = v;
     }
 
     // ---- small helpers -------------------------------------------------
@@ -518,6 +578,7 @@ impl Vm {
     /// Resets per-run state after a Rust panic unwound through the VM.
     pub fn recover(&mut self) {
         self.frames.clear();
+        self.stack.clear();
         self.reentry = 0;
         self.gc_level = 0;
         self.inspecting.clear();
@@ -1002,8 +1063,8 @@ impl Vm {
             Method::ProcCall => return self.start_proc(&recv, args, block, ProcCall::default()),
             Method::Undefined => return Err(self.no_method(&recv, mid)),
             Method::Ruby(irep) => {
-                let bound = self.bind_args(&irep, &recv, args, &block, true, None)?;
-                let mut f = Frame::new(irep, bound.env, recv, owner.clone());
+                let bound = self.bind_args(&irep, &recv, args, &block, true)?;
+                let mut f = Frame::new(irep, bound.base, recv, owner.clone());
                 f.block = block;
                 f.method = Some((owner, mid));
                 f.opt_filled = bound.opt_filled;
@@ -1045,7 +1106,6 @@ impl Vm {
         mut args: Vec<Value>,
         block: &Option<Value>,
         strict: bool,
-        upper: Option<EnvRef>,
     ) -> Result<Bound, Unwind> {
         let spec = &irep.spec;
         // keyword arguments arrive as a trailing Hash marked `kw`
@@ -1090,30 +1150,34 @@ impl Vm {
         let n = args.len();
         let opt_filled = (n - mand).min(spec.opt);
         let rest_len = n - mand - opt_filled;
-        let mut regs = vec![Value::Nil; irep.nregs.max(1 + spec.nparams())];
-        regs[0] = self_.clone();
+        // the frame's registers: a new window on top of the stack
+        let base = self.stack.len();
+        self.stack.resize(base + irep.nregs.max(1 + spec.nparams()), Value::Nil);
+        self.stack[base] = self_.clone();
         let mut r = 1;
         let mut it = args.into_iter();
         for _ in 0..spec.req {
-            regs[r] = it.next().unwrap();
+            self.stack[base + r] = it.next().unwrap();
             r += 1;
         }
         for i in 0..spec.opt {
             if i < opt_filled {
-                regs[r] = it.next().unwrap();
+                self.stack[base + r] = it.next().unwrap();
             }
             r += 1;
         }
         if spec.rest {
-            regs[r] = self.array(it.by_ref().take(rest_len).collect());
+            let rest = self.array(it.by_ref().take(rest_len).collect());
+            self.stack[base + r] = rest;
             r += 1;
         }
         for _ in 0..spec.post {
-            regs[r] = it.next().unwrap();
+            self.stack[base + r] = it.next().unwrap();
             r += 1;
         }
         let mut kw_mask = 0u64;
         if spec.nokw && kwargs.as_ref().is_some_and(|h| !h.pairs.is_empty()) {
+            self.stack.truncate(base);
             return Err(self.arg_err("no keywords accepted"));
         }
         let mut kwh = kwargs.unwrap_or_default();
@@ -1121,7 +1185,7 @@ impl Vm {
         for (i, (sym, required)) in spec.kw.iter().enumerate() {
             match kwh.remove(&self.heap, &Value::Sym(*sym)) {
                 Some(v) => {
-                    regs[r] = v;
+                    self.stack[base + r] = v;
                     kw_mask |= 1 << i.min(63);
                 }
                 None if *required => missing.push(*sym),
@@ -1130,15 +1194,17 @@ impl Vm {
             r += 1;
         }
         if !missing.is_empty() {
+            self.stack.truncate(base);
             let s = if missing.len() > 1 { "s" } else { "" };
             return Err(self.arg_err(format!("missing keyword{s}: {}", self.sym_list(&missing))));
         }
         if spec.kwrest {
-            regs[r] = if spec.nokw {
+            let kwrest = if spec.nokw {
                 Value::Nil
             } else {
                 self.hash(kwh)
             };
+            self.stack[base + r] = kwrest;
             r += 1;
         } else if !kwh.pairs.is_empty() {
             let unknown: Vec<Sym> = kwh
@@ -1153,16 +1219,14 @@ impl Vm {
                 })
                 .collect();
             let s = if unknown.len() > 1 { "s" } else { "" };
+            self.stack.truncate(base);
             return Err(self.arg_err(format!("unknown keyword{s}: {}", self.sym_list(&unknown))));
         }
         if spec.block {
-            regs[r] = block.clone().unwrap_or(Value::Nil);
+            self.stack[base + r] = block.clone().unwrap_or(Value::Nil);
         }
         Ok(Bound {
-            env: self.heap.alloc(Env {
-                regs: RefCell::new(regs),
-                upper,
-            }),
+            base,
             opt_filled,
             kw_mask,
         })
@@ -1219,8 +1283,9 @@ impl Vm {
                 let target = call.target.unwrap_or_else(|| rp.target.clone());
                 let method = call.method.or_else(|| rp.method.clone());
                 let (outer_block, home) = (rp.block.clone(), rp.home);
-                let bound = self.bind_args(&irep, &self_, args, &block, lambda, Some(env))?;
-                let mut f = Frame::new(irep, bound.env, self_, target);
+                let bound = self.bind_args(&irep, &self_, args, &block, lambda)?;
+                let mut f = Frame::new(irep, bound.base, self_, target);
+                f.upper = Some(env);
                 f.block = outer_block;
                 f.method = method;
                 f.opt_filled = bound.opt_filled;
@@ -1383,13 +1448,10 @@ impl Vm {
 
     /// A frame for the script or a class body (`class X`, `class << obj`).
     fn body_frame(&mut self, irep: Rc<Irep>, self_: Value, target: Rc<RClass>) -> Frame {
-        let mut regs = vec![Value::Nil; irep.nregs.max(1)];
-        regs[0] = self_.clone();
-        let env = self.heap.alloc(Env {
-            regs: RefCell::new(regs),
-            upper: None,
-        });
-        let mut f = Frame::new(irep, env, self_, target);
+        let base = self.stack.len();
+        self.stack.resize(base + irep.nregs.max(1), Value::Nil);
+        self.stack[base] = self_.clone();
+        let mut f = Frame::new(irep, base, self_, target);
         f.home = self.new_id();
         f
     }
@@ -1406,6 +1468,7 @@ impl Vm {
         } else if self.stack_base.saturating_sub(sp) > self.stack_budget
             || self.frames.len() >= MAX_FRAMES
         {
+            self.release_frame(&frame); // never entered
             return Err(self.err(&self.c.stack_error, "stack level too deep"));
         }
         self.reentry += 1;
@@ -1432,7 +1495,10 @@ impl Vm {
                     self.frames.push(caller);
                     continue;
                 }
-                Ok(Flow::Call(_)) => Err(self.err(&self.c.stack_error, "stack level too deep")),
+                Ok(Flow::Call(callee)) => {
+                    self.release_frame(&callee); // never entered
+                    Err(self.err(&self.c.stack_error, "stack level too deep"))
+                }
                 Ok(Flow::Return(v)) => Ok(v),
                 Err(e) => Err(e),
             };
@@ -1476,6 +1542,9 @@ impl Vm {
         let mut m = Marker::new(&self.heap);
         for f in self.frames.iter().chain(std::iter::once(current)) {
             mark_frame(&mut m, f);
+        }
+        for v in &self.stack {
+            m.value(v);
         }
         m.value(&self.main_obj);
         for v in self.globals.values().chain(&self.at_exit) {
@@ -1534,6 +1603,7 @@ impl Vm {
 
     /// Unregisters a finished frame and catches the `break`/`return` aimed at it.
     fn leave_frame(&mut self, f: &Frame, r: VmResult) -> VmResult {
+        self.release_frame(f);
         if f.is_home {
             self.live_homes.pop();
         }
@@ -1664,11 +1734,13 @@ impl Vm {
             Op::OClass(a) => self.set_reg(f, a, Value::Class(self.c.object.clone())),
             Op::GetUpVar(a, idx, depth) => {
                 let env = self.upvar_env(f, depth);
-                self.set_reg(f, a, self.heap[env].regs.borrow()[idx].clone());
+                let v = self.env_get(env, idx);
+                self.set_reg(f, a, v);
             }
             Op::SetUpVar(a, idx, depth) => {
                 let env = self.upvar_env(f, depth);
-                self.heap[env].regs.borrow_mut()[idx] = self.reg(f, a);
+                let v = self.reg(f, a);
+                self.env_set(env, idx, v);
             }
             Op::Jmp(t) => f.pc = t,
             Op::JmpIf(a, t) => {
@@ -1744,9 +1816,8 @@ impl Vm {
                     && argc <= MAX_INLINE_ARGS
                 {
                     let mut buf: [Value; MAX_INLINE_ARGS] = Default::default();
-                    let regs = self.heap[f.env].regs.borrow();
-                    buf[..argc].clone_from_slice(&regs[a + 1..a + 1 + argc]);
-                    drop(regs);
+                    let at = f.base + a + 1;
+                    buf[..argc].clone_from_slice(&self.stack[at..at + argc]);
                     let args = &buf[..argc];
                     return self.call_flow(f, a, tag, |vm| {
                         Ok(Call::Done(native(vm, &recv, args, blk.as_ref())?))
@@ -1929,10 +2000,11 @@ impl Vm {
                 self.set_reg(f, a, v);
             }
             Op::Block(a, idx) | Op::Lambda(a, idx) => {
+                let env = self.frame_env(f);
                 let p = RProc {
                     body: ProcBody::Ruby {
                         irep: f.irep.reps[idx].clone(),
-                        env: f.env,
+                        env,
                     },
                     self_: f.self_.clone(),
                     block: f.block.clone(),
@@ -2326,7 +2398,9 @@ impl Vm {
 }
 
 fn mark_frame(m: &mut Marker, f: &Frame) {
-    m.env(f.env);
+    for e in f.env.iter().chain(&f.upper) {
+        m.env(*e);
+    }
     m.value(&f.self_);
     for v in f.block.iter().chain(&f.exc) {
         m.value(v);

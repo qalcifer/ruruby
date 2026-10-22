@@ -16,7 +16,7 @@
 //! the VM's own state (frames, globals, classes), and native code never
 //! needs to protect the values it holds (mruby's "GC arena").
 
-use crate::value::{Env, Method, ProcBody, RClass, RHash, RObject, RProc, Value};
+use crate::value::{Env, EnvRegs, Method, ProcBody, RClass, RHash, RObject, RProc, Value};
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::fmt;
@@ -418,8 +418,11 @@ impl<'h> Marker<'h> {
             Gray::Env(e) => {
                 if self.visit(e) {
                     let e = &heap[e];
-                    for v in e.regs.borrow().iter() {
-                        self.value(v);
+                    // while on the stack the values are marked as stack roots
+                    if let EnvRegs::Heap(vals) = &*e.regs.borrow() {
+                        for v in vals {
+                            self.value(v);
+                        }
                     }
                     if let Some(up) = e.upper {
                         self.env(up);

@@ -159,8 +159,16 @@ impl RObject {
 /// Captured registers of a frame (mruby: `struct REnv`). Blocks keep a
 /// reference to their defining frame's env so they can read/write its locals.
 pub struct Env {
-    pub regs: RefCell<Vec<Value>>,
+    pub regs: RefCell<EnvRegs>,
     pub upper: Option<EnvRef>,
+}
+
+/// Where an [`Env`]'s variables are: while the frame that owns them runs,
+/// they are its registers on the VM stack; when it returns they are copied
+/// into the env (mruby: an REnv pointing into the stack, then "unshared").
+pub enum EnvRegs {
+    Stack { base: usize, len: usize },
+    Heap(Vec<Value>),
 }
 
 #[derive(Clone)]

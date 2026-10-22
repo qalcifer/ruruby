@@ -123,3 +123,43 @@ fn control_flow_across_frames() {
          \"CBA2\"\n[:zap, [1, 2]]\n10\n42\n101\n7\n"
     );
 }
+
+#[test]
+fn closures_outlive_their_frames() {
+    // registers live on the VM stack while a frame runs; a captured env
+    // takes a copy when the frame exits, however it exits
+    let src = r#"
+        def counter
+          n = 0
+          [-> { n += 1 }, -> { n }]
+        end
+        inc, get = counter
+        inc.(); inc.()
+        p get.()
+        def nested
+          a = 1
+          proc { b = 10; proc { a + b } }
+        end
+        p nested.call.call
+        $saved = nil
+        def leaves_by_raise
+          x = 5
+          $saved = -> { x * 2 }
+          raise "boom"
+        end
+        begin; leaves_by_raise; rescue; end
+        p $saved.()
+        def leaves_by_break
+          y = 7
+          [1].each { $saved = -> { y + 1 }; break }
+          y = 8
+          :done
+        end
+        p leaves_by_break, $saved.()
+        fs = (1..3).map { |i| -> { i * 10 } }
+        p fs.map(&:call)
+        GC.stress = true
+        p inc.(), get.(), nested.call.call
+    "#;
+    assert_eq!(run(src), "2\n11\n10\n:done\n9\n[10, 20, 30]\n3\n3\n11\n");
+}
