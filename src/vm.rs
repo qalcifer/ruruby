@@ -1825,21 +1825,21 @@ impl Vm {
                 {
                     self.set_reg(f, a, Value::Int(v));
                 } else {
-                    return self.step_slow(f, op);
+                    return self.step_slow(f);
                 }
             }
             Op::Add(a) | Op::Sub(a) | Op::Lt(a) | Op::Le(a) | Op::Gt(a) | Op::Ge(a) => {
                 let (Value::Int(x), Value::Int(y)) = (self.reg(f, a), self.reg(f, a + 1)) else {
-                    return self.step_slow(f, op);
+                    return self.step_slow(f);
                 };
                 let v = match op {
                     Op::Add(_) => match x.checked_add(y) {
                         Some(v) => Value::Int(v),
-                        None => return self.step_slow(f, op),
+                        None => return self.step_slow(f),
                     },
                     Op::Sub(_) => match x.checked_sub(y) {
                         Some(v) => Value::Int(v),
-                        None => return self.step_slow(f, op),
+                        None => return self.step_slow(f),
                     },
                     Op::Lt(_) => Value::Bool(x < y),
                     Op::Le(_) => Value::Bool(x <= y),
@@ -1848,7 +1848,7 @@ impl Vm {
                 };
                 self.set_reg(f, a, v);
             }
-            _ => return self.step_slow(f, op),
+            _ => return self.step_slow(f),
         }
         Ok(Flow::Next)
     }
@@ -1890,9 +1890,12 @@ impl Vm {
         self.call_flow(f, a, tag, |vm| vm.start_invoke(m, owner, recv, mid, args, blk))
     }
 
-    /// Every instruction, out of line (see [`Vm::step`]).
+    /// Every instruction, out of line (see [`Vm::step`]). It reads its
+    /// instruction (the one at `f.pc - 1`) itself, so the dispatch loop
+    /// doesn't have to copy the 48-byte `Op` to pass it.
     #[inline(never)]
-    fn step_slow(&mut self, f: &mut Frame, op: Op) -> Result<Flow, Unwind> {
+    fn step_slow(&mut self, f: &mut Frame) -> Result<Flow, Unwind> {
+        let op = f.irep.code[f.pc - 1];
         match op {
             Op::Nop => {}
             Op::Move(a, b) => self.set_reg(f, a, self.reg(f, b)),
