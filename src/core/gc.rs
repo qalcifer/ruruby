@@ -6,7 +6,7 @@
 use super::*;
 
 pub fn init(vm: &mut Vm) {
-    let gc = RClass::new("GC", None, true);
+    let gc = vm.new_class("GC", None, true);
     vm.def_singleton(&gc, "start", |vm, _, _, _| {
         vm.heap.gc.request();
         Ok(Value::Nil)

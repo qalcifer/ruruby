@@ -13,13 +13,12 @@ pub mod range;
 pub mod reflect;
 pub mod string;
 
-pub use crate::gc::{ArrayRef, HashRef, StrRef};
+pub use crate::gc::{ArrayRef, ClassRef, HashRef, StrRef};
 use crate::symbol::Sym;
 use crate::value::*;
 use crate::vm::{Unwind, Vm};
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::rc::Rc;
 
 pub fn init(vm: &mut Vm) {
     kernel::init(vm);
@@ -159,7 +158,7 @@ pub fn compare(vm: &mut Vm, a: &Value, b: &Value) -> Result<Ordering, Unwind> {
     let r = if a.is_numeric() || matches!(a, Value::Str(_)) {
         Value::Nil
     } else {
-        vm.call_method(a, vm.s.cmp, vec![b.clone()], None)?
+        vm.call_method(a, vm.s.cmp, vec![*b], None)?
     };
     match r {
         Value::Int(i) => Ok(i.cmp(&0)),
@@ -185,10 +184,10 @@ pub fn merge_sort(vm: &mut Vm, mut v: Vec<Value>, cmp: &mut CmpFn) -> Result<Vec
     let (mut i, mut j) = (0, 0);
     while i < left.len() && j < right.len() {
         if cmp(vm, &right[j], &left[i])? == Ordering::Less {
-            out.push(right[j].clone());
+            out.push(right[j]);
             j += 1;
         } else {
-            out.push(left[i].clone());
+            out.push(left[i]);
             i += 1;
         }
     }
@@ -200,11 +199,11 @@ pub fn merge_sort(vm: &mut Vm, mut v: Vec<Value>, cmp: &mut CmpFn) -> Result<Vec
 pub fn sort_values(vm: &mut Vm, v: Vec<Value>, blk: Option<&Value>) -> Result<Vec<Value>, Unwind> {
     match blk {
         Some(b) => {
-            let b = b.clone();
+            let b = *b;
             merge_sort(
                 vm,
                 v,
-                &mut |vm, x, y| match vm.call_block(&b, vec![x.clone(), y.clone()])? {
+                &mut |vm, x, y| match vm.call_block(&b, vec![*x, *y])? {
                     Value::Int(i) => Ok(i.cmp(&0)),
                     _ => Err(vm.arg_err("comparison failed")),
                 },
@@ -224,7 +223,7 @@ pub fn to_vec(vm: &mut Vm, v: &Value) -> Result<Vec<Value>, Unwind> {
             Ok(pairs.into_iter().map(|(k, v)| vm.array(vec![k, v])).collect())
         }
         Value::Range(r) => {
-            let r = vm.heap[r].clone();
+            let r = vm.heap[r];
             range::range_vec(vm, &r)
         }
         _ => {

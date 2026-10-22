@@ -14,7 +14,7 @@ pub fn init(vm: &mut Vm) {
 }
 
 fn init_object(vm: &mut Vm) {
-    let o = vm.c.kernel.clone();
+    let o = vm.c.kernel;
     vm.def(&o, "puts", puts);
     vm.def(&o, "print", |vm, _, a, _| {
         for v in a {
@@ -31,7 +31,7 @@ fn init_object(vm: &mut Vm) {
         }
         Ok(match a.len() {
             0 => Value::Nil,
-            1 => a[0].clone(),
+            1 => a[0],
             _ => vm.array(a.to_vec()),
         })
     });
@@ -111,7 +111,7 @@ fn init_object(vm: &mut Vm) {
     vm.def(&o, "is_a?", is_a);
     vm.def(&o, "kind_of?", is_a);
     vm.def(&o, "instance_of?", |vm, s, a, _| match arg(a, 0) {
-        Value::Class(c) => Ok(Value::Bool(Rc::ptr_eq(&vm.class_of(s), &c))),
+        Value::Class(c) => Ok(Value::Bool(vm.class_of(s) == c)),
         _ => Err(vm.type_err("class or module required")),
     });
     vm.def(&o, "respond_to?", |vm, s, a, _| {
@@ -132,7 +132,7 @@ fn init_object(vm: &mut Vm) {
             v => v.heap_id() as i64 * 8,
         }))
     });
-    vm.def(&o, "freeze", |_, s, _, _| Ok(s.clone()));
+    vm.def(&o, "freeze", |_, s, _, _| Ok(*s));
     vm.def(&o, "frozen?", |_, s, _, _| {
         Ok(Value::Bool(!matches!(
             s,
@@ -141,15 +141,15 @@ fn init_object(vm: &mut Vm) {
     });
     vm.def(&o, "dup", dup);
     vm.def(&o, "clone", dup);
-    vm.def(&o, "itself", |_, s, _, _| Ok(s.clone()));
+    vm.def(&o, "itself", |_, s, _, _| Ok(*s));
     vm.def(&o, "tap", |vm, s, _, b| {
         let b = need_block(vm, b)?;
-        vm.call_block(&b, vec![s.clone()])?;
-        Ok(s.clone())
+        vm.call_block(&b, vec![*s])?;
+        Ok(*s)
     });
     vm.def(&o, "then", |vm, s, _, b| {
         let b = need_block(vm, b)?;
-        vm.call_block(&b, vec![s.clone()])
+        vm.call_block(&b, vec![*s])
     });
     vm.def(&o, "instance_variable_get", |vm, s, a, _| {
         let iv = sym_of(vm, &arg(a, 0))?;
@@ -216,7 +216,7 @@ fn obj_inspect(vm: &mut Vm, s: &Value, _: &[Value], _: Option<&Value>) -> VmResu
         let name = vm.sym_name(*k).to_string();
         parts.push(format!("{name}={}", vm.inspect(v)?));
     }
-    let name = vm.heap[o].class.name();
+    let name = vm.heap[vm.heap[o].class].name();
     Ok(vm.str(if parts.is_empty() {
         format!("#<{name}>")
     } else {
@@ -246,27 +246,27 @@ fn dup(vm: &mut Vm, s: &Value, _: &[Value], _: Option<&Value>) -> VmResult {
         Value::Hash(x) => { let v = vm.heap[x].borrow().clone(); vm.hash(v) },
         Value::Object(o) => {
             let ivars = vm.heap[o].ivars.borrow().items.clone();
-            let copy = RObject::new(vm.heap[o].class.clone());
+            let copy = RObject::new(vm.heap[o].class);
             *copy.ivars.borrow_mut() = IvTable { items: ivars };
             vm.object(copy)
         }
-        other => other.clone(),
+        other => *other,
     })
 }
 
 fn raise(vm: &mut Vm, _: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
     let exc = match a {
         [] => {
-            let c = vm.c.runtime_error.clone();
+            let c = vm.c.runtime_error;
             vm.make_exception(&c, "unhandled exception")
         }
         [Value::Str(m)] => {
-            let (c, m) = (vm.c.runtime_error.clone(), vm.heap[m].borrow().clone());
+            let (c, m) = (vm.c.runtime_error, vm.heap[m].borrow().clone());
             vm.make_exception(&c, m)
         }
         [cls @ Value::Class(_)] => vm.send(cls, "new", vec![])?,
-        [cls @ Value::Class(_), msg] => vm.send(cls, "new", vec![msg.clone()])?,
-        [e @ Value::Object(_)] => e.clone(),
+        [cls @ Value::Class(_), msg] => vm.send(cls, "new", vec![*msg])?,
+        [e @ Value::Object(_)] => *e,
         _ => return Err(vm.type_err("exception class/object expected")),
     };
     if !vm.is_a(&exc, &vm.c.exception.clone()) {
@@ -276,8 +276,8 @@ fn raise(vm: &mut Vm, _: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
 }
 
 fn class_new(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>) -> VmResult {
-    let Value::Class(cls) = s else { unreachable!() };
-    if Rc::ptr_eq(cls, &vm.c.array) {
+    let &Value::Class(cls) = s else { unreachable!() };
+    if cls == vm.c.array {
         let n = if a.is_empty() {
             0
         } else {
@@ -292,18 +292,18 @@ fn class_new(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>) -> VmResult
         }
         return Ok(vm.array(v));
     }
-    if Rc::ptr_eq(cls, &vm.c.class) || Rc::ptr_eq(cls, &vm.c.module) {
+    if (cls == vm.c.class) || (cls == vm.c.module) {
         return super::reflect::new_class_or_module(vm, cls, a, b);
     }
     let c = &vm.c;
-    if Rc::ptr_eq(cls, &c.hash) {
+    if cls == c.hash {
         return Ok(vm.hash(RHash {
             default: arg(a, 0),
             default_proc: b.cloned(),
             ..RHash::new()
         }));
     }
-    if Rc::ptr_eq(cls, &c.string) {
+    if cls == c.string {
         return Ok(vm.str(if a.is_empty() {
             String::new()
         } else {
@@ -311,47 +311,46 @@ fn class_new(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>) -> VmResult
         }));
     }
     let builtin = [
-        &c.integer, &c.float, &c.symbol, &c.nil, &c.true_, &c.false_, &c.proc_, &c.range, &c.class,
-        &c.module,
+        c.integer, c.float, c.symbol, c.nil, c.true_, c.false_, c.proc_, c.range, c.class, c.module,
     ];
-    if cls.is_module || builtin.iter().any(|k| Rc::ptr_eq(k, cls)) {
+    if vm.heap[cls].is_module || builtin.contains(&cls) {
         let msg = format!(
             "undefined method 'new' for {} {}",
-            if cls.is_module { "module" } else { "class" },
-            cls.name()
+            if vm.heap[cls].is_module { "module" } else { "class" },
+            vm.heap[cls].name()
         );
         return Err(vm.err(&vm.c.no_method_error, msg));
     }
-    if cls.is_singleton {
+    if vm.heap[cls].is_singleton {
         return Err(vm.type_err("can't create instance of singleton class"));
     }
-    let obj = vm.object(RObject::new(cls.clone()));
+    let obj = vm.object(RObject::new(cls));
     vm.call_with_block(&obj, vm.s.initialize, a.to_vec(), b.cloned())?;
     Ok(obj)
 }
 
 fn attr(vm: &mut Vm, s: &Value, a: &[Value], reader: bool, writer: bool) -> VmResult {
-    let Value::Class(cls) = s else { unreachable!() };
+    let &Value::Class(cls) = s else { unreachable!() };
     for name in a {
         let n = sym_of(vm, name)?;
         let n = vm.sym_name(n).to_string();
         let iv = vm.intern(&format!("@{n}"));
         if reader {
             let m = vm.intern(&n);
-            cls.methods.insert(m, Method::AttrReader(iv));
+            vm.heap[cls].methods.insert(m, Method::AttrReader(iv));
         }
         if writer {
             let m = vm.intern(&format!("{n}="));
-            cls.methods.insert(m, Method::AttrWriter(iv));
+            vm.heap[cls].methods.insert(m, Method::AttrWriter(iv));
         }
     }
     Ok(Value::Nil)
 }
 
 fn init_module(vm: &mut Vm) {
-    let m = vm.c.module.clone();
+    let m = vm.c.module;
     let name: NativeFn = |vm, s, _, _| match s {
-        Value::Class(c) => Ok(vm.str(c.name())),
+        Value::Class(c) => Ok(vm.str(vm.heap[c].name())),
         _ => Ok(Value::Nil),
     };
     vm.def(&m, "name", name);
@@ -363,26 +362,26 @@ fn init_module(vm: &mut Vm) {
     vm.def(&m, "attr_reader", |vm, s, a, _| attr(vm, s, a, true, false));
     vm.def(&m, "attr_writer", |vm, s, a, _| attr(vm, s, a, false, true));
     vm.def(&m, "include", |vm, s, a, _| {
-        let Value::Class(cls) = s else { unreachable!() };
+        let &Value::Class(cls) = s else { unreachable!() };
         for m in a {
             match m {
-                Value::Class(module) if module.is_module => {
-                    cls.includes.push(module.clone())
+                Value::Class(module) if vm.heap[module].is_module => {
+                    vm.heap[cls].includes.push(*module)
                 }
                 _ => return Err(vm.type_err("wrong argument type (expected Module)")),
             }
         }
-        Ok(s.clone())
+        Ok(*s)
     });
     vm.def(&m, "ancestors", |vm, s, _, _| {
-        let Value::Class(cls) = s else { unreachable!() };
+        let &Value::Class(cls) = s else { unreachable!() };
         Ok(vm.array(
-            Vm::ancestors(cls).into_iter().map(Value::Class).collect(),
+            vm.ancestors(&cls).into_iter().map(Value::Class).collect(),
         ))
     });
     vm.def(&m, "instance_methods", |vm, s, _, _| {
-        let Value::Class(cls) = s else { unreachable!() };
-        let mut names: Vec<String> = cls
+        let &Value::Class(cls) = s else { unreachable!() };
+        let mut names: Vec<String> = vm.heap[cls]
             .methods
             .borrow()
             .keys()
@@ -393,18 +392,18 @@ fn init_module(vm: &mut Vm) {
         Ok(vm.array(syms))
     });
     vm.def(&m, "method_defined?", |vm, s, a, _| {
-        let Value::Class(cls) = s else { unreachable!() };
+        let &Value::Class(cls) = s else { unreachable!() };
         let mid = sym_of(vm, &arg(a, 0))?;
-        Ok(Value::Bool(Vm::find_method(cls, mid).is_some()))
+        Ok(Value::Bool(vm.find_method(&cls, mid).is_some()))
     });
     vm.def(&m, "===", |vm, s, a, _| {
-        let Value::Class(cls) = s else { unreachable!() };
-        Ok(Value::Bool(vm.is_a(&arg(a, 0), cls)))
+        let &Value::Class(cls) = s else { unreachable!() };
+        Ok(Value::Bool(vm.is_a(&arg(a, 0), &cls)))
     });
     vm.def(&m, "const_get", |vm, s, a, _| {
-        let Value::Class(cls) = s else { unreachable!() };
+        let &Value::Class(cls) = s else { unreachable!() };
         let n = sym_of(vm, &arg(a, 0))?;
-        let v = cls.consts.borrow().get(&n).cloned();
+        let v = vm.heap[cls].consts.borrow().get(&n).cloned();
         v.ok_or_else(|| {
             vm.err(
                 &vm.c.name_error,
@@ -423,16 +422,16 @@ fn init_module(vm: &mut Vm) {
         vm.def(&m, name, |_, _, _, _| Ok(Value::Nil));
     }
 
-    let c = vm.c.class.clone();
+    let c = vm.c.class;
     vm.def(&c, "new", class_new);
-    vm.def(&c, "superclass", |_, s, _, _| match s {
-        Value::Class(c) => Ok(c.superclass.clone().map(Value::Class).unwrap_or(Value::Nil)),
+    vm.def(&c, "superclass", |vm, s, _, _| match s {
+        Value::Class(c) => Ok(vm.heap[c].superclass.map(Value::Class).unwrap_or(Value::Nil)),
         _ => Ok(Value::Nil),
     });
 }
 
 fn init_exception(vm: &mut Vm) {
-    let e = vm.c.exception.clone();
+    let e = vm.c.exception;
     vm.def(&e, "initialize", |vm, s, a, _| {
         let msg = match arg(a, 0) {
             Value::Nil => vm.str(vm.class_name(s)),
@@ -465,7 +464,7 @@ fn init_exception(vm: &mut Vm) {
     });
     vm.def(&e, "exception", |vm, s, a, _| {
         if a.is_empty() {
-            return Ok(s.clone());
+            return Ok(*s);
         }
         let copy = dup(vm, s, &[], None)?;
         vm.ivar_set(&copy, vm.s.message, arg(a, 0))?;
@@ -475,19 +474,19 @@ fn init_exception(vm: &mut Vm) {
         let o = arg(a, 0);
         Ok(Value::Bool(
             s.identical(&o)
-                || (Rc::ptr_eq(&vm.class_of(s), &vm.class_of(&o))
+                || (vm.class_of(s) == vm.class_of(&o)
                     && vm.exc_message(s) == vm.exc_message(&o)),
         ))
     });
 }
 
 fn init_misc(vm: &mut Vm) {
-    let p = vm.c.proc_.clone();
+    let p = vm.c.proc_;
     for name in ["call", "()", "yield", "[]"] {
         let s = vm.intern(name);
-        p.methods.insert(s, Method::ProcCall);
+        vm.heap[p].methods.insert(s, Method::ProcCall);
     }
-    vm.def(&p, "to_proc", |_, s, _, _| Ok(s.clone()));
+    vm.def(&p, "to_proc", |_, s, _, _| Ok(*s));
     vm.def(&p, "arity", |vm, s, _, _| match s {
         Value::Proc(p) => Ok(Value::Int(match &vm.heap[p].body {
             ProcBody::Ruby { irep, .. } if vm.heap[p].lambda => irep.spec.arity(),
@@ -502,14 +501,14 @@ fn init_misc(vm: &mut Vm) {
         _ => Ok(Value::Int(-1)),
     });
 
-    let n = vm.c.nil.clone();
+    let n = vm.c.nil;
     vm.def(&n, "to_s", |vm, _, _, _| Ok(vm.str("")));
     vm.def(&n, "to_a", |vm, _, _, _| Ok(vm.array(vec![])));
     vm.def(&n, "to_i", |_, _, _, _| Ok(Value::Int(0)));
     vm.def(&n, "inspect", |vm, _, _, _| Ok(vm.str("nil")));
     vm.def(&n, "nil?", |_, _, _, _| Ok(Value::Bool(true)));
 
-    for cls in [vm.c.true_.clone(), vm.c.false_.clone()] {
+    for cls in [vm.c.true_, vm.c.false_] {
         let to_s: NativeFn = |vm, s, _, _| Ok(vm.str(if s.truthy() { "true" } else { "false" }));
         vm.def(&cls, "to_s", to_s);
         vm.def(&cls, "inspect", to_s);
@@ -524,12 +523,12 @@ fn init_misc(vm: &mut Vm) {
         });
     }
 
-    let sy = vm.c.symbol.clone();
+    let sy = vm.c.symbol;
     let to_s: NativeFn = |vm, s, _, _| Ok({ let v = vm.to_s(s)?; vm.str(v) });
     vm.def(&sy, "to_s", to_s);
     vm.def(&sy, "name", to_s);
     vm.def(&sy, "id2name", to_s);
-    vm.def(&sy, "to_sym", |_, s, _, _| Ok(s.clone()));
+    vm.def(&sy, "to_sym", |_, s, _, _| Ok(*s));
     vm.def(&sy, "inspect", |vm, s, _, _| Ok({ let v = vm.inspect(s)?; vm.str(v) }));
     vm.def(&sy, "to_proc", |vm, s, _, _| match s {
         Value::Sym(m) => Ok(vm.proc_value(ProcBody::SymCall(*m))),
@@ -551,7 +550,7 @@ fn init_misc(vm: &mut Vm) {
 }
 
 fn init_comparable(vm: &mut Vm) {
-    let c = vm.c.comparable.clone();
+    let c = vm.c.comparable;
     fn cmp(vm: &mut Vm, s: &Value, a: &[Value]) -> Result<Ordering, Unwind> {
         compare(vm, s, &arg(a, 0))
     }
@@ -587,7 +586,7 @@ fn init_comparable(vm: &mut Vm) {
         if compare(vm, s, &hi)?.is_gt() {
             return Ok(hi);
         }
-        Ok(s.clone())
+        Ok(*s)
     });
 }
 

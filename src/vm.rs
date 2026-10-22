@@ -13,7 +13,7 @@
 //! * mruby unwinds with `setjmp/longjmp`; here unwinding is `Result<_, Unwind>`
 //!   propagated with `?`, and each frame consults its irep's catch table.
 
-use crate::gc::{ArrayRef, EnvRef, HashRef, Heap, Marker};
+use crate::gc::{ArrayRef, ClassRef, EnvRef, HashRef, Heap, Marker};
 use crate::opcode::{ArgSpec, CallCache, DefinedKind, Irep, Literal, Op, Reg};
 use crate::symbol::{Sym, SymMap, SymbolTable};
 use crate::value::*;
@@ -29,7 +29,7 @@ pub enum Unwind {
     /// raised from Rust are created this way so raising doesn't allocate
     /// ([`Vm::err`] only needs `&self`); [`Vm::materialize`] makes the object
     /// when Ruby code gets to see it.
-    Raise(Rc<RClass>, String),
+    Raise(ClassRef, String),
     /// `break` out of a block; caught by the call site that passed the block (`tag`).
     Break { tag: u64, value: Value },
     /// `return` from inside a block; caught by the method frame `home`.
@@ -53,46 +53,105 @@ pub const DEFAULT_STACK_BUDGET: usize = if cfg!(target_family = "wasm") {
 };
 
 pub struct Classes {
-    pub basic_object: Rc<RClass>,
-    pub object: Rc<RClass>,
-    pub kernel: Rc<RClass>,
-    pub module: Rc<RClass>,
-    pub class: Rc<RClass>,
-    pub comparable: Rc<RClass>,
-    pub enumerable: Rc<RClass>,
-    pub numeric: Rc<RClass>,
-    pub integer: Rc<RClass>,
-    pub float: Rc<RClass>,
-    pub string: Rc<RClass>,
-    pub symbol: Rc<RClass>,
-    pub array: Rc<RClass>,
-    pub hash: Rc<RClass>,
-    pub range: Rc<RClass>,
-    pub proc_: Rc<RClass>,
-    pub nil: Rc<RClass>,
-    pub true_: Rc<RClass>,
-    pub false_: Rc<RClass>,
-    pub exception: Rc<RClass>,
-    pub script_error: Rc<RClass>,
-    pub syntax_error: Rc<RClass>,
-    pub not_implemented_error: Rc<RClass>,
-    pub standard_error: Rc<RClass>,
-    pub runtime_error: Rc<RClass>,
-    pub frozen_error: Rc<RClass>,
-    pub argument_error: Rc<RClass>,
-    pub type_error: Rc<RClass>,
-    pub name_error: Rc<RClass>,
-    pub no_method_error: Rc<RClass>,
-    pub zero_division_error: Rc<RClass>,
-    pub local_jump_error: Rc<RClass>,
-    pub index_error: Rc<RClass>,
-    pub key_error: Rc<RClass>,
-    pub stop_iteration: Rc<RClass>,
-    pub range_error: Rc<RClass>,
-    pub float_domain_error: Rc<RClass>,
-    pub no_matching_pattern_error: Rc<RClass>,
-    pub no_matching_pattern_key_error: Rc<RClass>,
-    pub stack_error: Rc<RClass>,
+    pub basic_object: ClassRef,
+    pub object: ClassRef,
+    pub kernel: ClassRef,
+    pub module: ClassRef,
+    pub class: ClassRef,
+    pub comparable: ClassRef,
+    pub enumerable: ClassRef,
+    pub numeric: ClassRef,
+    pub integer: ClassRef,
+    pub float: ClassRef,
+    pub string: ClassRef,
+    pub symbol: ClassRef,
+    pub array: ClassRef,
+    pub hash: ClassRef,
+    pub range: ClassRef,
+    pub proc_: ClassRef,
+    pub nil: ClassRef,
+    pub true_: ClassRef,
+    pub false_: ClassRef,
+    pub exception: ClassRef,
+    pub script_error: ClassRef,
+    pub syntax_error: ClassRef,
+    pub not_implemented_error: ClassRef,
+    pub standard_error: ClassRef,
+    pub runtime_error: ClassRef,
+    pub frozen_error: ClassRef,
+    pub argument_error: ClassRef,
+    pub type_error: ClassRef,
+    pub name_error: ClassRef,
+    pub no_method_error: ClassRef,
+    pub zero_division_error: ClassRef,
+    pub local_jump_error: ClassRef,
+    pub index_error: ClassRef,
+    pub key_error: ClassRef,
+    pub stop_iteration: ClassRef,
+    pub range_error: ClassRef,
+    pub float_domain_error: ClassRef,
+    pub no_matching_pattern_error: ClassRef,
+    pub no_matching_pattern_key_error: ClassRef,
+    pub stack_error: ClassRef,
+}
+
+impl Classes {
+    /// Every builtin class and module (registered as constants of Object,
+    /// and GC roots). Destructuring makes a new field a compile error here.
+    pub fn all(&self) -> Vec<ClassRef> {
+        let Classes {
+            basic_object,
+            object,
+            kernel,
+            module,
+            class,
+            comparable,
+            enumerable,
+            numeric,
+            integer,
+            float,
+            string,
+            symbol,
+            array,
+            hash,
+            range,
+            proc_,
+            nil,
+            true_,
+            false_,
+            exception,
+            script_error,
+            syntax_error,
+            not_implemented_error,
+            standard_error,
+            runtime_error,
+            frozen_error,
+            argument_error,
+            type_error,
+            name_error,
+            no_method_error,
+            zero_division_error,
+            local_jump_error,
+            index_error,
+            key_error,
+            stop_iteration,
+            range_error,
+            float_domain_error,
+            no_matching_pattern_error,
+            no_matching_pattern_key_error,
+            stack_error,
+        } = self;
+        vec![
+            *basic_object, *object, *kernel, *module, *class, *comparable, *enumerable,
+            *numeric, *integer, *float, *string, *symbol, *array, *hash, *range, *proc_,
+            *nil, *true_, *false_, *exception, *script_error, *syntax_error,
+            *not_implemented_error, *standard_error, *runtime_error, *frozen_error,
+            *argument_error, *type_error, *name_error, *no_method_error,
+            *zero_division_error, *local_jump_error, *index_error, *key_error,
+            *stop_iteration, *range_error, *float_domain_error, *no_matching_pattern_error,
+            *no_matching_pattern_key_error, *stack_error,
+        ]
+    }
 }
 
 /// Pre-interned symbols (mruby: "presym").
@@ -166,9 +225,9 @@ struct Frame {
     self_: Value,
     block: Option<Value>,
     /// Where `def` puts methods and where constants are looked up first.
-    target: Rc<RClass>,
+    target: ClassRef,
     /// (owner, name) of the running method, for `super` and `__method__`.
-    method: Option<(Rc<RClass>, Sym)>,
+    method: Option<(ClassRef, Sym)>,
     /// How many optional parameters received an argument.
     opt_filled: usize,
     /// Which keyword parameters received an argument.
@@ -192,7 +251,7 @@ struct Frame {
 }
 
 impl Frame {
-    fn new(irep: Rc<Irep>, base: usize, self_: Value, target: Rc<RClass>) -> Frame {
+    fn new(irep: Rc<Irep>, base: usize, self_: Value, target: ClassRef) -> Frame {
         Frame {
             irep,
             base,
@@ -274,8 +333,8 @@ struct Bound {
 #[derive(Default)]
 pub struct ProcCall {
     pub self_: Option<Value>,
-    pub target: Option<Rc<RClass>>,
-    pub method: Option<(Rc<RClass>, Sym)>,
+    pub target: Option<ClassRef>,
+    pub method: Option<(ClassRef, Sym)>,
     /// Treat as a lambda (strict arity, `return` returns from the proc).
     pub lambda: bool,
 }
@@ -317,52 +376,52 @@ impl Default for Vm {
 impl Vm {
     pub fn new() -> Vm {
         let mut syms = SymbolTable::new();
-        let basic_object = RClass::new("BasicObject", None, false);
-        let object = RClass::new("Object", Some(basic_object.clone()), false);
-        let kernel = RClass::new("Kernel", None, true);
-        object.includes.push(kernel.clone());
-        let sub = |name: &str, sup: &Rc<RClass>| RClass::new(name, Some(sup.clone()), false);
-        let module = sub("Module", &object);
-        let class = sub("Class", &module);
-        let numeric = sub("Numeric", &object);
-        let exception = sub("Exception", &object);
-        let script_error = sub("ScriptError", &exception);
-        let standard_error = sub("StandardError", &exception);
-        let runtime_error = sub("RuntimeError", &standard_error);
-        let name_error = sub("NameError", &standard_error);
-        let index_error = sub("IndexError", &standard_error);
-        let range_error = sub("RangeError", &standard_error);
-        let no_matching_pattern_error = sub("NoMatchingPatternError", &standard_error);
+        let mut heap = Heap::default();
+        let mut mk = |name: &str, sup: Option<ClassRef>, is_module: bool| {
+            heap.alloc(RClass::new(name, sup, is_module))
+        };
+        let basic_object = mk("BasicObject", None, false);
+        let object = mk("Object", Some(basic_object), false);
+        let kernel = mk("Kernel", None, true);
+        let mut sub = |name: &str, sup: ClassRef| mk(name, Some(sup), false);
+        let module = sub("Module", object);
+        let class = sub("Class", module);
+        let numeric = sub("Numeric", object);
+        let exception = sub("Exception", object);
+        let script_error = sub("ScriptError", exception);
+        let standard_error = sub("StandardError", exception);
+        let runtime_error = sub("RuntimeError", standard_error);
+        let name_error = sub("NameError", standard_error);
+        let index_error = sub("IndexError", standard_error);
+        let range_error = sub("RangeError", standard_error);
+        let no_matching_pattern_error = sub("NoMatchingPatternError", standard_error);
         let c = Classes {
-            comparable: RClass::new("Comparable", None, true),
-            enumerable: RClass::new("Enumerable", None, true),
-            integer: sub("Integer", &numeric),
-            float: sub("Float", &numeric),
-            string: sub("String", &object),
-            symbol: sub("Symbol", &object),
-            array: sub("Array", &object),
-            hash: sub("Hash", &object),
-            range: sub("Range", &object),
-            proc_: sub("Proc", &object),
-            nil: sub("NilClass", &object),
-            true_: sub("TrueClass", &object),
-            false_: sub("FalseClass", &object),
-            syntax_error: sub("SyntaxError", &script_error),
-            not_implemented_error: sub("NotImplementedError", &script_error),
-            frozen_error: sub("FrozenError", &runtime_error),
-            argument_error: sub("ArgumentError", &standard_error),
-            type_error: sub("TypeError", &standard_error),
-            no_method_error: sub("NoMethodError", &name_error),
-            zero_division_error: sub("ZeroDivisionError", &standard_error),
-            local_jump_error: sub("LocalJumpError", &standard_error),
-            key_error: sub("KeyError", &index_error),
-            stop_iteration: sub("StopIteration", &index_error),
-            float_domain_error: sub("FloatDomainError", &range_error),
-            no_matching_pattern_key_error: sub(
-                "NoMatchingPatternKeyError",
-                &no_matching_pattern_error,
-            ),
-            stack_error: sub("SystemStackError", &exception),
+            integer: sub("Integer", numeric),
+            float: sub("Float", numeric),
+            string: sub("String", object),
+            symbol: sub("Symbol", object),
+            array: sub("Array", object),
+            hash: sub("Hash", object),
+            range: sub("Range", object),
+            proc_: sub("Proc", object),
+            nil: sub("NilClass", object),
+            true_: sub("TrueClass", object),
+            false_: sub("FalseClass", object),
+            syntax_error: sub("SyntaxError", script_error),
+            not_implemented_error: sub("NotImplementedError", script_error),
+            frozen_error: sub("FrozenError", runtime_error),
+            argument_error: sub("ArgumentError", standard_error),
+            type_error: sub("TypeError", standard_error),
+            no_method_error: sub("NoMethodError", name_error),
+            zero_division_error: sub("ZeroDivisionError", standard_error),
+            local_jump_error: sub("LocalJumpError", standard_error),
+            key_error: sub("KeyError", index_error),
+            stop_iteration: sub("StopIteration", index_error),
+            float_domain_error: sub("FloatDomainError", range_error),
+            no_matching_pattern_key_error: sub("NoMatchingPatternKeyError", no_matching_pattern_error),
+            stack_error: sub("SystemStackError", exception),
+            comparable: mk("Comparable", None, true),
+            enumerable: mk("Enumerable", None, true),
             basic_object,
             object,
             kernel,
@@ -378,54 +437,13 @@ impl Vm {
             range_error,
             no_matching_pattern_error,
         };
-        let all = [
-            &c.basic_object,
-            &c.object,
-            &c.kernel,
-            &c.module,
-            &c.class,
-            &c.comparable,
-            &c.enumerable,
-            &c.numeric,
-            &c.integer,
-            &c.float,
-            &c.string,
-            &c.symbol,
-            &c.array,
-            &c.hash,
-            &c.range,
-            &c.proc_,
-            &c.nil,
-            &c.true_,
-            &c.false_,
-            &c.exception,
-            &c.script_error,
-            &c.syntax_error,
-            &c.not_implemented_error,
-            &c.standard_error,
-            &c.runtime_error,
-            &c.frozen_error,
-            &c.argument_error,
-            &c.type_error,
-            &c.name_error,
-            &c.no_method_error,
-            &c.zero_division_error,
-            &c.local_jump_error,
-            &c.index_error,
-            &c.key_error,
-            &c.stop_iteration,
-            &c.range_error,
-            &c.float_domain_error,
-            &c.no_matching_pattern_error,
-            &c.no_matching_pattern_key_error,
-            &c.stack_error,
-        ];
-        for cls in all {
-            let s = syms.intern(&cls.name());
-            c.object
-                .consts
-                .borrow_mut()
-                .insert(s, Value::Class(cls.clone()));
+        heap[c.object].includes.push(c.kernel);
+        for cls in c.all() {
+            attach_meta(&mut heap, cls, c.class, c.module);
+        }
+        for cls in c.all() {
+            let s = syms.intern(&heap[cls].name());
+            heap[c.object].consts.borrow_mut().insert(s, Value::Class(cls));
         }
         let s = CommonSyms {
             initialize: syms.intern("initialize"),
@@ -449,8 +467,7 @@ impl Vm {
             to_ary: syms.intern("to_ary"),
             to_proc: syms.intern("to_proc"),
         };
-        let mut heap = Heap::default();
-        let main_obj = Value::Object(heap.alloc(RObject::new(c.object.clone())));
+        let main_obj = Value::Object(heap.alloc(RObject::new(c.object)));
         let mut vm = Vm {
             heap,
             stack: Vec::new(),
@@ -537,8 +554,8 @@ impl Vm {
 
     fn env_get(&self, e: EnvRef, i: usize) -> Value {
         match &*self.heap[e].regs.borrow() {
-            EnvRegs::Stack { base, .. } => self.stack[base + i].clone(),
-            EnvRegs::Heap(vals) => vals[i].clone(),
+            EnvRegs::Stack { base, .. } => self.stack[base + i],
+            EnvRegs::Heap(vals) => vals[i],
         }
     }
 
@@ -585,7 +602,7 @@ impl Vm {
 
     #[inline]
     fn reg(&self, f: &Frame, i: Reg) -> Value {
-        self.stack[f.base + i].clone()
+        self.stack[f.base + i]
     }
 
     #[inline]
@@ -619,20 +636,30 @@ impl Vm {
         self.next_id
     }
 
-    pub fn def(&mut self, cls: &Rc<RClass>, name: &str, f: NativeFn) {
+    pub fn def(&mut self, cls: &ClassRef, name: &str, f: NativeFn) {
         let s = self.intern(name);
-        cls.methods.insert(s, Method::Native(f));
+        self.heap[cls].methods.insert(s, Method::Native(f));
     }
 
-    pub fn def_singleton(&mut self, cls: &Rc<RClass>, name: &str, f: NativeFn) {
+    pub fn def_singleton(&mut self, cls: &ClassRef, name: &str, f: NativeFn) {
         let s = self.intern(name);
-        self.class_singleton(cls)
-            .methods.insert(s, Method::Native(f));
+        let meta = self.class_singleton(cls);
+        self.heap[meta].methods.insert(s, Method::Native(f));
+    }
+
+    /// A new class or module together with its singleton class, whose
+    /// superclass is the superclass's singleton class (so class methods are
+    /// inherited; mruby: `prepare_singleton_class`). Making it eagerly keeps
+    /// method lookup free of allocation.
+    pub fn new_class(&mut self, name: &str, superclass: Option<ClassRef>, is_module: bool) -> ClassRef {
+        let c = self.heap.alloc(RClass::new(name, superclass, is_module));
+        attach_meta(&mut self.heap, c, self.c.class, self.c.module);
+        c
     }
 
     pub fn set_const(&mut self, name: &str, v: Value) {
         let s = self.intern(name);
-        self.c.object.consts.borrow_mut().insert(s, v);
+        self.heap[self.c.object].consts.borrow_mut().insert(s, v);
     }
 
     pub fn write(&mut self, s: &str) {
@@ -647,15 +674,15 @@ impl Vm {
 
     // ---- errors (src/error.c) ------------------------------------------
 
-    pub fn make_exception(&mut self, cls: &Rc<RClass>, msg: impl Into<String>) -> Value {
+    pub fn make_exception(&mut self, cls: &ClassRef, msg: impl Into<String>) -> Value {
         let msg = self.str(msg);
-        let obj = RObject::new(cls.clone());
+        let obj = RObject::new(*cls);
         obj.ivars.borrow_mut().set(self.s.message, msg);
         self.object(obj)
     }
 
-    pub fn err(&self, cls: &Rc<RClass>, msg: impl Into<String>) -> Unwind {
-        Unwind::Raise(cls.clone(), msg.into())
+    pub fn err(&self, cls: &ClassRef, msg: impl Into<String>) -> Unwind {
+        Unwind::Raise(*cls, msg.into())
     }
 
     /// Turns a pending [`Unwind::Raise`] into an exception object.
@@ -684,93 +711,82 @@ impl Vm {
         {
             return self.heap[s].borrow().clone();
         }
-        self.class_of(e).name()
+        self.heap[self.class_of(e)].name()
     }
 
     // ---- classes & method lookup (src/class.c) -------------------------
 
     /// The class `obj.class` reports (never a singleton class).
-    pub fn class_of(&self, v: &Value) -> Rc<RClass> {
+    pub fn class_of(&self, v: &Value) -> ClassRef {
         let c = &self.c;
         match v {
-            Value::Nil => c.nil.clone(),
-            Value::Bool(true) => c.true_.clone(),
-            Value::Bool(false) => c.false_.clone(),
-            Value::Int(_) => c.integer.clone(),
-            Value::Float(_) => c.float.clone(),
-            Value::Sym(_) => c.symbol.clone(),
-            Value::Str(_) => c.string.clone(),
-            Value::Array(_) => c.array.clone(),
-            Value::Hash(_) => c.hash.clone(),
-            Value::Range(_) => c.range.clone(),
-            Value::Proc(_) => c.proc_.clone(),
+            Value::Nil => c.nil,
+            Value::Bool(true) => c.true_,
+            Value::Bool(false) => c.false_,
+            Value::Int(_) => c.integer,
+            Value::Float(_) => c.float,
+            Value::Sym(_) => c.symbol,
+            Value::Str(_) => c.string,
+            Value::Array(_) => c.array,
+            Value::Hash(_) => c.hash,
+            Value::Range(_) => c.range,
+            Value::Proc(_) => c.proc_,
             Value::Class(k) => {
-                if k.is_module {
-                    c.module.clone()
+                if self.heap[k].is_module {
+                    c.module
                 } else {
-                    c.class.clone()
+                    c.class
                 }
             }
-            Value::Object(o) => self.heap[o].class.clone(),
+            Value::Object(o) => self.heap[o].class,
         }
     }
 
     pub fn class_name(&self, v: &Value) -> String {
-        self.class_of(v).name()
+        self.heap[self.class_of(v)].name()
     }
 
-    /// The singleton class of a class or module, created on demand. Its
-    /// superclass is the superclass's singleton class, so class methods are
-    /// inherited (mruby: `prepare_singleton_class`).
-    pub fn class_singleton(&self, c: &Rc<RClass>) -> Rc<RClass> {
-        if let Some(m) = c.meta.borrow().as_ref() {
-            return m.clone();
-        }
-        let sup = if c.is_singleton {
-            self.c.class.clone()
-        } else if c.is_module {
-            self.c.module.clone()
-        } else {
-            match &c.superclass {
-                Some(s) => self.class_singleton(s),
-                None => self.c.class.clone(),
-            }
-        };
-        let m = RClass::new_singleton(format!("#<Class:{}>", c.name()), sup);
-        *m.attached.borrow_mut() = Some(Rc::downgrade(c));
-        *c.meta.borrow_mut() = Some(m.clone());
-        m
+    /// The singleton class of a class or module (made with the class, see
+    /// [`Vm::new_class`]). A singleton class has none until one is asked
+    /// for with [`Vm::singleton_class`]; lookup then starts at `Class`.
+    pub fn class_singleton(&self, c: &ClassRef) -> ClassRef {
+        self.heap[c].meta.get().unwrap_or(self.c.class)
     }
 
-    /// `obj.singleton_class`
-    pub fn singleton_class(&self, v: &Value) -> Result<Rc<RClass>, Unwind> {
-        match v {
-            Value::Class(c) => Ok(self.class_singleton(c)),
-            Value::Object(o) => {
-                if let Some(s) = self.heap[o].singleton.borrow().as_ref() {
-                    return Ok(s.clone());
+    /// `obj.singleton_class`, created on demand.
+    pub fn singleton_class(&mut self, v: &Value) -> Result<ClassRef, Unwind> {
+        match *v {
+            Value::Class(c) => {
+                if self.heap[c].meta.get().is_none() {
+                    // a singleton class of a singleton class
+                    attach_meta(&mut self.heap, c, self.c.class, self.c.module);
                 }
-                let s = RClass::new_singleton(
-                    format!("#<Class:#<{}>>", self.heap[o].class.name()),
-                    self.heap[o].class.clone(),
-                );
-                *self.heap[o].singleton.borrow_mut() = Some(s.clone());
+                Ok(self.class_singleton(&c))
+            }
+            Value::Object(o) => {
+                if let Some(s) = self.heap[o].singleton.get() {
+                    return Ok(s);
+                }
+                let class = self.heap[o].class;
+                let name = format!("#<Class:#<{}>>", self.heap[class].name());
+                let s = self.heap.alloc(RClass::new_singleton(name, class));
+                self.heap[o].singleton.set(Some(s));
                 Ok(s)
             }
-            Value::Nil => Ok(self.c.nil.clone()),
-            Value::Bool(true) => Ok(self.c.true_.clone()),
-            Value::Bool(false) => Ok(self.c.false_.clone()),
+            Value::Nil => Ok(self.c.nil),
+            Value::Bool(true) => Ok(self.c.true_),
+            Value::Bool(false) => Ok(self.c.false_),
             _ => Err(self.type_err(format!("can't define singleton for {}", self.class_name(v)))),
         }
     }
 
     /// The class where method lookup for `v` starts.
-    pub fn dispatch_class(&self, v: &Value) -> Rc<RClass> {
+    pub fn dispatch_class(&self, v: &Value) -> ClassRef {
         match v {
             Value::Class(c) => self.class_singleton(c),
             Value::Object(o) => {
                 let o = &self.heap[o];
-                o.singleton.borrow().clone().unwrap_or_else(|| o.class.clone())
+                o.singleton.get().unwrap_or(o.class)
             }
             _ => self.class_of(v),
         }
@@ -778,45 +794,47 @@ impl Vm {
 
     /// Method resolution order: prepended modules, the class, its included
     /// modules (latest first), then the superclass.
-    pub fn ancestors(cls: &Rc<RClass>) -> Vec<Rc<RClass>> {
-        let mut out: Vec<Rc<RClass>> = Vec::new();
-        let add = |out: &mut Vec<Rc<RClass>>, k: Rc<RClass>| {
-            if !out.iter().any(|x| Rc::ptr_eq(x, &k)) {
+    pub fn ancestors(&self, cls: &ClassRef) -> Vec<ClassRef> {
+        let mut out: Vec<ClassRef> = Vec::new();
+        let add = |out: &mut Vec<ClassRef>, k: ClassRef| {
+            if !out.contains(&k) {
                 out.push(k);
             }
         };
-        let mut c = Some(cls.clone());
+        let mut c = Some(*cls);
         while let Some(k) = c {
-            for p in k.prepends.borrow().iter().rev() {
-                for a in Self::ancestors(p) {
+            let kc = &self.heap[k];
+            for p in kc.prepends.borrow().iter().rev() {
+                for a in self.ancestors(p) {
                     add(&mut out, a);
                 }
             }
-            add(&mut out, k.clone());
-            for m in k.includes.borrow().iter().rev() {
-                for a in Self::ancestors(m) {
+            add(&mut out, k);
+            for m in kc.includes.borrow().iter().rev() {
+                for a in self.ancestors(m) {
                     add(&mut out, a);
                 }
             }
-            c = k.superclass.clone();
+            c = kc.superclass;
         }
         out
     }
 
-    fn find_in_module(k: &Rc<RClass>, mid: Sym) -> Option<Option<(Method, Rc<RClass>)>> {
-        for p in k.prepends.borrow().iter().rev() {
-            if let Some(found) = Self::find_in_module(p, mid) {
+    fn find_in_module(&self, k: ClassRef, mid: Sym) -> Option<Option<(Method, ClassRef)>> {
+        let kc = &self.heap[k];
+        for p in kc.prepends.borrow().iter().rev() {
+            if let Some(found) = self.find_in_module(*p, mid) {
                 return Some(found);
             }
         }
-        if let Some(m) = k.methods.borrow().get(&mid) {
+        if let Some(m) = kc.methods.borrow().get(&mid) {
             return Some(match m {
                 Method::Undefined => None,
-                m => Some((m.clone(), k.clone())),
+                m => Some((m.clone(), k)),
             });
         }
-        for inc in k.includes.borrow().iter().rev() {
-            if let Some(found) = Self::find_in_module(inc, mid) {
+        for inc in kc.includes.borrow().iter().rev() {
+            if let Some(found) = self.find_in_module(*inc, mid) {
                 return Some(found);
             }
         }
@@ -824,48 +842,29 @@ impl Vm {
     }
 
     /// Finds `mid` starting at `cls`; returns the method and its owner.
-    pub fn find_method(cls: &Rc<RClass>, mid: Sym) -> Option<(Method, Rc<RClass>)> {
-        let mut c = Some(cls.clone());
+    pub fn find_method(&self, cls: &ClassRef, mid: Sym) -> Option<(Method, ClassRef)> {
+        let mut c = Some(*cls);
         while let Some(k) = c {
-            if let Some(found) = Self::find_in_module(&k, mid) {
+            if let Some(found) = self.find_in_module(k, mid) {
                 return found;
             }
-            c = k.superclass.clone();
+            c = self.heap[k].superclass;
         }
         None
     }
 
-    /// The class lookup for `v` starts at, by address, without cloning it;
-    /// 0 for classes (their singleton class may not exist yet).
-    fn dispatch_key(&self, v: &Value) -> usize {
-        let c = &self.c;
-        let class = match v {
-            Value::Object(o) => {
-                let o = &self.heap[o];
-                return match o.singleton.borrow().as_ref() {
-                    Some(s) => Rc::as_ptr(s) as usize,
-                    None => Rc::as_ptr(&o.class) as usize,
-                };
-            }
-            Value::Class(_) => return 0,
-            Value::Nil => &c.nil,
-            Value::Bool(true) => &c.true_,
-            Value::Bool(false) => &c.false_,
-            Value::Int(_) => &c.integer,
-            Value::Float(_) => &c.float,
-            Value::Sym(_) => &c.symbol,
-            Value::Str(_) => &c.string,
-            Value::Array(_) => &c.array,
-            Value::Hash(_) => &c.hash,
-            Value::Range(_) => &c.range,
-            Value::Proc(_) => &c.proc_,
-        };
-        Rc::as_ptr(class) as usize
+    /// Identity of the class lookup for `v` starts at; 0 for classes, whose
+    /// lookup isn't cached.
+    fn dispatch_key(&self, v: &Value) -> u64 {
+        match v {
+            Value::Class(_) => 0,
+            v => self.dispatch_class(v).id(),
+        }
     }
 
     /// `lookup` through the inline cache of the `Send` that just ran
     /// (`f.pc - 1`).
-    fn cached_lookup(&self, f: &Frame, recv: &Value, mid: Sym) -> Option<(Method, Rc<RClass>)> {
+    fn cached_lookup(&self, f: &Frame, recv: &Value, mid: Sym) -> Option<(Method, ClassRef)> {
         let key = self.dispatch_key(recv);
         if key == 0 {
             return self.lookup(recv, mid);
@@ -887,32 +886,32 @@ impl Vm {
         found
     }
 
-    fn lookup(&self, recv: &Value, mid: Sym) -> Option<(Method, Rc<RClass>)> {
-        Self::find_method(&self.dispatch_class(recv), mid)
+    fn lookup(&self, recv: &Value, mid: Sym) -> Option<(Method, ClassRef)> {
+        self.find_method(&self.dispatch_class(recv), mid)
     }
 
     pub fn respond_to(&self, v: &Value, mid: Sym) -> bool {
         self.lookup(v, mid).is_some()
     }
 
-    pub fn is_a(&self, v: &Value, cls: &Rc<RClass>) -> bool {
-        Self::ancestors(&self.dispatch_class(v))
+    pub fn is_a(&self, v: &Value, cls: &ClassRef) -> bool {
+        self.ancestors(&self.dispatch_class(v))
             .iter()
-            .any(|c| Rc::ptr_eq(c, cls))
+            .any(|c| c == cls)
     }
 
     fn find_super(
         &self,
         recv: &Value,
-        owner: &Rc<RClass>,
+        owner: &ClassRef,
         mid: Sym,
-    ) -> Option<(Method, Rc<RClass>)> {
-        let anc = Self::ancestors(&self.dispatch_class(recv));
-        let pos = anc.iter().position(|c| Rc::ptr_eq(c, owner))?;
+    ) -> Option<(Method, ClassRef)> {
+        let anc = self.ancestors(&self.dispatch_class(recv));
+        let pos = anc.iter().position(|c| c == owner)?;
         for k in &anc[pos + 1..] {
-            match k.methods.borrow().get(&mid) {
+            match self.heap[k].methods.borrow().get(&mid) {
                 Some(Method::Undefined) => return None,
-                Some(m) => return Some((m.clone(), k.clone())),
+                Some(m) => return Some((m.clone(), *k)),
                 None => {}
             }
         }
@@ -921,80 +920,80 @@ impl Vm {
 
     /// The class used for constants and class variables: singleton classes
     /// of classes defer to the class itself.
-    fn lexical_class(&self, target: &Rc<RClass>) -> Rc<RClass> {
-        if target.is_singleton
-            && let Some(c) = target.attached_class()
+    fn lexical_class(&self, target: &ClassRef) -> ClassRef {
+        if self.heap[target].is_singleton
+            && let Some(c) = self.heap[target].attached_class()
         {
             return c;
         }
-        target.clone()
+        *target
     }
 
-    pub fn get_const(&self, target: &Rc<RClass>, name: Sym) -> Option<Value> {
+    pub fn get_const(&self, target: &ClassRef, name: Sym) -> Option<Value> {
         let start = self.lexical_class(target);
         // lexically enclosing classes first, then the ancestors
-        let mut lex = start.outer_class();
-        if let Some(v) = start.consts.borrow().get(&name) {
-            return Some(v.clone());
+        let mut lex = self.heap[start].outer_class();
+        if let Some(v) = self.heap[start].consts.borrow().get(&name) {
+            return Some(*v);
         }
         while let Some(o) = lex {
-            if let Some(v) = o.consts.borrow().get(&name) {
-                return Some(v.clone());
+            if let Some(v) = self.heap[o].consts.borrow().get(&name) {
+                return Some(*v);
             }
-            lex = o.outer_class();
+            lex = self.heap[o].outer_class();
         }
         self.get_const_in(&start, name)
-            .or_else(|| self.c.object.consts.borrow().get(&name).cloned())
+            .or_else(|| self.heap[self.c.object].consts.borrow().get(&name).cloned())
     }
 
     /// `Mod::Name`: the module and its ancestors (Object only if it's one of them).
-    pub fn get_const_in(&self, cls: &Rc<RClass>, name: Sym) -> Option<Value> {
-        Self::ancestors(cls)
+    pub fn get_const_in(&self, cls: &ClassRef, name: Sym) -> Option<Value> {
+        self.ancestors(cls)
             .into_iter()
-            .find_map(|k| k.consts.borrow().get(&name).cloned())
+            .find_map(|k| self.heap[k].consts.borrow().get(&name).cloned())
     }
 
     /// Stores a constant, naming an anonymous class after it.
-    pub fn store_const(&self, owner: &Rc<RClass>, name: Sym, v: Value) {
+    pub fn store_const(&self, owner: &ClassRef, name: Sym, v: Value) {
         if let Value::Class(c) = &v
-            && c.is_anonymous()
+            && self.heap[c].is_anonymous()
         {
             let n = self.sym_name(name);
-            let full = if Rc::ptr_eq(owner, &self.c.object) {
+            let full = if *owner == self.c.object {
                 n.to_string()
             } else {
-                format!("{}::{}", owner.name(), n)
+                format!("{}::{}", self.heap[owner].name(), n)
             };
-            c.set_name(full);
-            if !Rc::ptr_eq(owner, &self.c.object) {
-                *c.outer.borrow_mut() = Some(Rc::downgrade(owner));
+            self.heap[c].set_name(full);
+            if owner != &self.c.object {
+                self.heap[c].outer.set(Some(*owner));
             }
         }
-        owner.consts.borrow_mut().insert(name, v);
+        self.heap[owner].consts.borrow_mut().insert(name, v);
     }
 
-    fn cvar_holder(&self, cls: &Rc<RClass>, name: Sym) -> Option<Rc<RClass>> {
-        Self::ancestors(cls)
+    fn cvar_holder(&self, cls: &ClassRef, name: Sym) -> Option<ClassRef> {
+        self.ancestors(cls)
             .into_iter()
-            .find(|k| k.cvars.borrow().get(name).is_some())
+            .find(|k| self.heap[k].cvars.borrow().get(name).is_some())
     }
 
-    fn cvar_get(&self, target: &Rc<RClass>, name: Sym) -> VmResult {
+    fn cvar_get(&self, target: &ClassRef, name: Sym) -> VmResult {
         let base = self.lexical_class(target);
         match self.cvar_holder(&base, name) {
-            Some(k) => Ok(k.cvars.borrow().get(name).unwrap()),
+            Some(k) => Ok(self.heap[k].cvars.borrow().get(name).unwrap()),
             None => Err(self.name_err(format!(
                 "uninitialized class variable {} in {}",
                 self.sym_name(name),
-                base.name()
+                self.heap[base].name()
             ))),
         }
     }
 
-    fn cvar_set(&self, target: &Rc<RClass>, name: Sym, v: Value) {
+    fn cvar_set(&self, target: &ClassRef, name: Sym, v: Value) {
         let base = self.lexical_class(target);
         let holder = self.cvar_holder(&base, name).unwrap_or(base);
-        holder.cvars.borrow_mut().set(name, v);
+        self.heap[holder].cvars.borrow_mut().set(name, v);
     }
 
     // ---- calling -------------------------------------------------------
@@ -1006,7 +1005,7 @@ impl Vm {
         args: Vec<Value>,
         block: Option<Value>,
     ) -> VmResult {
-        let call = self.start_call(recv.clone(), mid, Args::Owned(args), block)?;
+        let call = self.start_call(*recv, mid, Args::Owned(args), block)?;
         self.finish(call)
     }
 
@@ -1046,8 +1045,8 @@ impl Vm {
             Value::Bool(b) => b.to_string(),
             Value::Class(c) => format!(
                 "{} {}",
-                if c.is_module { "module" } else { "class" },
-                c.name()
+                if self.heap[c].is_module { "module" } else { "class" },
+                self.heap[c].name()
             ),
             v if v.identical(&self.main_obj) => "main:Object".to_string(),
             _ => format!("an instance of {}", self.class_name(recv)),
@@ -1086,7 +1085,7 @@ impl Vm {
     pub fn invoke(
         &mut self,
         m: Method,
-        owner: Rc<RClass>,
+        owner: ClassRef,
         recv: Value,
         mid: Sym,
         args: Vec<Value>,
@@ -1101,7 +1100,7 @@ impl Vm {
     fn start_invoke(
         &mut self,
         m: Method,
-        owner: Rc<RClass>,
+        owner: ClassRef,
         recv: Value,
         mid: Sym,
         args: Args,
@@ -1129,13 +1128,13 @@ impl Vm {
                     ));
                 }
                 let v = args.into_vec(self).pop().unwrap();
-                self.ivar_set(&recv, iv, v.clone())?;
+                self.ivar_set(&recv, iv, v)?;
                 v
             }
             Method::Proc(p) => {
                 let call = ProcCall {
                     self_: Some(recv),
-                    target: Some(owner.clone()),
+                    target: Some(owner),
                     method: Some((owner, mid)),
                     lambda: true,
                 };
@@ -1145,7 +1144,7 @@ impl Vm {
             Method::Undefined => return Err(self.no_method(&recv, mid)),
             Method::Ruby(irep) => {
                 let bound = self.bind_args(&irep, &recv, args, &block, true)?;
-                let mut f = Frame::new(irep, bound.base, recv, owner.clone());
+                let mut f = Frame::new(irep, bound.base, recv, owner);
                 f.block = block;
                 f.method = Some((owner, mid));
                 f.opt_filled = bound.opt_filled;
@@ -1202,12 +1201,12 @@ impl Vm {
         {
             let base = self.stack.len();
             self.stack.resize(base + irep.nregs.max(1 + spec.nparams()), Value::Nil);
-            self.stack[base] = self_.clone();
+            self.stack[base] = *self_;
             for i in 0..n {
-                self.stack[base + 1 + i] = self.stack[at + i].clone();
+                self.stack[base + 1 + i] = self.stack[at + i];
             }
             if spec.block {
-                self.stack[base + 1 + n] = block.clone().unwrap_or(Value::Nil);
+                self.stack[base + 1 + n] = (*block).unwrap_or(Value::Nil);
             }
             return Ok(Bound {
                 base,
@@ -1261,7 +1260,7 @@ impl Vm {
         // the frame's registers: a new window on top of the stack
         let base = self.stack.len();
         self.stack.resize(base + irep.nregs.max(1 + spec.nparams()), Value::Nil);
-        self.stack[base] = self_.clone();
+        self.stack[base] = *self_;
         let mut r = 1;
         let mut it = args.into_iter();
         for _ in 0..spec.req {
@@ -1331,7 +1330,7 @@ impl Vm {
             return Err(self.arg_err(format!("unknown keyword{s}: {}", self.sym_list(&unknown))));
         }
         if spec.block {
-            self.stack[base + r] = block.clone().unwrap_or(Value::Nil);
+            self.stack[base + r] = (*block).unwrap_or(Value::Nil);
         }
         Ok(Bound {
             base,
@@ -1388,10 +1387,10 @@ impl Vm {
             ProcBody::Ruby { irep, env } => {
                 let rp = &self.heap[p];
                 let lambda = rp.lambda || call.lambda;
-                let self_ = call.self_.unwrap_or_else(|| rp.self_.clone());
-                let target = call.target.unwrap_or_else(|| rp.target.clone());
-                let method = call.method.or_else(|| rp.method.clone());
-                let (outer_block, home) = (rp.block.clone(), rp.home);
+                let self_ = call.self_.unwrap_or(rp.self_);
+                let target = call.target.unwrap_or(rp.target);
+                let method = call.method.or(rp.method);
+                let (outer_block, home) = (rp.block, rp.home);
                 let bound = self.bind_args(&irep, &self_, args, &block, lambda)?;
                 let mut f = Frame::new(irep, bound.base, self_, target);
                 f.upper = Some(env);
@@ -1409,7 +1408,7 @@ impl Vm {
     }
 
     pub fn proc_value(&mut self, body: ProcBody) -> Value {
-        let target = self.c.object.clone();
+        let target = self.c.object;
         Value::Proc(self.heap.alloc(RProc {
             body,
             self_: Value::Nil,
@@ -1428,16 +1427,16 @@ impl Vm {
                 let p = &self.heap[p];
                 let copy = RProc {
                     body: p.body.clone(),
-                    self_: p.self_.clone(),
-                    block: p.block.clone(),
+                    self_: p.self_,
+                    block: p.block,
                     home: p.home,
-                    method: p.method.clone(),
-                    target: p.target.clone(),
+                    method: p.method,
+                    target: p.target,
                     lambda: true,
                 };
                 Value::Proc(self.heap.alloc(copy))
             }
-            v => v.clone(),
+            v => *v,
         }
     }
 
@@ -1473,17 +1472,17 @@ impl Vm {
             _ if self.respond_to(v, self.s.to_a) => {
                 match self.call_method(v, self.s.to_a, vec![], None)? {
                     Value::Array(a) => self.heap[a].borrow().clone(),
-                    Value::Nil => vec![v.clone()],
+                    Value::Nil => vec![*v],
                     _ => return Err(self.type_err("can't convert to Array (to_a gives non-Array)")),
                 }
             }
-            _ => vec![v.clone()],
+            _ => vec![*v],
         })
     }
 
     /// Converts the right-hand side of a multiple assignment to an Array.
     fn masgn_array(&mut self, v: &Value) -> Result<ArrayRef, Unwind> {
-        let wrap = |vm: &mut Self| vm.heap.alloc(RefCell::new(vec![v.clone()]));
+        let wrap = |vm: &mut Self| vm.heap.alloc(RefCell::new(vec![*v]));
         match v {
             Value::Array(a) => Ok(*a),
             _ if !matches!(v, Value::Nil) && self.respond_to(v, self.s.to_ary) => {
@@ -1504,7 +1503,7 @@ impl Vm {
     pub fn ivar_lookup(&self, obj: &Value, iv: Sym) -> Option<Value> {
         match obj {
             Value::Object(o) => self.heap[o].ivars.borrow().get(iv),
-            Value::Class(c) => c.ivars.borrow().get(iv),
+            Value::Class(c) => self.heap[c].ivars.borrow().get(iv),
             _ => None,
         }
     }
@@ -1512,7 +1511,7 @@ impl Vm {
     pub fn ivar_set(&self, obj: &Value, iv: Sym, v: Value) -> Result<(), Unwind> {
         match obj {
             Value::Object(o) => self.heap[o].ivars.borrow_mut().set(iv, v),
-            Value::Class(c) => c.ivars.borrow_mut().set(iv, v),
+            Value::Class(c) => self.heap[c].ivars.borrow_mut().set(iv, v),
             _ => {
                 return Err(self.err(
                     &self.c.runtime_error,
@@ -1527,8 +1526,8 @@ impl Vm {
 
     /// Runs a top-level irep with `self = main`.
     pub fn run_main(&mut self, irep: Rc<Irep>) -> Result<Value, Value> {
-        let main = self.main_obj.clone();
-        let mut f = self.body_frame(irep, main, self.c.object.clone());
+        let main = self.main_obj;
+        let mut f = self.body_frame(irep, main, self.c.object);
         f.home = self.new_id();
         f.is_home = true;
         // the script's own loop is a safe point for collection; loops nested
@@ -1545,21 +1544,21 @@ impl Vm {
             Err(Unwind::Error(e)) => Err(e),
             Err(Unwind::Raise(..)) => unreachable!("materialized"),
             Err(Unwind::Return { .. }) => {
-                let c = self.c.local_jump_error.clone();
+                let c = self.c.local_jump_error;
                 Err(self.make_exception(&c, "unexpected return"))
             }
             Err(Unwind::Break { .. }) => {
-                let c = self.c.local_jump_error.clone();
+                let c = self.c.local_jump_error;
                 Err(self.make_exception(&c, "break from proc-closure"))
             }
         }
     }
 
     /// A frame for the script or a class body (`class X`, `class << obj`).
-    fn body_frame(&mut self, irep: Rc<Irep>, self_: Value, target: Rc<RClass>) -> Frame {
+    fn body_frame(&mut self, irep: Rc<Irep>, self_: Value, target: ClassRef) -> Frame {
         let base = self.stack.len();
         self.stack.resize(base + irep.nregs.max(1), Value::Nil);
-        self.stack[base] = self_.clone();
+        self.stack[base] = self_;
         let mut f = Frame::new(irep, base, self_, target);
         f.home = self.new_id();
         f
@@ -1659,9 +1658,9 @@ impl Vm {
         for v in self.globals.values().chain(&self.at_exit) {
             m.value(v);
         }
-        // builtin classes are constants of Object, or reachable from those
-        m.class(&self.c.basic_object);
-        m.class(&self.c.object);
+        for c in self.c.all() {
+            m.class(c);
+        }
         let marks = m.finish();
         self.heap.sweep(marks);
     }
@@ -1791,7 +1790,7 @@ impl Vm {
             }
             Op::LoadSym(a, s) => self.set_reg(f, a, Value::Sym(s)),
             Op::LoadNil(a) => self.set_reg(f, a, Value::Nil),
-            Op::LoadSelf(a) => self.set_reg(f, a, f.self_.clone()),
+            Op::LoadSelf(a) => self.set_reg(f, a, f.self_),
             Op::LoadTrue(a) => self.set_reg(f, a, Value::Bool(true)),
             Op::LoadFalse(a) => self.set_reg(f, a, Value::Bool(false)),
             Op::GetGV(a, s) => self.set_reg(f, a, self.globals.get(&s).cloned().unwrap_or(Value::Nil)),
@@ -1826,7 +1825,7 @@ impl Vm {
                     None => {
                         let msg = format!(
                             "uninitialized constant {}::{}",
-                            outer.name(),
+                            self.heap[outer].name(),
                             self.sym_name(s)
                         );
                         return Err(self.name_err(msg));
@@ -1841,7 +1840,7 @@ impl Vm {
                 };
                 self.store_const(&outer, s, self.reg(f, a));
             }
-            Op::OClass(a) => self.set_reg(f, a, Value::Class(self.c.object.clone())),
+            Op::OClass(a) => self.set_reg(f, a, Value::Class(self.c.object)),
             Op::GetUpVar(a, idx, depth) => {
                 let env = self.upvar_env(f, depth);
                 let v = self.env_get(env, idx);
@@ -1958,7 +1957,7 @@ impl Vm {
                 return self.super_flow(f, a, args, blk);
             }
             Op::BlkPush(a, required) => match &f.block {
-                Some(b) => self.set_reg(f, a, b.clone()),
+                Some(b) => self.set_reg(f, a, *b),
                 None if required => {
                     return Err(self.err(&self.c.local_jump_error, "no block given (yield)"));
                 }
@@ -2140,11 +2139,11 @@ impl Vm {
                         irep: f.irep.reps[idx].clone(),
                         env,
                     },
-                    self_: f.self_.clone(),
-                    block: f.block.clone(),
+                    self_: f.self_,
+                    block: f.block,
                     home: f.home,
-                    method: f.method.clone(),
-                    target: f.target.clone(),
+                    method: f.method,
+                    target: f.target,
                     lambda: matches!(op, Op::Lambda(..)),
                 };
                 let p = Value::Proc(self.heap.alloc(p));
@@ -2152,11 +2151,11 @@ impl Vm {
             }
             Op::TDef(s, idx) => {
                 let irep = f.irep.reps[idx].clone();
-                f.target.methods.insert(s, Method::Ruby(irep));
+                self.heap[f.target].methods.insert(s, Method::Ruby(irep));
             }
             Op::SDef(a, s, idx) => {
                 let cls = self.singleton_class(&self.reg(f, a))?;
-                cls.methods.insert(s, Method::Ruby(f.irep.reps[idx].clone()));
+                self.heap[cls].methods.insert(s, Method::Ruby(f.irep.reps[idx].clone()));
             }
             Op::Class(a, name, is_module) => {
                 let cls = self.define_class(f, a, name, is_module)?;
@@ -2170,7 +2169,7 @@ impl Vm {
                 let Value::Class(cls) = self.reg(f, a) else {
                     unreachable!()
                 };
-                let target = cls.clone();
+                let target = cls;
                 let mut body = self.body_frame(f.irep.reps[idx].clone(), Value::Class(cls), target);
                 body.ret = a;
                 return Ok(Flow::Call(body));
@@ -2207,10 +2206,10 @@ impl Vm {
         args: Vec<Value>,
         blk: Option<Value>,
     ) -> Result<Flow, Unwind> {
-        let Some((owner, mid)) = f.method.clone() else {
+        let Some((owner, mid)) = f.method else {
             return Err(self.err(&self.c.no_method_error, "super called outside of method"));
         };
-        let self_ = f.self_.clone();
+        let self_ = f.self_;
         let tag = proc_tag(&blk);
         if let Some((m, o)) = self.find_super(&self_, &owner, mid) {
             let args = Args::Owned(args);
@@ -2227,29 +2226,29 @@ impl Vm {
         Err(self.err(&self.c.no_method_error, msg))
     }
 
-    pub fn alias_method(&self, target: &Rc<RClass>, new: Sym, old: Sym) -> Result<(), Unwind> {
-        match Self::find_method(target, old) {
+    pub fn alias_method(&self, target: &ClassRef, new: Sym, old: Sym) -> Result<(), Unwind> {
+        match self.find_method(target, old) {
             Some((m, _)) => {
-                target.methods.insert(new, m);
+                self.heap[target].methods.insert(new, m);
                 Ok(())
             }
             None => Err(self.name_err(format!(
                 "undefined method '{}' for class '{}'",
                 self.sym_name(old),
-                target.name()
+                self.heap[target].name()
             ))),
         }
     }
 
-    pub fn undef_method(&self, target: &Rc<RClass>, s: Sym) -> Result<(), Unwind> {
-        if Self::find_method(target, s).is_none() {
+    pub fn undef_method(&self, target: &ClassRef, s: Sym) -> Result<(), Unwind> {
+        if self.find_method(target, s).is_none() {
             return Err(self.name_err(format!(
                 "undefined method '{}' for class '{}'",
                 self.sym_name(s),
-                target.name()
+                self.heap[target].name()
             )));
         }
-        target.methods.insert(s, Method::Undefined);
+        self.heap[target].methods.insert(s, Method::Undefined);
         Ok(())
     }
 
@@ -2291,7 +2290,7 @@ impl Vm {
         a: Reg,
         name: Sym,
         is_module: bool,
-    ) -> Result<Rc<RClass>, Unwind> {
+    ) -> Result<ClassRef, Unwind> {
         let outer = match self.reg(f, a) {
             Value::Class(c) => c,
             Value::Nil => self.lexical_class(&f.target),
@@ -2301,11 +2300,11 @@ impl Vm {
             }
         };
         let name_str = self.sym_name(name).to_string();
-        let existing = outer.consts.borrow().get(&name).cloned();
+        let existing = self.heap[outer].consts.borrow().get(&name).cloned();
         match existing {
-            Some(Value::Class(c)) if c.is_module == is_module => {
+            Some(Value::Class(c)) if self.heap[c].is_module == is_module => {
                 if let Value::Class(sup) = self.reg(f, a + 1) {
-                    let same = c.superclass.as_ref().is_some_and(|s| Rc::ptr_eq(s, &sup));
+                    let same = self.heap[c].superclass == Some(sup);
                     if !is_module && !same {
                         return Err(
                             self.type_err(format!("superclass mismatch for class {name_str}"))
@@ -2323,24 +2322,21 @@ impl Vm {
                     None
                 } else {
                     match self.reg(f, a + 1) {
-                        Value::Nil => Some(self.c.object.clone()),
-                        Value::Class(s) if !s.is_module && !s.is_singleton => Some(s),
+                        Value::Nil => Some(self.c.object),
+                        Value::Class(s) if !self.heap[s].is_module && !self.heap[s].is_singleton => Some(s),
                         _ => return Err(self.type_err("superclass must be a Class")),
                     }
                 };
-                let full = if Rc::ptr_eq(&outer, &self.c.object) {
+                let full = if outer == self.c.object {
                     name_str
                 } else {
-                    format!("{}::{}", outer.name(), name_str)
+                    format!("{}::{}", self.heap[outer].name(), name_str)
                 };
-                let cls = RClass::new(&full, superclass, is_module);
-                if !Rc::ptr_eq(&outer, &self.c.object) {
-                    *cls.outer.borrow_mut() = Some(Rc::downgrade(&outer));
+                let cls = self.new_class(&full, superclass, is_module);
+                if outer != self.c.object {
+                    self.heap[cls].outer.set(Some(outer));
                 }
-                outer
-                    .consts
-                    .borrow_mut()
-                    .insert(name, Value::Class(cls.clone()));
+                self.heap[outer].consts.borrow_mut().insert(name, Value::Class(cls));
                 Ok(cls)
             }
         }
@@ -2438,7 +2434,7 @@ impl Vm {
     pub fn equal(&mut self, a: &Value, b: &Value) -> Result<bool, Unwind> {
         if let Value::Object(_) = a {
             return Ok(self
-                .call_method(a, self.s.eq, vec![b.clone()], None)?
+                .call_method(a, self.s.eq, vec![*b], None)?
                 .truthy());
         }
         Ok(values_eq(&self.heap, a, b))
@@ -2518,7 +2514,7 @@ impl Vm {
                 r?
             }
             Value::Range(r) => {
-                let (lo, hi, excl) = self.heap[r].clone();
+                let (lo, hi, excl) = self.heap[r];
                 let lo = if lo.is_nil() { String::new() } else { self.inspect(&lo)? };
                 let hi = if hi.is_nil() { String::new() } else { self.inspect(&hi)? };
                 format!("{lo}{}{hi}", if excl { "..." } else { ".." })
@@ -2541,17 +2537,36 @@ fn mark_frame(m: &mut Marker, f: &Frame) {
     for v in f.block.iter().chain(&f.exc) {
         m.value(v);
     }
-    m.class(&f.target);
-    if let Some((owner, _)) = &f.method {
+    m.class(f.target);
+    if let Some((owner, _)) = f.method {
         m.class(owner);
     }
     match &f.pending {
         Some(Unwind::Error(v) | Unwind::Break { value: v, .. } | Unwind::Return { value: v, .. }) => {
             m.value(v)
         }
-        Some(Unwind::Raise(c, _)) => m.class(c),
+        Some(Unwind::Raise(c, _)) => m.class(*c),
         None => {}
     }
+}
+
+/// Gives class `c` its singleton class.
+fn attach_meta(heap: &mut Heap, c: ClassRef, class: ClassRef, module: ClassRef) {
+    let cc = &heap[c];
+    let sup = if cc.is_singleton {
+        class
+    } else if cc.is_module {
+        module
+    } else {
+        match cc.superclass {
+            Some(s) => heap[s].meta.get().unwrap_or(class),
+            None => class,
+        }
+    };
+    let name = format!("#<Class:{}>", cc.name());
+    let meta = heap.alloc(RClass::new_singleton(name, sup));
+    heap[meta].attached.set(Some(c));
+    heap[c].meta.set(Some(meta));
 }
 
 fn proc_tag(blk: &Option<Value>) -> u64 {

@@ -6,8 +6,7 @@
 //! `unsafe` code: a handle to a slot that has been freed and reused has a
 //! stale generation and panics on use instead of reading another object.
 //!
-//! Classes are not in the heap; they stay reference counted (`Rc<RClass>`),
-//! and the collector traces through them to the values they hold.
+//! Classes and modules are heap objects too, so a `Value` is `Copy`.
 //!
 //! Collection is a stop-the-world mark-sweep (mruby's is incremental). It
 //! only runs at *safe points*: between instructions of the outermost
@@ -18,11 +17,9 @@
 
 use crate::value::{Env, EnvRegs, Method, ProcBody, RClass, RHash, RObject, RProc, Value};
 use std::cell::RefCell;
-use std::collections::HashSet;
 use std::fmt;
 use std::marker::PhantomData;
 use std::ops::Index;
-use std::rc::Rc;
 
 /// A handle to a heap object of type `T`.
 pub struct Gc<T> {
@@ -55,10 +52,9 @@ impl<T> fmt::Debug for Gc<T> {
 
 impl<T: HeapObj> Gc<T> {
     /// Identity of the object, unique among live objects of all types and
-    /// never 0. The low 3 bits hold the type's tag (1..=7), so ids never
-    /// equal an 8-aligned address (classes use their `Rc` address).
+    /// never 0. The low 4 bits hold the type's tag (1..=15).
     pub fn id(self) -> u64 {
-        (self.generation as u64) << 40 | (self.idx as u64) << 3 | T::TAG
+        (self.generation as u64) << 40 | (self.idx as u64) << 4 | T::TAG
     }
 }
 
@@ -69,6 +65,7 @@ pub type RangeRef = Gc<(Value, Value, bool)>;
 pub type ProcRef = Gc<RProc>;
 pub type ObjRef = Gc<RObject>;
 pub type EnvRef = Gc<Env>;
+pub type ClassRef = Gc<RClass>;
 
 struct Slot<T> {
     generation: u32,
@@ -211,6 +208,7 @@ heap_types! {
     procs: RProc = 5,
     objects: RObject = 6,
     envs: Env = 7,
+    classes: RClass = 8,
 }
 
 /// A collection runs once this many objects were allocated since the last
@@ -302,7 +300,7 @@ impl<T: HeapObj> Index<&Gc<T>> for Heap {
 enum Gray {
     Val(Value),
     Env(EnvRef),
-    Class(Rc<RClass>),
+    Class(ClassRef),
 }
 
 /// The mark phase: roots are added with [`Marker::value`] & co, then
@@ -312,7 +310,6 @@ pub struct Marker<'h> {
     heap: &'h Heap,
     marks: Marks,
     gray: Vec<Gray>,
-    classes: HashSet<*const RClass>,
 }
 
 impl<'h> Marker<'h> {
@@ -321,15 +318,14 @@ impl<'h> Marker<'h> {
             heap,
             marks: heap.new_marks(),
             gray: Vec::new(),
-            classes: HashSet::new(),
         }
     }
 
     pub fn value(&mut self, v: &Value) {
         match v {
             Value::Nil | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Sym(_) => {}
-            Value::Class(c) => self.class(c),
-            v => self.gray.push(Gray::Val(v.clone())),
+            Value::Class(c) => self.class(*c),
+            v => self.gray.push(Gray::Val(*v)),
         }
     }
 
@@ -337,10 +333,8 @@ impl<'h> Marker<'h> {
         self.gray.push(Gray::Env(e));
     }
 
-    pub fn class(&mut self, c: &Rc<RClass>) {
-        if !self.classes.contains(&Rc::as_ptr(c)) {
-            self.gray.push(Gray::Class(c.clone()));
-        }
+    pub fn class(&mut self, c: ClassRef) {
+        self.gray.push(Gray::Class(c));
     }
 
     /// Marks everything reachable from the roots given so far.
@@ -399,11 +393,11 @@ impl<'h> Marker<'h> {
                 Value::Object(h) => {
                     if self.visit(h) {
                         let o = &heap[h];
-                        self.class(&o.class);
+                        self.class(o.class);
                         for (_, v) in &o.ivars.borrow().items {
                             self.value(v);
                         }
-                        if let Some(s) = o.singleton.borrow().as_ref() {
+                        if let Some(s) = o.singleton.get() {
                             self.class(s);
                         }
                     }
@@ -429,25 +423,19 @@ impl<'h> Marker<'h> {
                     }
                 }
             }
-            Gray::Class(c) => {
-                if !self.classes.insert(Rc::as_ptr(&c)) {
+            Gray::Class(h) => {
+                if !self.visit(h) {
                     return;
                 }
-                if let Some(s) = &c.superclass {
-                    self.class(s);
+                let c = &heap[h];
+                for k in c.superclass.iter().chain(c.meta.get().iter()) {
+                    self.class(*k);
                 }
                 for m in c.includes.borrow().iter().chain(c.prepends.borrow().iter()) {
-                    self.class(m);
+                    self.class(*m);
                 }
-                if let Some(m) = c.meta.borrow().as_ref() {
-                    self.class(m);
-                }
-                // weak links can be upgraded later, so what they reach must stay
-                if let Some(a) = c.attached_class() {
-                    self.class(&a);
-                }
-                if let Some(o) = c.outer_class() {
-                    self.class(&o);
+                for k in c.attached.get().iter().chain(c.outer.get().iter()) {
+                    self.class(*k);
                 }
                 for v in c.consts.borrow().values() {
                     self.value(v);
@@ -469,10 +457,10 @@ impl<'h> Marker<'h> {
         if let Some(b) = &p.block {
             self.value(b);
         }
-        if let Some((owner, _)) = &p.method {
+        if let Some((owner, _)) = p.method {
             self.class(owner);
         }
-        self.class(&p.target);
+        self.class(p.target);
         match &p.body {
             ProcBody::Ruby { env, .. } => self.env(*env),
             ProcBody::Collect(buf) => self.value(&Value::Array(*buf)),

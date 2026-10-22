@@ -9,11 +9,11 @@ use crate::core::array::uniq;
 use crate::vm::{Arith, VmResult};
 
 fn yield1(vm: &mut Vm, b: &Value, x: &Value) -> VmResult {
-    vm.call_block(b, vec![x.clone()])
+    vm.call_block(b, vec![*x])
 }
 
 pub fn init(vm: &mut Vm) {
-    let e = vm.c.enumerable.clone();
+    let e = vm.c.enumerable;
     vm.def(&e, "to_a", |vm, s, _, _| Ok({ let v = to_vec(vm, s)?; vm.array(v) }));
     vm.def(&e, "entries", |vm, s, _, _| {
         Ok({ let v = to_vec(vm, s)?; vm.array(v) })
@@ -93,13 +93,13 @@ pub fn init(vm: &mut Vm) {
         for (i, x) in to_vec(vm, s)?.into_iter().enumerate() {
             vm.call_block(&b, vec![x, Value::Int(i as i64)])?;
         }
-        Ok(s.clone())
+        Ok(*s)
     });
     vm.def(&e, "each_with_object", |vm, s, a, b| {
         let b = need_block(vm, b)?;
         let memo = arg(a, 0);
         for x in to_vec(vm, s)? {
-            vm.call_block(&b, vec![x, memo.clone()])?;
+            vm.call_block(&b, vec![x, memo])?;
         }
         Ok(memo)
     });
@@ -125,14 +125,14 @@ pub fn init(vm: &mut Vm) {
             let w = vm.array(w.to_vec());
             vm.call_block(&b, vec![w])?;
         }
-        Ok(s.clone())
+        Ok(*s)
     });
     let inject: NativeFn = |vm, s, a, b| {
         let mut items = to_vec(vm, s)?.into_iter();
         let (mut acc, op) = match (a, b) {
             ([Value::Sym(op)], None) => (items.next().unwrap_or(Value::Nil), Some(*op)),
-            ([init, Value::Sym(op)], None) => (init.clone(), Some(*op)),
-            ([init], Some(_)) => (init.clone(), None),
+            ([init, Value::Sym(op)], None) => (*init, Some(*op)),
+            ([init], Some(_)) => (*init, None),
             ([], Some(_)) => (items.next().unwrap_or(Value::Nil), None),
             _ => return Err(vm.arg_err("wrong arguments for inject")),
         };
@@ -178,7 +178,7 @@ pub fn init(vm: &mut Vm) {
             keyed.push(vm.array(vec![k, x]));
         }
         let first = |vm: &Vm, p: &Value| match p {
-            Value::Array(p) => vm.heap[p].borrow()[0].clone(),
+            Value::Array(p) => vm.heap[p].borrow()[0],
             _ => unreachable!(),
         };
         let sorted = merge_sort(vm, keyed, &mut |vm, x, y| {
@@ -190,7 +190,7 @@ pub fn init(vm: &mut Vm) {
                 .into_iter()
                 .map(|p| {
                     if let Value::Array(p) = p {
-                        vm.heap[p].borrow()[1].clone()
+                        vm.heap[p].borrow()[1]
                     } else {
                         p
                     }
@@ -324,7 +324,7 @@ pub fn init(vm: &mut Vm) {
         for x in to_vec(vm, s)? {
             yield1(vm, &b, &x)?;
         }
-        Ok(s.clone())
+        Ok(*s)
     });
 }
 
@@ -356,7 +356,7 @@ pub fn sum(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>) -> VmResult {
     let mut acc = if a.is_empty() {
         Value::Int(0)
     } else {
-        a[0].clone()
+        a[0]
     };
     for x in to_vec(vm, s)? {
         let x = match b {
@@ -389,7 +389,7 @@ fn extreme(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>, want: Orderin
             None => x,
             Some(cur) => {
                 let o = match b {
-                    Some(b) => match vm.call_block(b, vec![x.clone(), cur.clone()])? {
+                    Some(b) => match vm.call_block(b, vec![x, cur])? {
                         Value::Int(i) => i.cmp(&0),
                         _ => return Err(vm.arg_err("comparison failed")),
                     },
@@ -426,7 +426,7 @@ fn quantifier(
     let mut hits = 0;
     for x in &items {
         let hit = match (a, b) {
-            ([pattern], _) => vm.send(pattern, "===", vec![x.clone()])?.truthy(),
+            ([pattern], _) => vm.send(pattern, "===", vec![*x])?.truthy(),
             (_, Some(b)) => yield1(vm, b, x)?.truthy(),
             _ => x.truthy(),
         };

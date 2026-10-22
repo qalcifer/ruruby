@@ -8,7 +8,8 @@
 //! later, mechanical step.
 
 use crate::symbol::{Sym, SymbolTable};
-use crate::value::{Method, RClass};
+use crate::gc::ClassRef;
+use crate::value::Method;
 use std::cell::RefCell;
 use std::fmt::Write;
 use std::rc::Rc;
@@ -259,13 +260,13 @@ impl ArgSpec {
 
 /// A compiled unit: method body, block, class body, or top-level script.
 /// Inline cache of a `Send`: the method found for receivers of one class
-/// (by address) in one method epoch (mruby: the method cache; CRuby: the
+/// (by heap id) in one method epoch (mruby: the method cache; CRuby: the
 /// call cache of a call site).
 #[derive(Default)]
 pub struct CallCache {
-    pub class: usize,
+    pub class: u64,
     pub epoch: u64,
-    pub hit: Option<(Method, Rc<RClass>)>,
+    pub hit: Option<(Method, ClassRef)>,
 }
 
 #[derive(Debug, Default)]

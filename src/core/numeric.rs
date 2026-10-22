@@ -4,7 +4,7 @@ use super::*;
 use crate::vm::{Arith, VmResult};
 
 pub fn init(vm: &mut Vm) {
-    let n = vm.c.numeric.clone();
+    let n = vm.c.numeric;
     vm.def(&n, "+", |vm, s, a, _| vm.arith(Arith::Add, s, &arg(a, 0)));
     vm.def(&n, "-", |vm, s, a, _| vm.arith(Arith::Sub, s, &arg(a, 0)));
     vm.def(&n, "*", |vm, s, a, _| vm.arith(Arith::Mul, s, &arg(a, 0)));
@@ -35,7 +35,7 @@ pub fn init(vm: &mut Vm) {
     vm.def(&n, "-@", |vm, s, _, _| {
         vm.arith(Arith::Sub, &Value::Int(0), s)
     });
-    vm.def(&n, "+@", |_, s, _, _| Ok(s.clone()));
+    vm.def(&n, "+@", |_, s, _, _| Ok(*s));
     vm.def(&n, "==", |vm, s, a, _| {
         Ok(Value::Bool(values_eq(&vm.heap, s, &arg(a, 0))))
     });
@@ -60,7 +60,7 @@ pub fn init(vm: &mut Vm) {
         } else if compare(vm, s, &hi)?.is_gt() {
             hi
         } else {
-            s.clone()
+            *s
         })
     });
     vm.def(&n, "to_s", to_s);
@@ -102,40 +102,40 @@ pub fn init(vm: &mut Vm) {
             },
         );
         let positive = float_of(vm, &step)? > 0.0;
-        let mut i = s.clone();
+        let mut i = *s;
         loop {
             let o = compare(vm, &i, &limit)?;
             if (positive && o.is_gt()) || (!positive && o.is_lt()) {
                 break;
             }
-            vm.call_block(&b, vec![i.clone()])?;
+            vm.call_block(&b, vec![i])?;
             i = vm.arith(Arith::Add, &i, &step)?;
         }
-        Ok(s.clone())
+        Ok(*s)
     });
 
-    let i = vm.c.integer.clone();
+    let i = vm.c.integer;
     vm.def(&i, "times", |vm, s, _, b| {
         let b = need_block(vm, b)?;
         let n = int_of(vm, s)?;
         for k in 0..n {
             vm.call_block(&b, vec![Value::Int(k)])?;
         }
-        Ok(s.clone())
+        Ok(*s)
     });
     vm.def(&i, "upto", |vm, s, a, b| {
         let b = need_block(vm, b)?;
         for k in int_of(vm, s)?..=int_of(vm, &arg(a, 0))? {
             vm.call_block(&b, vec![Value::Int(k)])?;
         }
-        Ok(s.clone())
+        Ok(*s)
     });
     vm.def(&i, "downto", |vm, s, a, b| {
         let b = need_block(vm, b)?;
         for k in (int_of(vm, &arg(a, 0))?..=int_of(vm, s)?).rev() {
             vm.call_block(&b, vec![Value::Int(k)])?;
         }
-        Ok(s.clone())
+        Ok(*s)
     });
     vm.def(&i, "even?", |vm, s, _, _| {
         Ok(Value::Bool(int_of(vm, s)? % 2 == 0))
@@ -201,9 +201,9 @@ pub fn init(vm: &mut Vm) {
             int_of(vm, s)?.wrapping_shr(int_of(vm, &arg(a, 0))? as u32),
         ))
     });
-    vm.def(&i, "hash", |_, s, _, _| Ok(s.clone()));
+    vm.def(&i, "hash", |_, s, _, _| Ok(*s));
 
-    let f = vm.c.float.clone();
+    let f = vm.c.float;
     vm.def(&f, "nan?", |vm, s, _, _| {
         Ok(Value::Bool(float_of(vm, s)?.is_nan()))
     });
@@ -232,12 +232,12 @@ pub fn init(vm: &mut Vm) {
     ];
     for (name, v) in float_consts {
         let s = vm.intern(name);
-        f.consts.borrow_mut().insert(s, Value::Float(v));
+        vm.heap[f].consts.borrow_mut().insert(s, Value::Float(v));
     }
-    let math = RClass::new("Math", None, true);
+    let math = vm.new_class("Math", None, true);
     for (name, v) in [("PI", std::f64::consts::PI), ("E", std::f64::consts::E)] {
         let s = vm.intern(name);
-        math.consts.borrow_mut().insert(s, Value::Float(v));
+        vm.heap[math].consts.borrow_mut().insert(s, Value::Float(v));
     }
     vm.def_singleton(&math, "sqrt", |vm, _, a, _| {
         Ok(Value::Float(float_of(vm, &arg(a, 0))?.sqrt()))
@@ -323,7 +323,7 @@ fn to_s(vm: &mut Vm, s: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
 fn round_with(vm: &mut Vm, s: &Value, a: &[Value], f: fn(f64) -> f64) -> VmResult {
     let digits = if a.is_empty() { 0 } else { int_of(vm, &a[0])? };
     match s {
-        Value::Int(_) if digits >= 0 => Ok(s.clone()),
+        Value::Int(_) if digits >= 0 => Ok(*s),
         _ => {
             let x = float_of(vm, s)?;
             if digits > 0 {

@@ -109,3 +109,27 @@ fn garbage_is_collected_while_iterators_run() {
     "#);
     assert_eq!(out, "true\ntrue\ntrue\n");
 }
+
+#[test]
+fn anonymous_classes_are_collected() {
+    // classes live in the heap too; unreachable ones are freed, named and
+    // referenced ones survive
+    let out = run(r#"
+        Kept = Class.new { def hi = "kept" }
+        held = [Class.new(StandardError) { def hi = "held" }]
+        i = 0
+        while i < 20_000
+          c = Class.new { def x = 1 }
+          c.new.x
+          Module.new
+          i += 1
+        end
+        GC.start
+        nil
+        p GC.live < 20_000, Kept.new.hi, held[0].new.hi, held[0].ancestors.include?(StandardError)
+        GC.stress = true
+        k = Class.new(Kept) { def hi = super + "!" }
+        p k.new.hi, Kept.name, k.superclass == Kept
+    "#);
+    assert_eq!(out, "true\n\"kept\"\n\"held\"\ntrue\n\"kept!\"\n\"Kept\"\ntrue\n");
+}

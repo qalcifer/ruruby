@@ -3,16 +3,17 @@
 //!
 //! mruby packs a value into one machine word (NaN/word boxing). Here a
 //! `Value` is a Rust enum; heap objects live in the [`Heap`](crate::gc::Heap)
-//! and a `Value` holds a [`Gc`](crate::gc::Gc) handle to them. Classes are
-//! the exception: they stay reference counted (`Rc<RClass>`).
+//! and a `Value` holds a [`Gc`](crate::gc::Gc) handle to them, classes
+//! included, so a `Value` is `Copy`.
 
-use crate::gc::{ArrayRef, EnvRef, HashRef, Heap, ObjRef, ProcRef, RangeRef, StrRef};
+use crate::gc::{ArrayRef, ClassRef, EnvRef, HashRef, Heap, ObjRef, ProcRef, RangeRef, StrRef};
 use crate::opcode::Irep;
 use crate::symbol::{Sym, SymMap};
 use crate::vm::{Vm, VmResult};
 use std::cell::RefCell;
 use std::cmp::Ordering;
-use std::rc::{Rc, Weak};
+use std::cell::Cell;
+use std::rc::Rc;
 
 /// A method implemented in Rust (mruby: `mrb_func_t`).
 pub type NativeFn = fn(&mut Vm, &Value, &[Value], Option<&Value>) -> VmResult;
@@ -44,7 +45,7 @@ impl IvTable {
         self.items
             .iter()
             .find(|(s, _)| *s == k)
-            .map(|(_, v)| v.clone())
+            .map(|(_, v)| *v)
     }
 
     pub fn set(&mut self, k: Sym, v: Value) {
@@ -94,24 +95,25 @@ impl MethodTable {
 
 /// Included or prepended modules; `push` invalidates the method caches.
 #[derive(Default)]
-pub struct ModuleList(RefCell<Vec<Rc<RClass>>>);
+pub struct ModuleList(RefCell<Vec<ClassRef>>);
 
 impl ModuleList {
-    pub fn borrow(&self) -> std::cell::Ref<'_, Vec<Rc<RClass>>> {
+    pub fn borrow(&self) -> std::cell::Ref<'_, Vec<ClassRef>> {
         self.0.borrow()
     }
 
-    pub fn push(&self, m: Rc<RClass>) {
+    pub fn push(&self, m: ClassRef) {
         methods_changed();
         self.0.borrow_mut().push(m);
     }
 }
 
-/// Class or module (mruby: `struct RClass`).
+/// Class or module (mruby: `struct RClass`). A heap object, referred to by
+/// [`ClassRef`] handles.
 pub struct RClass {
     /// Use [`RClass::name`]; anonymous classes get their name on first constant assignment.
     pub name_cell: RefCell<String>,
-    pub superclass: Option<Rc<RClass>>,
+    pub superclass: Option<ClassRef>,
     pub is_module: bool,
     pub methods: MethodTable,
     pub consts: RefCell<SymMap<Value>>,
@@ -122,19 +124,19 @@ pub struct RClass {
     pub ivars: RefCell<IvTable>,
     pub cvars: RefCell<IvTable>,
     /// The singleton class ("metaclass"), created on demand (mruby: `MRB_TT_SCLASS`).
-    pub meta: RefCell<Option<Rc<RClass>>>,
+    pub meta: Cell<Option<ClassRef>>,
     /// Set on singleton classes.
     pub is_singleton: bool,
     /// For a class's singleton class: the class it belongs to.
-    pub attached: RefCell<Option<Weak<RClass>>>,
+    pub attached: Cell<Option<ClassRef>>,
     /// The class/module this one was defined in (an approximation of mruby's lexical `cref`).
-    pub outer: RefCell<Option<Weak<RClass>>>,
+    pub outer: Cell<Option<ClassRef>>,
 }
 
 impl RClass {
-    pub fn new(name: &str, superclass: Option<Rc<RClass>>, is_module: bool) -> Rc<RClass> {
+    pub fn new(name: &str, superclass: Option<ClassRef>, is_module: bool) -> RClass {
         methods_changed();
-        Rc::new(RClass {
+        RClass {
             name_cell: RefCell::new(name.to_string()),
             superclass,
             is_module,
@@ -148,26 +150,14 @@ impl RClass {
             is_singleton: false,
             attached: Default::default(),
             outer: Default::default(),
-        })
+        }
     }
 
-    pub fn new_singleton(name: String, superclass: Rc<RClass>) -> Rc<RClass> {
-        methods_changed();
-        Rc::new(RClass {
-            name_cell: RefCell::new(name),
-            superclass: Some(superclass),
-            is_module: false,
-            methods: Default::default(),
-            consts: Default::default(),
-            includes: Default::default(),
-            prepends: Default::default(),
-            ivars: Default::default(),
-            cvars: Default::default(),
-            meta: Default::default(),
+    pub fn new_singleton(name: String, superclass: ClassRef) -> RClass {
+        RClass {
             is_singleton: true,
-            attached: Default::default(),
-            outer: Default::default(),
-        })
+            ..RClass::new(&name, Some(superclass), false)
+        }
     }
 
     pub fn name(&self) -> String {
@@ -183,25 +173,25 @@ impl RClass {
         *self.name_cell.borrow_mut() = name;
     }
 
-    pub fn outer_class(&self) -> Option<Rc<RClass>> {
-        self.outer.borrow().as_ref().and_then(Weak::upgrade)
+    pub fn outer_class(&self) -> Option<ClassRef> {
+        self.outer.get()
     }
 
     /// The class a singleton class of a class belongs to.
-    pub fn attached_class(&self) -> Option<Rc<RClass>> {
-        self.attached.borrow().as_ref().and_then(Weak::upgrade)
+    pub fn attached_class(&self) -> Option<ClassRef> {
+        self.attached.get()
     }
 }
 
 pub struct RObject {
-    pub class: Rc<RClass>,
+    pub class: ClassRef,
     pub ivars: RefCell<IvTable>,
     /// Per-object singleton class (`def obj.m`, `obj.extend(M)`).
-    pub singleton: RefCell<Option<Rc<RClass>>>,
+    pub singleton: Cell<Option<ClassRef>>,
 }
 
 impl RObject {
-    pub fn new(class: Rc<RClass>) -> RObject {
+    pub fn new(class: ClassRef) -> RObject {
         RObject {
             class,
             ivars: Default::default(),
@@ -244,8 +234,8 @@ pub struct RProc {
     pub block: Option<Value>,
     /// Frame id of the enclosing method, the target of `return` inside the block.
     pub home: usize,
-    pub method: Option<(Rc<RClass>, Sym)>,
-    pub target: Rc<RClass>,
+    pub method: Option<(ClassRef, Sym)>,
+    pub target: ClassRef,
     /// Lambdas check arity strictly and `return` from themselves.
     pub lambda: bool,
 }
@@ -276,7 +266,7 @@ impl RHash {
         self.pairs
             .iter()
             .find(|(key, _)| eql(heap, key, k))
-            .map(|(_, v)| v.clone())
+            .map(|(_, v)| *v)
     }
 
     pub fn contains(&self, heap: &Heap, k: &Value) -> bool {
@@ -304,7 +294,7 @@ impl Default for RHash {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Copy, Default)]
 pub enum Value {
     #[default]
     Nil,
@@ -317,7 +307,7 @@ pub enum Value {
     Hash(HashRef),
     Range(RangeRef),
     Proc(ProcRef),
-    Class(Rc<RClass>),
+    Class(ClassRef),
     Object(ObjRef),
 }
 
@@ -348,7 +338,7 @@ impl Value {
             (Hash(a), Hash(b)) => a == b,
             (Range(a), Range(b)) => a == b,
             (Proc(a), Proc(b)) => a == b,
-            (Class(a), Class(b)) => Rc::ptr_eq(a, b),
+            (Class(a), Class(b)) => a == b,
             (Object(a), Object(b)) => a == b,
             _ => false,
         }
@@ -363,7 +353,7 @@ impl Value {
             Value::Range(h) => h.id(),
             Value::Proc(h) => h.id(),
             Value::Object(h) => h.id(),
-            Value::Class(c) => Rc::as_ptr(c) as usize as u64,
+            Value::Class(h) => h.id(),
             _ => 0,
         }
     }

@@ -28,9 +28,9 @@ pub fn norm_index(i: i64, len: usize) -> Option<usize> {
 }
 
 pub fn init(vm: &mut Vm) {
-    let c = vm.c.string.clone();
-    vm.def(&c, "to_s", |_, s, _, _| Ok(s.clone()));
-    vm.def(&c, "to_str", |_, s, _, _| Ok(s.clone()));
+    let c = vm.c.string;
+    vm.def(&c, "to_s", |_, s, _, _| Ok(*s));
+    vm.def(&c, "to_str", |_, s, _, _| Ok(*s));
     vm.def(&c, "inspect", |vm, s, _, _| {
         Ok(vm.str(inspect_str(&s_of(vm, s)?)))
     });
@@ -147,7 +147,7 @@ pub fn init(vm: &mut Vm) {
             let ch = vm.str(ch.to_string());
             vm.call_block(&b, vec![ch])?;
         }
-        Ok(s.clone())
+        Ok(*s)
     });
     vm.def(&c, "each_line", |vm, s, _, b| {
         let b = need_block(vm, b)?;
@@ -155,7 +155,7 @@ pub fn init(vm: &mut Vm) {
             let line = vm.str(line);
             vm.call_block(&b, vec![line])?;
         }
-        Ok(s.clone())
+        Ok(*s)
     });
     vm.def(&c, "ord", |vm, s, _, _| {
         s_of(vm, s)?
@@ -187,14 +187,14 @@ pub fn init(vm: &mut Vm) {
     let append: NativeFn = |vm, s, a, _| {
         let piece = vm.to_s(&arg(a, 0))?;
         vm.heap[this_str(vm, s)?].borrow_mut().push_str(&piece);
-        Ok(s.clone())
+        Ok(*s)
     };
     vm.def(&c, "<<", append);
     vm.def(&c, "concat", append);
     vm.def(&c, "replace", |vm, s, a, _| {
         let new = str_of(vm, &arg(a, 0))?;
         *vm.heap[this_str(vm, s)?].borrow_mut() = new;
-        Ok(s.clone())
+        Ok(*s)
     });
     vm.def(&c, "==", |vm, s, a, _| {
         Ok(Value::Bool(values_eq(&vm.heap, s, &arg(a, 0))))
@@ -376,7 +376,7 @@ fn slice(vm: &mut Vm, s: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
             })
         }
         (Value::Range(r), _) => {
-            let r = vm.heap[r].clone();
+            let r = vm.heap[r];
             let (lo, hi) = (int_of(vm, &r.0)?, if r.1.is_nil() { -1 } else { int_of(vm, &r.1)? });
             let Some(start) = norm_index(lo, len) else {
                 return Ok(Value::Nil);

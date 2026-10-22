@@ -36,34 +36,34 @@ pub fn range_vec(vm: &mut Vm, r: &(Value, Value, bool)) -> Result<Vec<Value>, Un
 /// The receiver's (begin, end, exclusive?).
 fn this(vm: &Vm, s: &Value) -> Result<(Value, Value, bool), Unwind> {
     match s {
-        Value::Range(r) => Ok(vm.heap[r].clone()),
+        Value::Range(r) => Ok(vm.heap[r]),
         _ => Err(vm.type_err("expected a Range")),
     }
 }
 
 pub fn init(vm: &mut Vm) {
-    let c = vm.c.range.clone();
-    c.includes.push(vm.c.enumerable.clone());
+    let c = vm.c.range;
+    vm.heap[c].includes.push(vm.c.enumerable);
     vm.def(&c, "first", |vm, s, a, _| {
         let r = this(vm, s)?;
         if a.is_empty() {
-            return Ok(r.0.clone());
+            return Ok(r.0);
         }
         let n = int_of(vm, &a[0])?.max(0) as usize;
         let v = range_vec(vm, &r)?;
         Ok(vm.array(v.into_iter().take(n).collect()))
     });
-    vm.def(&c, "begin", |vm, s, _, _| Ok(this(vm, s)?.0.clone()));
+    vm.def(&c, "begin", |vm, s, _, _| Ok(this(vm, s)?.0));
     vm.def(&c, "last", |vm, s, a, _| {
         let r = this(vm, s)?;
         if a.is_empty() {
-            return Ok(r.1.clone());
+            return Ok(r.1);
         }
         let n = int_of(vm, &a[0])?.max(0) as usize;
         let v = range_vec(vm, &r)?;
         Ok(vm.array(v[v.len().saturating_sub(n)..].to_vec()))
     });
-    vm.def(&c, "end", |vm, s, _, _| Ok(this(vm, s)?.1.clone()));
+    vm.def(&c, "end", |vm, s, _, _| Ok(this(vm, s)?.1));
     vm.def(&c, "exclude_end?", |vm, s, _, _| {
         Ok(Value::Bool(this(vm, s)?.2))
     });
@@ -81,7 +81,7 @@ pub fn init(vm: &mut Vm) {
                 vm.call_block(&b, vec![x])?;
             }
         }
-        Ok(s.clone())
+        Ok(*s)
     });
     vm.def(&c, "reverse_each", |vm, s, _, b| {
         let b = need_block(vm, b)?;
@@ -89,7 +89,7 @@ pub fn init(vm: &mut Vm) {
         for x in range_vec(vm, &r)?.into_iter().rev() {
             vm.call_block(&b, vec![x])?;
         }
-        Ok(s.clone())
+        Ok(*s)
     });
     vm.def(&c, "step", |vm, s, a, b| {
         let b = need_block(vm, b)?;
@@ -104,7 +104,7 @@ pub fn init(vm: &mut Vm) {
             vm.call_block(&b, vec![Value::Int(i)])?;
             i += step;
         }
-        Ok(s.clone())
+        Ok(*s)
     });
     vm.def(&c, "size", size);
     vm.def(&c, "count", |vm, s, a, b| {
