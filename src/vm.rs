@@ -1646,6 +1646,8 @@ impl Vm {
 
     /// Mark-sweep collection (mruby: `mrb_full_gc`). Only called at a safe
     /// point, where `current` and the VM's fields hold every live value.
+    #[cold]
+    #[inline(never)]
     fn collect_garbage(&mut self, current: &Frame) {
         let mut m = Marker::new(&self.heap);
         for f in self.frames.iter().chain(std::iter::once(current)) {
@@ -1668,6 +1670,8 @@ impl Vm {
     /// Looks for a handler in `f` covering instruction `at`; `None` when one
     /// took the unwind (and `f` continues there). Exceptions go to any
     /// handler, `break`/`return` passing through only run `ensure` clauses.
+    #[cold]
+    #[inline(never)]
     fn catch(&mut self, f: &mut Frame, e: Unwind, at: usize, own: bool) -> Option<Unwind> {
         let e = self.materialize(e);
         let covers = |h: &&crate::opcode::CatchHandler| h.start <= at && at < h.end;
