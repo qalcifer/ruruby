@@ -95,3 +95,17 @@ fn gc_module() {
     "#);
     assert_eq!(out, "false\ntrue\ntrue\nfalse\ntrue\ntrue\nfalse\ntrue\ntrue\n");
 }
+
+#[test]
+fn garbage_is_collected_while_iterators_run() {
+    // times/each/map are Ruby code (prelude.rb), so their loops reach the
+    // collector's safe points
+    let out = run(r#"
+        seen = 0
+        30_000.times { |i| x = [i, "s#{i}"]; seen = GC.count if i == 29_999 }
+        list = [1] * 3
+        list.each { 20_000.times { |i| {i => [i]} } }
+        p seen > 0, GC.count > seen, GC.live < 50_000
+    "#);
+    assert_eq!(out, "true\ntrue\ntrue\n");
+}

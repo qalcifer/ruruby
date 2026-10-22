@@ -432,6 +432,7 @@ impl Vm {
             live_homes: Vec::new(),
         };
         crate::core::init(&mut vm);
+        crate::core::load_prelude(&mut vm);
         vm
     }
 

@@ -32,10 +32,13 @@ fn deep_ruby_recursion_needs_no_native_stack() {
               def initialize(n) = @n = n
               def +(o) = @n == 0 ? o : Num.new(@n - 1) + (o + 1)
             end
-            p down(9_000), via_yield(3_000), Num.new(4_000) + 0
+            # each/map/times are written in Ruby (prelude.rb), so recursing
+            # through them needs no native stack either
+            def via_each(n) = n == 0 ? 0 : [n].map { |k| 1 + via_each(k - 1) }.first
+            p down(9_000), via_yield(3_000), Num.new(4_000) + 0, via_each(2_000)
         "#)
     });
-    assert_eq!(out, "9000\n3000\n4000\n");
+    assert_eq!(out, "9000\n3000\n4000\n2000\n");
 }
 
 #[test]
@@ -53,14 +56,15 @@ fn runaway_recursion_is_a_system_stack_error() {
 
 #[test]
 fn natives_calling_back_into_ruby_stay_within_the_stack_budget() {
-    // each level recurses natively through Array#map (~3 KiB in release,
-    // ~24 KiB in debug); past the budget it's a SystemStackError, not a crash
+    // each level recurses natively through Enumerable#inject, a native that
+    // calls its block (~3 KiB in release, ~24 KiB in debug); past the budget
+    // it's a SystemStackError, not a crash
     let out = small_stack(2048, || {
         let mut interp = Interpreter::new();
         interp.vm.stack_budget = 256 << 10;
         interp.capture_output();
         let src = r#"
-            def deep(n) = n == 0 ? 0 : [n].map { |k| 1 + deep(k - 1) }.first
+            def deep(n) = n == 0 ? 0 : [n].inject(0) { |_, k| 1 + deep(k - 1) }
             p deep(5)
             p(begin; deep(100_000); rescue SystemStackError; :caught; end)
             p deep(5)

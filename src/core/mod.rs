@@ -33,6 +33,16 @@ pub fn init(vm: &mut Vm) {
     gc::init(vm);
 }
 
+/// Core methods written in Ruby (`prelude.rb`), compiled into every VM.
+pub fn load_prelude(vm: &mut Vm) {
+    const PRELUDE: &str = include_str!("prelude.rb");
+    let prog = crate::parser::parse_file(PRELUDE, "prelude.rb", 1).expect("prelude parses");
+    let irep = crate::codegen::compile(&prog, &mut vm.syms).expect("prelude compiles");
+    if let Err(e) = vm.run_main(irep) {
+        panic!("prelude failed: {}", vm.exc_message(&e));
+    }
+}
+
 /// Argument `i`, or nil when missing.
 pub fn arg(a: &[Value], i: usize) -> Value {
     a.get(i).cloned().unwrap_or(Value::Nil)
