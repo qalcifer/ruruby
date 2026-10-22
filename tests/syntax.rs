@@ -318,3 +318,21 @@ fn operations_never_clobber_locals() {
     "##;
     assert_eq!(run(src), "3\n[5, 10, -2]\n49\n\"abAB\"\n[3, 3]\n");
 }
+
+#[test]
+fn immediate_operands() {
+    // `x + 1` / `x - 2` compile to AddI/SubI; non-Integers and overflow
+    // take the ordinary path
+    let src = r##"
+        class Meters
+          def initialize(n) = @n = n
+          def +(o) = "#{@n + o}m"
+        end
+        big = 9223372036854775807
+        p 1 + 1, 5 - -2, 1.5 + 1, big + 1, -big - 3, "a" + "b", [1, 2] - [1], Meters.new(2) + 3
+    "##;
+    assert_eq!(
+        run(src),
+        "2\n7\n2.5\n9.223372036854776e+18\n-9.223372036854776e+18\n\"ab\"\n[2]\n\"5m\"\n"
+    );
+}

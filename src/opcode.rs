@@ -90,6 +90,11 @@ pub enum Op {
     ReturnBlk(Reg),
     /// `break` inside a block.
     Break(Reg),
+    /// R[a] = R[a] + i (mruby: ADDI). Anything but an Integer without
+    /// overflow takes the slow path, which puts `i` in R[a+1].
+    AddI(Reg, i64),
+    /// R[a] = R[a] - i (mruby: SUBI)
+    SubI(Reg, i64),
     /// R[a] = R[a] op R[a+1], with a fast path for numbers.
     Add(Reg),
     Sub(Reg),

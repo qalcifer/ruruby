@@ -709,8 +709,16 @@ impl Codegen<'_> {
             let a = self.op_reg(dst);
             self.expr(recv, a)?;
             let r = self.alloc();
-            self.expr(arg, r)?;
-            self.emit(op(a));
+            // `x + 1`, `n - 2`: the operand is an immediate (R[a+1] stays
+            // reserved for the slow path)
+            match (name, arg) {
+                ("+", Node::Int(i)) => _ = self.emit(Op::AddI(a, *i)),
+                ("-", Node::Int(i)) => _ = self.emit(Op::SubI(a, *i)),
+                _ => {
+                    self.expr(arg, r)?;
+                    self.emit(op(a));
+                }
+            }
             self.op_done(a, dst);
             return Ok(());
         }

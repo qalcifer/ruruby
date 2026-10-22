@@ -1933,6 +1933,21 @@ impl Vm {
                     value: self.reg(f, a),
                 });
             }
+            Op::AddI(a, i) | Op::SubI(a, i) => {
+                let add = matches!(op, Op::AddI(..));
+                if let Value::Int(x) = self.reg(f, a)
+                    && let Some(v) = if add { x.checked_add(i) } else { x.checked_sub(i) }
+                {
+                    self.set_reg(f, a, Value::Int(v));
+                } else {
+                    self.set_reg(f, a + 1, Value::Int(i));
+                    return if add {
+                        self.arith_flow(f, a, Arith::Add, self.s.add)
+                    } else {
+                        self.arith_flow(f, a, Arith::Sub, self.s.sub)
+                    };
+                }
+            }
             Op::Add(a) => return self.arith_flow(f, a, Arith::Add, self.s.add),
             Op::Sub(a) => return self.arith_flow(f, a, Arith::Sub, self.s.sub),
             Op::Mul(a) => return self.arith_flow(f, a, Arith::Mul, self.s.mul),
