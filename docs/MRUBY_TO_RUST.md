@@ -206,7 +206,8 @@ Each step can be checked against mruby's own tests.
    values not copied, `step` inlined into the dispatch loop, inline method
    caches on `Send`, and classes in the GC heap so `Value` is `Copy`.
    `fib(30)` 0.79 → 0.23 s, a counting `while` loop 2.80 → 0.65 s (30M
-   iterations; CRuby 2.6: 0.69 s), `times`/`each` 3.3× faster. CRuby 2.6 runs
+   iterations; CRuby 2.6: 0.69 s), `times`/`each` 3.3× faster (later
+   0.18 s / 0.48 s, see below). CRuby 2.6 runs
    `fib(30)` in 0.14 s. Tried without gain (reverted): 16/24-byte instructions,
    compare-with-immediate instructions, splitting rare instructions out of the
    dispatch loop — each changed the large dispatch function's code for the
@@ -216,9 +217,15 @@ Each step can be checked against mruby's own tests.
    (0.54 s now, beating CRuby 2.6). The profile also shows the loop keeping
    `self`, the frame and `pc` on the stack (one ~37 KB function, too many live
    values for the registers) and ~13% of a call spent copying 208-byte frames
-   (boxing them was worse: one more indirection per field access). Next:
-   NaN-boxed 8-byte `Value`; a smaller dispatch function (handlers as separate
-   functions); fewer `Rc<Irep>` updates per call.
+   (boxing them was worse: one more indirection per field access). Then the
+   dispatch loop was cut down to the simplest instructions and Integer fast
+   paths, with `Send` and everything else out of line (`send_op`,
+   `step_slow`, which fetches its own instruction so the loop never copies an
+   `Op`), and the method epoch became an atomic (a thread-local read is a
+   function call on macOS). The loop now keeps `self` and the frame in
+   registers; its stack frame went from ~2.4 KiB to 784 bytes. `fib(30)` is
+   at 0.18 s (CRuby 2.6: 0.14 s), the `while` loop at 0.48 s (CRuby: 0.69 s).
+   Next: NaN-boxed 8-byte `Value`; fewer frame copies per call.
 7. **Numbers.** Bignum (`num-bigint`, matching `mruby-bigint`), Rational, Complex.
 8. **Enumerators.** `Enumerator`, external iteration (needs Fibers), `lazy`.
 9. **Standard gems** as Cargo features: `mruby-io`/`mruby-dir`, `mruby-time`,
