@@ -38,7 +38,23 @@ pub struct Parser {
     /// In a `case/in`: (subject var, cached deconstruct var, "cached" flag var),
     /// so every clause shares one `deconstruct` call.
     pm_cache: Option<(String, String, String)>,
+    /// Current nesting level, see [`MAX_DEPTH`].
+    depth: usize,
 }
+
+/// Deepest nesting accepted, by the parser and by the lexer for `#{}`.
+///
+/// The parser, the code generator and dropping the AST all recurse once per
+/// level, so input nested without bound would overflow the stack — a crash
+/// natively and a trap on wasm, whose default stack is 1 MiB. A level costs
+/// about 6-8 KiB of stack in a release build (several times that in debug),
+/// so this limit fits a 1 MiB stack with room to spare. Real code rarely
+/// nests 30 levels. Deeper input is a SyntaxError.
+///
+/// A level is a nested expression (a primary inside another one, `!x`,
+/// `-x`, `a = b`, `c ? a : b`, a nested pattern) or one more link of a chain
+/// such as `a + b + c` or `x.f.g`, since that builds a deeper tree too.
+pub const MAX_DEPTH: usize = 100;
 
 pub fn parse(src: &str) -> PResult<Program> {
     parse_file(src, "-", 1)
@@ -55,6 +71,7 @@ pub fn parse_file(src: &str, file: &str, line: u32) -> PResult<Program> {
         no_do: false,
         no_in: false,
         tmp: 0,
+        depth: 0,
     };
     let body = p.parse_stmts()?;
     if !p.at(&Tok::Eof) {
@@ -292,6 +309,24 @@ impl Parser {
         f(self)
     }
 
+    /// Enters one more nesting level (see [`MAX_DEPTH`]); callers restore `depth`.
+    fn enter(&mut self) -> PResult<()> {
+        if self.depth >= MAX_DEPTH {
+            return Err(self.err(&format!("nesting too deep (limit {MAX_DEPTH})")));
+        }
+        self.depth += 1;
+        Ok(())
+    }
+
+    /// Runs `f` one nesting level deeper.
+    #[inline]
+    fn nested<T>(&mut self, f: impl FnOnce(&mut Self) -> PResult<T>) -> PResult<T> {
+        self.enter()?;
+        let r = f(self);
+        self.depth -= 1;
+        r
+    }
+
     fn fresh(&mut self, prefix: &str) -> String {
         self.tmp += 1;
         format!("%{prefix}{}", self.tmp)
@@ -390,12 +425,15 @@ impl Parser {
             }
             node = replace_assign_value(node, Node::Array(items));
         }
+        let base = self.depth;
         loop {
             let Tok::Kw(kw @ (Kw::If | Kw::Unless | Kw::While | Kw::Until | Kw::Rescue)) =
                 *self.peek()
             else {
+                self.depth = base;
                 return Ok(node);
             };
+            self.enter()?;
             self.advance();
             // the condition may start on the next line: `warn "x" if\n  cond`
             self.skip_nl();
@@ -424,13 +462,13 @@ impl Parser {
         if !self.looks_like_masgn() {
             return Ok(None);
         }
-        let start = self.pos;
-        let saved_tmp = self.tmp;
+        let (start, saved_tmp, saved_depth) = (self.pos, self.tmp, self.depth);
         let lhs = match self.parse_mlhs(&[Tok::Assign]) {
             Ok(l) if self.at(&Tok::Assign) => l,
             _ => {
                 self.pos = start;
                 self.tmp = saved_tmp;
+                self.depth = saved_depth;
                 return Ok(None);
             }
         };
@@ -603,22 +641,31 @@ impl Parser {
 
     fn parse_expr(&mut self) -> PResult<Node> {
         let mut l = self.parse_not()?;
+        let base = self.depth;
         loop {
-            if self.eat_kw(Kw::And) {
-                self.skip_nl();
-                l = Node::And(b(l), b(self.parse_not()?));
-            } else if self.eat_kw(Kw::Or) {
-                self.skip_nl();
-                l = Node::Or(b(l), b(self.parse_not()?));
+            let and = match self.peek() {
+                Tok::Kw(Kw::And) => true,
+                Tok::Kw(Kw::Or) => false,
+                _ => {
+                    self.depth = base;
+                    return Ok(l);
+                }
+            };
+            self.enter()?;
+            self.advance();
+            self.skip_nl();
+            let r = self.parse_not()?;
+            l = if and {
+                Node::And(b(l), b(r))
             } else {
-                return Ok(l);
-            }
+                Node::Or(b(l), b(r))
+            };
         }
     }
 
     fn parse_not(&mut self) -> PResult<Node> {
         if self.eat_kw(Kw::Not) {
-            return Ok(Node::Not(b(self.parse_not()?)));
+            return Ok(Node::Not(b(self.nested(Self::parse_not)?)));
         }
         let v = self.parse_arg()?;
         // one-line pattern matching: `expr => pattern`, `expr in pattern`
@@ -652,9 +699,9 @@ impl Parser {
                 self.skip_nl();
                 self.declare_lhs(&lhs);
                 let rhs = if self.at(&Tok::Star) {
-                    Node::Array(vec![self.parse_arg_or_splat()?])
+                    Node::Array(vec![self.nested(Self::parse_arg_or_splat)?])
                 } else {
-                    self.parse_arg()?
+                    self.nested(Self::parse_arg)?
                 };
                 Ok(make_assign(lhs, rhs))
             }
@@ -662,7 +709,7 @@ impl Parser {
                 self.advance();
                 self.skip_nl();
                 self.declare_lhs(&lhs);
-                let rhs = self.parse_arg()?;
+                let rhs = self.nested(Self::parse_arg)?;
                 let cur = read_of(&lhs);
                 Ok(match op.as_str() {
                     // `a ||= v` is `a || a = v`
@@ -691,7 +738,7 @@ impl Parser {
         }
         self.skip_nl();
         // branches are full `arg`s, so they may assign: `c ? a : n -= 1`
-        let t = self.parse_arg()?;
+        let t = self.nested(Self::parse_arg)?;
         self.skip_nl();
         // `a ? b :c` lexes `:c` as a symbol; it's really the identifier `c`
         if let Tok::Sym(s) = self.peek().clone()
@@ -708,7 +755,7 @@ impl Parser {
         }
         self.expect(&Tok::Colon)?;
         self.skip_nl();
-        let e = self.parse_arg()?;
+        let e = self.nested(Self::parse_arg)?;
         Ok(Node::If(b(c), b(t), b(e)))
     }
 
@@ -740,13 +787,14 @@ impl Parser {
     /// keeps deeply nested code within a small (wasm) stack.
     fn parse_binary(&mut self, min: u8) -> PResult<Node> {
         let mut l = self.parse_operand()?;
+        let base = self.depth;
         loop {
-            let Some((prec, op)) = binary_op(self.peek()) else {
+            let prec_op = binary_op(self.peek()).filter(|(prec, _)| *prec >= min);
+            let Some((prec, op)) = prec_op else {
+                self.depth = base;
                 return Ok(l);
             };
-            if prec < min {
-                return Ok(l);
-            }
+            self.enter()?; // each link makes the tree one level deeper
             self.advance();
             self.skip_nl();
             // all of these are left-associative
@@ -796,7 +844,7 @@ impl Parser {
             };
             return self.parse_postfix(lit);
         }
-        let e = self.parse_uminus()?;
+        let e = self.nested(Self::parse_uminus)?;
         Ok(match (e, neg) {
             (Node::Int(i), true) => Node::Int(-i),
             (Node::Float(f), true) => Node::Float(-f),
@@ -809,7 +857,7 @@ impl Parser {
         let base = self.parse_unary()?;
         if self.eat(&Tok::Pow) {
             self.skip_nl();
-            let e = self.parse_uminus()?;
+            let e = self.nested(Self::parse_uminus)?;
             return Ok(ast::call(Some(base), "**", vec![e]));
         }
         Ok(base)
@@ -817,10 +865,10 @@ impl Parser {
 
     fn parse_unary(&mut self) -> PResult<Node> {
         if self.eat(&Tok::Bang) {
-            return Ok(Node::Not(b(self.parse_unary()?)));
+            return Ok(Node::Not(b(self.nested(Self::parse_unary)?)));
         }
         if self.eat(&Tok::Tilde) {
-            return Ok(ast::call(Some(self.parse_unary()?), "~", vec![]));
+            return Ok(ast::call(Some(self.nested(Self::parse_unary)?), "~", vec![]));
         }
         if self.at(&Tok::Amp) {
             return Err(self.err("unexpected '&'"));
@@ -854,7 +902,11 @@ impl Parser {
     }
 
     fn parse_postfix(&mut self, mut node: Node) -> PResult<Node> {
+        let base = self.depth;
         loop {
+            if matches!(self.peek(), Tok::Dot | Tok::AndDot | Tok::Colon2 | Tok::LBracket) {
+                self.enter()?; // each link makes the tree one level deeper
+            }
             match self.peek() {
                 Tok::Dot | Tok::AndDot => {
                     let safe = self.advance() == Tok::AndDot;
@@ -884,7 +936,10 @@ impl Parser {
                     }
                     node = ast::call(Some(node), "[]", args);
                 }
-                _ => return Ok(node),
+                _ => {
+                    self.depth = base;
+                    return Ok(node);
+                }
             }
         }
     }
@@ -1393,6 +1448,10 @@ impl Parser {
     }
 
     fn parse_primary(&mut self) -> PResult<Node> {
+        self.nested(Self::parse_primary_node)
+    }
+
+    fn parse_primary_node(&mut self) -> PResult<Node> {
         let tok = self.peek().clone();
         let line = self.line();
         match tok {
@@ -1554,7 +1613,7 @@ impl Parser {
             }
             Tok::Bang => {
                 self.advance();
-                Ok(Node::Not(b(self.parse_unary()?)))
+                Ok(Node::Not(b(self.nested(Self::parse_unary)?)))
             }
             Tok::Minus | Tok::Plus | Tok::Tilde => self.parse_uminus(),
             Tok::Star => Err(self.err("unexpected splat")),

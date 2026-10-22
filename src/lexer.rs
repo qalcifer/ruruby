@@ -7,6 +7,8 @@
 //! literal depends on the previous token and on surrounding whitespace. Those
 //! decisions are made with [`Lexer::value_before`] and the `spc` flag.
 
+use crate::parser::MAX_DEPTH;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kw {
     Def,
@@ -223,6 +225,8 @@ struct Lexer {
     line: u32,
     toks: Vec<Token>,
     heredocs: Vec<Heredoc>,
+    /// `#{}` nesting, bounded by [`MAX_DEPTH`]
+    depth: usize,
 }
 
 fn is_ident_start(c: char) -> bool {
@@ -252,6 +256,7 @@ impl Lexer {
             line,
             toks: Vec::new(),
             heredocs: Vec::new(),
+            depth: 0,
         }
     }
 
@@ -957,9 +962,14 @@ impl Lexer {
     /// Tokens of `#{ ... }` up to the matching brace, lexed by the main
     /// tokenizer so anything valid in code is valid here.
     fn interpolation(&mut self) -> Result<Vec<Token>, String> {
+        if self.depth >= MAX_DEPTH {
+            return Err(self.err(&format!("nesting too deep (limit {MAX_DEPTH})")));
+        }
         let outer = std::mem::take(&mut self.toks);
         let outer_heredocs = std::mem::take(&mut self.heredocs);
+        self.depth += 1;
         let r = self.interpolation_tokens();
+        self.depth -= 1;
         let started_heredoc = !std::mem::replace(&mut self.heredocs, outer_heredocs).is_empty();
         let toks = std::mem::replace(&mut self.toks, outer);
         r?;

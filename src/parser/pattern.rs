@@ -156,6 +156,10 @@ impl Parser {
     }
 
     fn parse_pattern(&mut self) -> PResult<Pat> {
+        self.nested(Self::parse_pattern_alts)
+    }
+
+    fn parse_pattern_alts(&mut self) -> PResult<Pat> {
         let mut alts = vec![self.parse_pattern_primary()?];
         while self.at(&Tok::Pipe) {
             self.advance();

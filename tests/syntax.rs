@@ -267,3 +267,35 @@ fn operator_precedence() {
         "5\n2\n2\n8\ntrue\n3\n13\n512\n-4\nfalse\ntrue\nfalse\n1\n1\n1\n"
     );
 }
+
+#[test]
+fn deep_nesting_is_a_syntax_error_not_a_crash() {
+    // within the limit, debug builds need a few MiB of stack
+    std::thread::Builder::new()
+        .stack_size(64 << 20)
+        .spawn(|| {
+            let deep = |open: &str, close: &str, n: usize| {
+                format!("p({}1{})", open.repeat(n), close.repeat(n))
+            };
+            assert_eq!(run(&deep("(", ")", 50)), "1\n");
+            assert_eq!(run(&deep("[", "]", 3)), "[[[1]]]\n");
+            for src in [
+                deep("(", ")", 10_000),
+                deep("[", "]", 10_000),
+                deep("\"#{", "}\"", 10_000),
+                deep("-> { ", " }", 10_000),
+                deep("!", "", 10_000),
+                format!("p 1{}", " + 1".repeat(10_000)),
+                format!("p 1{}", ".abs".repeat(10_000)),
+            ] {
+                let err = run_capture(&src).unwrap_err().to_string();
+                assert!(err.contains("nesting too deep"), "{err}");
+            }
+            // long but flat code is fine
+            assert_eq!(run(&"x = 1\n".repeat(10_000)), "");
+            assert_eq!(run(&format!("p [{}].size", "1, ".repeat(10_000))), "10000\n");
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
