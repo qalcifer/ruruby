@@ -64,7 +64,7 @@ and `mruby-compiler/src/codegen.c` (7.4k).
 | Prism parser | A hand-written, pure-Rust lexer and parser. ruruby must build for wasm, which rules out the `ruby-prism` crate (C bindings). | near-complete Ruby syntax (`lexer.rs`, `parser/`) |
 | `codegen.c` | Same algorithm: scope stack, register stack pointer, jump patching, catch tables. | done for the supported syntax (`codegen.rs`) |
 | `ops.h` / `irep` | `enum Op` with typed operands. Add an encoder/decoder to mruby's byte format for `.mrb` compatibility and denser code. | enum form (`opcode.rs`) |
-| `vm.c` dispatch | `match` in a loop. Next: a flat value stack (`Vec<Value>` + base offset) and a `Vec<CallInfo>` instead of native recursion, which is needed for Fibers and avoids deep native stacks. | `match` loop, but each Ruby call recurses natively |
+| `vm.c` dispatch | `match` in one loop over an explicit frame stack (`Vec<Frame>`, mruby's callinfo stack). Natives calling back into Ruby nest the loop, as C functions do in mruby. Later: a flat value stack instead of a heap `Env` per frame. | done (step 3); registers still in per-frame `Env`s |
 | `setjmp/longjmp` | `Result<T, Unwind>` + `?`; `Unwind::{Error, Break, Return}`. Catch tables are consulted per frame, as in mruby. | done |
 | `REnv` | `Rc<Env>` with `upper` chain; `GETUPVAR/SETUPVAR(idx, depth)`. | done (every frame's registers live in an Env; mruby only heap-allocates on capture) |
 | C functions (`mrb_func_t`) | `fn(&mut Vm, &Value, &[Value], Option<&Value>) -> VmResult`. `mrb_get_args` becomes small typed helpers (`int_of`, `str_of`, …) or a derive macro later. | done |
@@ -81,12 +81,15 @@ and `mruby-compiler/src/codegen.c` (7.4k).
   then call. All of `core/` follows this rule.
 * **`Rc` cycles leak** (an object referring to itself, a closure stored in an
   ivar of its own `self`). That's acceptable for a prototype; a tracing GC fixes it.
-* **Native recursion depth.** Each Ruby call is several Rust frames. `main.rs`
-  runs the VM on a 1 GiB thread stack and the VM raises `SystemStackError` at
-  depth 10 000. Moving to an explicit call stack removes this limit. The parser
-  and codegen recurse per nesting level, which `parser::MAX_DEPTH` bounds; keep
-  parser frames small (box large `Node` variants, `#[inline(never)]` on cold
-  helpers) so the limit can be raised toward Prism's 256.
+* **Native recursion depth.** Ruby→Ruby calls run on the VM's own frame stack
+  (capped at 10 000 frames), so they need no native stack. Natives calling back
+  into Ruby (`each` with a block) do recurse: about 3 KiB per level in release,
+  24 KiB in debug. That recursion is bounded by measured stack use against
+  `Vm::stack_budget` (512 KiB on wasm, 1 MiB elsewhere; the CLI raises it), so
+  it raises `SystemStackError` instead of crashing. The parser and codegen
+  recurse per nesting level, which `parser::MAX_DEPTH` bounds; keep parser
+  frames small (box large `Node` variants, `#[inline(never)]` on cold helpers)
+  so the limit can be raised toward Prism's 256.
 * `sort_by` in std may panic on inconsistent comparators, and Ruby `<=>` can be
   anything, so `core::merge_sort` is a small stable sort that propagates Ruby exceptions.
 
@@ -141,7 +144,8 @@ Tooling: `ruruby file.rb`, `ruruby -e '…'`, stdin, a REPL (`mirb`-style),
 
 Verified: `examples/*.rb` produce the same output as CRuby, apart from error-message
 wording (ruruby uses Ruby 3.4's wording) and `2**-1` (Ruby returns a Rational).
-`cargo test` runs 24 end-to-end tests (`tests/language.rs`, `tests/syntax.rs`),
+`cargo test` runs 28 end-to-end tests (`tests/language.rs`, `tests/syntax.rs`,
+`tests/call_stack.rs`),
 the harness test, and `tests/parse_corpus.rs` (compiles every `.rb` file in
 `./mruby`).
 
@@ -164,8 +168,16 @@ Each step can be checked against mruby's own tests.
    nesting is limited to `parser::MAX_DEPTH` = 100 levels, so deep input is a
    SyntaxError instead of a stack overflow (a release build needs ≤ ~740 KiB of
    stack at the limit, within wasm's default 1 MiB).
-3. **Explicit call stack.** Replace `execute` recursion with `Vec<CallInfo>` and
-   a single value stack, as in `vm.c`. Required for Fibers, and it speeds up calls.
+3. **Explicit call stack.** ✅ Done. One dispatch loop (`Vm::run_frames`) runs
+   Ruby→Ruby calls (methods, `yield`/`Proc#call`, `super`, `method_missing`,
+   `define_method`, class bodies, user-defined operators) on `Vm::frames`
+   without native recursion; unwinding (rescue, `break`, block `return`,
+   `ensure`) walks the frames. On a 1 MiB stack method recursion went from 536
+   levels to the 10 000-frame cap; speed is unchanged. Still natively
+   recursive: natives that call blocks (`each`, `map`, …). Moving the common
+   iterators to Ruby, as mruby's `mrblib` does, would make those in-loop too,
+   and Fibers can only switch between frames of one loop. The single value
+   stack is left for step 6.
 4. **Garbage collector.** Replace `Rc` with a tracing GC (mark-sweep over an
    arena, then incremental tri-color with write barriers as in `gc.c`). Add
    `GC.start` and `ObjectSpace`.
