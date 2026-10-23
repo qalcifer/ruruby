@@ -326,23 +326,19 @@ fn init_module(vm: &mut Vm) {
         }
         Ok(Value::sym(mid))
     });
-    // visibility is not enforced yet; these return their arguments so `private def x` works
-    for name in [
-        "private",
-        "public",
-        "protected",
-        "private_class_method",
-        "public_class_method",
-        "private_constant",
-    ] {
-        vm.def(&m, name, |vm, _, a, _| {
-            Ok(match a.len() {
-                0 => Value::NIL,
-                1 => a[0],
-                _ => vm.array(a.to_vec()),
-            })
-        });
-    }
+    // with names; without, `private` & co. are compiled as a scope's
+    // default (Op::DefaultVis), so a call that gets here changes nothing
+    vm.def(&m, "private", |vm, s, a, _| set_vis(vm, s, a, Vis::Private));
+    vm.def(&m, "public", |vm, s, a, _| set_vis(vm, s, a, Vis::Public));
+    vm.def(&m, "protected", |vm, s, a, _| set_vis(vm, s, a, Vis::Protected));
+    vm.def(&m, "private_class_method", |vm, s, a, _| {
+        let meta = vm.singleton_class(s)?;
+        set_vis(vm, &Value::from(meta), a, Vis::Private)
+    });
+    vm.def(&m, "public_class_method", |vm, s, a, _| {
+        let meta = vm.singleton_class(s)?;
+        set_vis(vm, &Value::from(meta), a, Vis::Public)
+    });
     vm.def(&m, "module_function", |vm, s, a, _| {
         let cls = this_class(vm, s)?;
         let sc = vm.class_singleton(&cls);
@@ -571,4 +567,53 @@ fn init_pattern_support(vm: &mut Vm) {
         }
         Ok(vm.hash(out))
     });
+}
+
+/// The method names given to `private` & co.: Symbols, Strings, or Arrays
+/// of them (`private attr_accessor :a, :b`).
+fn method_names(vm: &mut Vm, a: &[Value]) -> Result<Vec<Sym>, Unwind> {
+    let mut names = Vec::new();
+    for v in a {
+        match vm.kind(*v) {
+            V::Array(items) => {
+                let items = vm.heap[items].borrow().clone();
+                for x in items {
+                    names.push(sym_of(vm, &x)?);
+                }
+            }
+            _ => names.push(sym_of(vm, v)?),
+        }
+    }
+    Ok(names)
+}
+
+/// `private :a, :b` (and public/protected): changes the methods'
+/// visibility in `s`. An inherited method is copied into `s` with the new
+/// visibility, as in mruby. Returns the arguments.
+fn set_vis(vm: &mut Vm, s: &Value, a: &[Value], vis: Vis) -> VmResult {
+    let cls = this_class(vm, s)?;
+    for name in method_names(vm, a)? {
+        let own = matches!(
+            vm.heap[cls].methods.borrow().get(&name),
+            Some(m) if !matches!(m, Method::Undefined)
+        );
+        if own {
+            vm.heap[cls].methods.set_vis(name, vis);
+        } else if let Some((m, _)) = vm.find_method(&cls, name) {
+            vm.heap[cls].methods.insert_vis(name, m, vis);
+        } else {
+            let kind = if vm.heap[cls].is_module { "module" } else { "class" };
+            let msg = format!(
+                "undefined method '{}' for {kind} '{}'",
+                vm.sym_name(name),
+                vm.heap[cls].name()
+            );
+            return Err(vm.name_err(msg));
+        }
+    }
+    Ok(match a.len() {
+        0 => Value::NIL,
+        1 => a[0],
+        _ => vm.array(a.to_vec()),
+    })
 }

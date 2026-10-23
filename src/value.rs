@@ -79,21 +79,63 @@ fn methods_changed() {
 /// A class's methods. Mutation goes through `insert`/`remove`, which
 /// invalidate the method caches.
 #[derive(Default)]
-pub struct MethodTable(RefCell<SymMap<Method>>);
+pub struct MethodTable {
+    methods: RefCell<SymMap<Method>>,
+    /// Visibility of the methods that aren't public (most are).
+    vis: RefCell<SymMap<Vis>>,
+}
+
+/// Method visibility (mruby: `MRB_METHOD_VISIBILITY`). `ModuleFunction` is
+/// only a scope's default (`module_function` with no arguments); a method
+/// itself is never that.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Vis {
+    #[default]
+    Public,
+    Private,
+    Protected,
+    ModuleFunction,
+}
 
 impl MethodTable {
     pub fn borrow(&self) -> std::cell::Ref<'_, SymMap<Method>> {
-        self.0.borrow()
+        self.methods.borrow()
     }
 
+    /// Defines a public method (or replaces one, which makes it public).
     pub fn insert(&self, name: Sym, m: Method) {
+        self.insert_vis(name, m, Vis::Public);
+    }
+
+    pub fn insert_vis(&self, name: Sym, m: Method, vis: Vis) {
         methods_changed();
-        self.0.borrow_mut().insert(name, m);
+        self.methods.borrow_mut().insert(name, m);
+        self.store_vis(name, vis);
     }
 
     pub fn remove(&self, name: &Sym) -> Option<Method> {
         methods_changed();
-        self.0.borrow_mut().remove(name)
+        self.vis.borrow_mut().remove(name);
+        self.methods.borrow_mut().remove(name)
+    }
+
+    pub fn vis(&self, name: Sym) -> Vis {
+        self.vis.borrow().get(&name).copied().unwrap_or_default()
+    }
+
+    /// Changes the visibility of a method defined here.
+    pub fn set_vis(&self, name: Sym, vis: Vis) {
+        methods_changed();
+        self.store_vis(name, vis);
+    }
+
+    fn store_vis(&self, name: Sym, vis: Vis) {
+        let vis = if vis == Vis::ModuleFunction { Vis::Private } else { vis };
+        if vis == Vis::Public {
+            self.vis.borrow_mut().remove(&name);
+        } else {
+            self.vis.borrow_mut().insert(name, vis);
+        }
     }
 }
 

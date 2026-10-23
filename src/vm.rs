@@ -933,7 +933,7 @@ impl Vm {
         out
     }
 
-    fn find_in_module(&self, k: ClassRef, mid: Sym) -> Option<Option<(Method, ClassRef)>> {
+    fn find_in_module(&self, k: ClassRef, mid: Sym) -> Option<Option<(Method, ClassRef, Vis)>> {
         let kc = &self.heap[k];
         for p in kc.prepends.borrow().iter().rev() {
             if let Some(found) = self.find_in_module(*p, mid) {
@@ -943,7 +943,7 @@ impl Vm {
         if let Some(m) = kc.methods.borrow().get(&mid) {
             return Some(match m {
                 Method::Undefined => None,
-                m => Some((m.clone(), k)),
+                m => Some((m.clone(), k, kc.methods.vis(mid))),
             });
         }
         for inc in kc.includes.borrow().iter().rev() {
@@ -956,6 +956,11 @@ impl Vm {
 
     /// Finds `mid` starting at `cls`; returns the method and its owner.
     pub fn find_method(&self, cls: &ClassRef, mid: Sym) -> Option<(Method, ClassRef)> {
+        self.find_method_vis(cls, mid).map(|(m, owner, _)| (m, owner))
+    }
+
+    /// [`Vm::find_method`] with the method's visibility.
+    pub fn find_method_vis(&self, cls: &ClassRef, mid: Sym) -> Option<(Method, ClassRef, Vis)> {
         let mut c = Some(*cls);
         while let Some(k) = c {
             if let Some(found) = self.find_in_module(k, mid) {
@@ -977,10 +982,10 @@ impl Vm {
 
     /// `lookup` through the inline cache of the `Send` that just ran
     /// (`f.pc - 1`).
-    fn cached_lookup(&self, f: &Frame, recv: &Value, mid: Sym) -> Option<(Method, ClassRef)> {
+    fn cached_lookup(&self, f: &Frame, recv: &Value, mid: Sym) -> Option<(Method, ClassRef, Vis)> {
         let key = self.dispatch_key(recv);
         if key == 0 {
-            return self.lookup(recv, mid);
+            return self.lookup_vis(recv, mid);
         }
         let epoch = method_epoch();
         let cache = &f.irep.caches[f.pc - 1];
@@ -990,7 +995,7 @@ impl Vm {
                 return c.hit.clone();
             }
         }
-        let found = self.lookup(recv, mid);
+        let found = self.lookup_vis(recv, mid);
         *cache.borrow_mut() = CallCache {
             class: key,
             epoch,
@@ -1001,6 +1006,34 @@ impl Vm {
 
     fn lookup(&self, recv: &Value, mid: Sym) -> Option<(Method, ClassRef)> {
         self.find_method(&self.dispatch_class(recv), mid)
+    }
+
+    fn lookup_vis(&self, recv: &Value, mid: Sym) -> Option<(Method, ClassRef, Vis)> {
+        self.find_method_vis(&self.dispatch_class(recv), mid)
+    }
+
+    /// Whether code running as `caller` (its `self`) may call a method of
+    /// `owner` with visibility `vis` on `recv`. A private method needs the
+    /// receiver to be the caller's self (`foo`, `self.foo`); a protected
+    /// one a caller that is an instance of the method's owner.
+    #[inline]
+    fn visible(&self, vis: Vis, owner: &ClassRef, recv: &Value, caller: &Value) -> bool {
+        match vis {
+            Vis::Public => true,
+            Vis::Private | Vis::ModuleFunction => self.heap.identical(recv, caller),
+            Vis::Protected => self.heap.identical(recv, caller) || self.is_a(caller, owner),
+        }
+    }
+
+    #[cold]
+    fn not_visible(&self, vis: Vis, recv: &Value, mid: Sym) -> Unwind {
+        let kind = if vis == Vis::Protected { "protected" } else { "private" };
+        let msg = format!(
+            "{kind} method '{}' called for {}",
+            self.sym_name(mid),
+            self.recv_desc(recv)
+        );
+        self.err(&self.c.no_method_error, msg)
     }
 
     pub fn respond_to(&self, v: &Value, mid: Sym) -> bool {
@@ -1153,7 +1186,13 @@ impl Vm {
     }
 
     pub fn no_method(&self, recv: &Value, mid: Sym) -> Unwind {
-        let desc = match self.kind(*recv) {
+        let msg = format!("undefined method '{}' for {}", self.sym_name(mid), self.recv_desc(recv));
+        self.err(&self.c.no_method_error, msg)
+    }
+
+    /// How error messages name a receiver: "nil", "class Foo", "an instance of Foo".
+    fn recv_desc(&self, recv: &Value) -> String {
+        match self.kind(*recv) {
             V::Nil => "nil".to_string(),
             V::Bool(b) => b.to_string(),
             V::Class(c) => format!(
@@ -1163,9 +1202,7 @@ impl Vm {
             ),
             _ if self.heap.identical(recv, &self.main_obj) => "main:Object".to_string(),
             _ => format!("an instance of {}", self.class_name(recv)),
-        };
-        let msg = format!("undefined method '{}' for {}", self.sym_name(mid), desc);
-        self.err(&self.c.no_method_error, msg)
+        }
     }
 
     /// Convenience: `recv.name(*args)`.
@@ -1985,9 +2022,12 @@ impl Vm {
         };
         let tag = proc_tag(&blk);
         let args = Args::Stack { at: f.base + a + 1, n: argc };
-        let Some((m, owner)) = self.cached_lookup(f, &recv, mid) else {
+        let Some((m, owner, vis)) = self.cached_lookup(f, &recv, mid) else {
             return self.call_flow(f, a, tag, |vm| vm.start_call(recv, mid, args, blk));
         };
+        if vis != Vis::Public && !self.visible(vis, &owner, &recv, &f.self_) {
+            return Err(self.not_visible(vis, &recv, mid));
+        }
         // natives take their arguments as a slice: no Vec for the common case
         if let Method::Native(native) = m
             && argc <= MAX_INLINE_ARGS
@@ -2151,6 +2191,11 @@ impl Vm {
                     None
                 };
                 let tag = proc_tag(&blk);
+                if let Some((_, owner, vis)) = self.lookup_vis(&recv, mid)
+                    && !self.visible(vis, &owner, &recv, &f.self_)
+                {
+                    return Err(self.not_visible(vis, &recv, mid));
+                }
                 let args = Args::Owned(args);
                 return self.call_flow(f, a, tag, |vm| vm.start_call(recv, mid, args, blk));
             }

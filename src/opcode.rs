@@ -9,7 +9,7 @@
 
 use crate::symbol::{Sym, SymbolTable};
 use crate::gc::ClassRef;
-use crate::value::Method;
+use crate::value::{Method, Vis};
 use std::cell::RefCell;
 use std::fmt::Write;
 use std::rc::Rc;
@@ -266,7 +266,7 @@ impl ArgSpec {
 pub struct CallCache {
     pub class: u64,
     pub epoch: u64,
-    pub hit: Option<(Method, ClassRef)>,
+    pub hit: Option<(Method, ClassRef, Vis)>,
 }
 
 #[derive(Debug, Default)]

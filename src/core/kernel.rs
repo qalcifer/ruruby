@@ -425,16 +425,8 @@ fn init_module(vm: &mut Vm) {
             )
         })
     });
-    // visibility is not enforced yet
-    for name in [
-        "private",
-        "public",
-        "protected",
-        "module_function",
-        "private_constant",
-    ] {
-        vm.def(&m, name, |_, _, _, _| Ok(Value::NIL));
-    }
+    // constants have no visibility
+    vm.def(&m, "private_constant", |_, _, _, _| Ok(Value::NIL));
 
     let c = vm.c.class;
     vm.def(&c, "new", class_new);
