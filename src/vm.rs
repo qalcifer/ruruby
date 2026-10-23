@@ -773,7 +773,14 @@ impl Vm {
 
     pub fn def(&mut self, cls: &ClassRef, name: &str, f: NativeFn) {
         let s = self.intern(name);
-        self.heap[cls].methods.insert(s, Method::Native(f));
+        let vis = if self.always_private(s) { Vis::Private } else { Vis::Public };
+        self.heap[cls].methods.insert_vis(s, Method::Native(f), vis);
+    }
+
+    /// `initialize`, `initialize_copy`, `respond_to_missing?`: private
+    /// wherever they are defined, like Ruby.
+    pub fn always_private(&self, name: Sym) -> bool {
+        [self.s.initialize, self.s.initialize_copy, self.s.respond_to_missing].contains(&name)
     }
 
     pub fn def_singleton(&mut self, cls: &ClassRef, name: &str, f: NativeFn) {
@@ -1048,7 +1055,7 @@ impl Vm {
     }
 
     #[cold]
-    fn not_visible(&self, vis: Vis, recv: &Value, mid: Sym) -> Unwind {
+    pub fn not_visible(&self, vis: Vis, recv: &Value, mid: Sym) -> Unwind {
         let kind = if vis == Vis::Protected { "protected" } else { "private" };
         let msg = format!(
             "{kind} method '{}' called for {}",
@@ -2452,14 +2459,7 @@ impl Vm {
             }
             Op::TDef(s, idx) => {
                 let irep = f.irep.reps[idx].clone();
-                // like Ruby, these are private wherever they are defined
-                let vis = if [self.s.initialize, self.s.initialize_copy, self.s.respond_to_missing]
-                    .contains(&s)
-                {
-                    Vis::Private
-                } else {
-                    f.vis
-                };
+                let vis = if self.always_private(s) { Vis::Private } else { f.vis };
                 if f.vis == Vis::ModuleFunction {
                     let meta = self.singleton_class(&Value::from(f.target))?;
                     self.heap[meta].methods.insert(s, Method::Ruby(irep.clone()));
@@ -2540,10 +2540,11 @@ impl Vm {
         Err(self.err(&self.c.no_method_error, msg))
     }
 
+    /// `alias new old`: the alias has the method's visibility.
     pub fn alias_method(&self, target: &ClassRef, new: Sym, old: Sym) -> Result<(), Unwind> {
-        match self.find_method(target, old) {
-            Some((m, _)) => {
-                self.heap[target].methods.insert(new, m);
+        match self.find_method_vis(target, old) {
+            Some((m, _, vis)) => {
+                self.heap[target].methods.insert_vis(new, m, vis);
                 Ok(())
             }
             None => Err(self.name_err(format!(

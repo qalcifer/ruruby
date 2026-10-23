@@ -163,3 +163,25 @@ fn natives_that_define_methods_follow_the_scope() {
          :private\n:f\n:private\ntrue\n"
     );
 }
+
+#[test]
+fn aliases_and_builtin_private_methods() {
+    let out = run(r##"
+        def err
+          yield
+        rescue NoMethodError
+          :private
+        end
+        class A
+          private def priv = :priv
+          alias_method :priv2, :priv
+          alias priv3 priv
+          def pub = :pub
+          alias pub2 pub
+        end
+        a = A.new
+        p err { a.priv2 }, err { a.priv3 }, a.pub2, a.send(:priv2)
+        p err { Object.new.initialize }, err { Object.new.respond_to_missing?(:x, false) }
+    "##);
+    assert_eq!(out, ":private\n:private\n:pub\n:priv\n:private\n:private\n");
+}
