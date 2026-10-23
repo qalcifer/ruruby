@@ -108,6 +108,11 @@ fn init_object(vm: &mut Vm) {
         Ok(Value::bool(vm.heap.identical(s, &arg(a, 0))))
     });
     vm.def(&o, "eql?", |vm, s, a, _| Ok(Value::bool(eql(&vm.heap, s, &arg(a, 0)))));
+    // agrees with eql? (the hash a Hash key gets); `>> 1` keeps it positive
+    vm.def(&o, "hash", |vm, s, _, _| {
+        let h = (hash_key(&vm.heap, s) >> 1) as i64;
+        Ok(vm.int(h))
+    });
     vm.def(&o, "===", |vm, s, a, _| {
         Ok(Value::bool(vm.equal(s, &arg(a, 0))?))
     });

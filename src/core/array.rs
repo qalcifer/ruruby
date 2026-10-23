@@ -363,9 +363,6 @@ pub fn init(vm: &mut Vm) {
         }
         Ok(Value::NIL)
     });
-    vm.def(&c, "hash", |vm, s, _, _| {
-        Ok(Value::small_int(items(vm, s)?.len() as i64))
-    });
 }
 
 /// `a[i] = v`, `a[start, len] = v`, `a[range] = v` (the last two splice).

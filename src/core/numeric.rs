@@ -204,7 +204,6 @@ pub fn init(vm: &mut Vm) {
             int_of(vm, s)?.wrapping_shr(int_of(vm, &arg(a, 0))? as u32),
         ))
     });
-    vm.def(&i, "hash", |_, s, _, _| Ok(*s));
 
     let f = vm.c.float;
     vm.def(&f, "nan?", |vm, s, _, _| {

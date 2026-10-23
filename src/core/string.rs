@@ -325,12 +325,6 @@ pub fn init(vm: &mut Vm) {
     vm.def(&c, "next", |vm, s, _, _| {
         Ok(vm.str(succ(&s_of(vm, s)?)))
     });
-    vm.def(&c, "hash", |vm, s, _, _| {
-        use std::hash::{Hash, Hasher};
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        s_of(vm, s)?.hash(&mut h);
-        Ok(vm.int(h.finish() as i64))
-    });
 }
 
 fn to_sym(vm: &mut Vm, s: &Value, _: &[Value], _: Option<&Value>) -> VmResult {
