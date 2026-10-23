@@ -256,7 +256,7 @@ impl RHash {
     pub fn new() -> Self {
         RHash {
             pairs: Vec::new(),
-            default: V::Nil,
+            default: Value::NIL,
             default_proc: None,
             kw: false,
         }
@@ -312,26 +312,79 @@ pub enum V {
     Object(ObjRef),
 }
 
-/// For now the stored form is the view itself.
-pub type Value = V;
+/// A value as stored: in registers, arrays, hashes, ivars. Code reads it
+/// through its view, `heap.kind(v)` (a [`V`]), and builds it with the
+/// constructors below; `vm.int(n)` for an Integer that may be large.
+///
+/// Still a wrapper of `V`: the NaN-boxed 8-byte form comes next, which is
+/// why reading needs the heap (big Integers will be boxed there).
+#[derive(Clone, Copy, Default)]
+pub struct Value(V);
 
-impl V {
+macro_rules! value_from_handles {
+    ($($t:ty => $variant:ident),*) => {
+        $(impl From<$t> for Value {
+            fn from(h: $t) -> Value {
+                Value(V::$variant(h))
+            }
+        })*
+    };
+}
+
+value_from_handles!(StrRef => Str, ArrayRef => Array, HashRef => Hash, RangeRef => Range,
+    ProcRef => Proc, ClassRef => Class, ObjRef => Object);
+
+impl From<V> for Value {
+    fn from(v: V) -> Value {
+        Value(v)
+    }
+}
+
+impl Value {
+    pub const NIL: Value = Value(V::Nil);
+    pub const TRUE: Value = Value(V::Bool(true));
+    pub const FALSE: Value = Value(V::Bool(false));
+
+    pub fn bool(b: bool) -> Value {
+        Value(V::Bool(b))
+    }
+
+    pub fn float(f: f64) -> Value {
+        Value(V::Float(f))
+    }
+
+    pub fn sym(s: Sym) -> Value {
+        Value(V::Sym(s))
+    }
+
+    /// An Integer known to be small (a length, an index, a character code):
+    /// it never needs the heap. Anything else uses `vm.int(n)`.
+    pub fn small_int(n: i64) -> Value {
+        Value(V::Int(n))
+    }
+
+    /// The view, for values that are never Integers' boxes; prefer
+    /// `heap.kind(v)`.
+    pub(crate) fn raw(self) -> V {
+        self.0
+    }
+
     pub fn truthy(&self) -> bool {
-        !matches!(self, V::Nil | V::Bool(false))
+        !matches!(self.0, V::Nil | V::Bool(false))
     }
 
     pub fn is_numeric(&self) -> bool {
-        matches!(self, V::Int(_) | V::Float(_))
+        matches!(self.0, V::Int(_) | V::Float(_))
     }
 
     pub fn is_nil(&self) -> bool {
-        matches!(self, V::Nil)
+        matches!(self.0, V::Nil)
     }
 
     /// Identity (`equal?`).
     pub fn identical(&self, other: &Value) -> bool {
         use V::*;
-        match (self, other) {
+        match (self.0, other.0) {
             (Nil, Nil) => true,
             (Bool(a), Bool(b)) => a == b,
             (Int(a), Int(b)) => a == b,
@@ -350,7 +403,7 @@ impl V {
 
     /// Identity as a number (`object_id`, recursion guards); 0 for immediates.
     pub fn heap_id(&self) -> u64 {
-        match self {
+        match self.0 {
             V::Str(h) => h.id(),
             V::Array(h) => h.id(),
             V::Hash(h) => h.id(),
@@ -360,6 +413,19 @@ impl V {
             V::Class(h) => h.id(),
             _ => 0,
         }
+    }
+}
+
+impl Heap {
+    /// The view of `v` (decoding a boxed Integer needs the heap).
+    #[inline]
+    pub fn kind(&self, v: Value) -> V {
+        v.0
+    }
+
+    /// An Integer value; one that doesn't fit inline will be boxed here.
+    pub fn int(&mut self, n: i64) -> Value {
+        Value(V::Int(n))
     }
 }
 
@@ -391,17 +457,17 @@ fn guarded(
 
 fn eq_rec(heap: &Heap, a: &Value, b: &Value, in_progress: &mut InProgress) -> bool {
     use V::*;
-    match (a, b) {
-        (Int(x), Float(y)) | (Float(y), Int(x)) => (*x as f64) == *y,
-        (Str(x), Str(y)) => x == y || *heap[*x].borrow() == *heap[*y].borrow(),
+    match (heap.kind(*a), heap.kind(*b)) {
+        (Int(x), Float(y)) | (Float(y), Int(x)) => (x as f64) == y,
+        (Str(x), Str(y)) => x == y || *heap[x].borrow() == *heap[y].borrow(),
         (Array(x), Array(y)) => {
-            let (xv, yv) = (heap[*x].borrow().clone(), heap[*y].borrow().clone());
+            let (xv, yv) = (heap[x].borrow().clone(), heap[y].borrow().clone());
             guarded(x.id(), y.id(), in_progress, |ip| {
                 xv.len() == yv.len() && xv.iter().zip(&yv).all(|(p, q)| eq_rec(heap, p, q, ip))
             })
         }
         (Hash(x), Hash(y)) => {
-            let (xh, yh) = (heap[*x].borrow().clone(), heap[*y].borrow().clone());
+            let (xh, yh) = (heap[x].borrow().clone(), heap[y].borrow().clone());
             guarded(x.id(), y.id(), in_progress, |ip| {
                 xh.pairs.len() == yh.pairs.len()
                     && xh.pairs.iter().all(|(k, v)| {
@@ -411,7 +477,7 @@ fn eq_rec(heap: &Heap, a: &Value, b: &Value, in_progress: &mut InProgress) -> bo
             })
         }
         (Range(x), Range(y)) => {
-            let (x, y) = (&heap[*x], &heap[*y]);
+            let (x, y) = (&heap[x], &heap[y]);
             eq_rec(heap, &x.0, &y.0, in_progress) && eq_rec(heap, &x.1, &y.1, in_progress) && x.2 == y.2
         }
         _ => a.identical(b),
@@ -420,18 +486,18 @@ fn eq_rec(heap: &Heap, a: &Value, b: &Value, in_progress: &mut InProgress) -> bo
 
 /// `eql?` — hash-key equality (`1.eql?(1.0)` is false).
 pub fn eql(heap: &Heap, a: &Value, b: &Value) -> bool {
-    match (a, b) {
+    match (heap.kind(*a), heap.kind(*b)) {
         (V::Int(_), V::Float(_)) | (V::Float(_), V::Int(_)) => false,
         _ => values_eq(heap, a, b),
     }
 }
 
-pub fn num_cmp(x: &Value, y: &Value) -> Option<Ordering> {
-    match (x, y) {
-        (V::Int(a), V::Int(b)) => Some(a.cmp(b)),
-        (V::Int(a), V::Float(b)) => (*a as f64).partial_cmp(b),
-        (V::Float(a), V::Int(b)) => a.partial_cmp(&(*b as f64)),
-        (V::Float(a), V::Float(b)) => a.partial_cmp(b),
+pub fn num_cmp(heap: &Heap, x: &Value, y: &Value) -> Option<Ordering> {
+    match (heap.kind(*x), heap.kind(*y)) {
+        (V::Int(a), V::Int(b)) => Some(a.cmp(&b)),
+        (V::Int(a), V::Float(b)) => (a as f64).partial_cmp(&b),
+        (V::Float(a), V::Int(b)) => a.partial_cmp(&(b as f64)),
+        (V::Float(a), V::Float(b)) => a.partial_cmp(&b),
         _ => None,
     }
 }

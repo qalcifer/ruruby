@@ -33,40 +33,40 @@ pub fn init(vm: &mut Vm) {
         let b = need_block(vm, b)?;
         let n = vm.heap[this_ary(vm, s)?].borrow().len();
         for i in 0..n {
-            vm.call_block(&b, vec![V::Int(i as i64)])?;
+            vm.call_block(&b, vec![Value::small_int(i as i64)])?;
         }
         Ok(*s)
     });
     vm.def(&c, "length", |vm, s, _, _| {
-        Ok(V::Int(vm.heap[this_ary(vm, s)?].borrow().len() as i64))
+        Ok(Value::small_int(vm.heap[this_ary(vm, s)?].borrow().len() as i64))
     });
     vm.def(&c, "size", |vm, s, _, _| {
-        Ok(V::Int(vm.heap[this_ary(vm, s)?].borrow().len() as i64))
+        Ok(Value::small_int(vm.heap[this_ary(vm, s)?].borrow().len() as i64))
     });
     vm.def(&c, "empty?", |vm, s, _, _| {
-        Ok(V::Bool(vm.heap[this_ary(vm, s)?].borrow().is_empty()))
+        Ok(Value::bool(vm.heap[this_ary(vm, s)?].borrow().is_empty()))
     });
     vm.def(&c, "to_a", |_, s, _, _| Ok(*s));
     vm.def(&c, "to_s", |vm, s, _, _| Ok({ let v = vm.inspect(s)?; vm.str(v) }));
     vm.def(&c, "inspect", |vm, s, _, _| Ok({ let v = vm.inspect(s)?; vm.str(v) }));
     vm.def(&c, "==", |vm, s, a, _| {
-        let V::Array(o) = arg(a, 0) else {
-            return Ok(V::Bool(false));
+        let V::Array(o) = vm.kind(arg(a, 0)) else {
+            return Ok(Value::FALSE);
         };
         let (x, y) = (items(vm, s)?, vm.heap[o].borrow().clone());
         if x.len() != y.len() {
-            return Ok(V::Bool(false));
+            return Ok(Value::FALSE);
         }
         for (p, q) in x.iter().zip(&y) {
             if !vm.equal(p, q)? {
-                return Ok(V::Bool(false));
+                return Ok(Value::FALSE);
             }
         }
-        Ok(V::Bool(true))
+        Ok(Value::TRUE)
     });
-    vm.def(&c, "<=>", |vm, s, a, _| match arg(a, 0) {
-        o @ V::Array(_) => Ok(V::Int(compare(vm, s, &o)? as i64)),
-        _ => Ok(V::Nil),
+    vm.def(&c, "<=>", |vm, s, a, _| match vm.kind(arg(a, 0)) {
+        V::Array(_) => Ok(Value::small_int(compare(vm, s, &a[0])? as i64)),
+        _ => Ok(Value::NIL),
     });
     vm.def(&c, "[]", aref);
     vm.def(&c, "slice", aref);
@@ -75,8 +75,8 @@ pub fn init(vm: &mut Vm) {
     vm.def(&c, "dig", |vm, s, a, _| {
         let mut cur = *s;
         for k in a {
-            cur = match &cur {
-                V::Nil => return Ok(V::Nil),
+            cur = match vm.kind(cur) {
+                V::Nil => return Ok(Value::NIL),
                 _ => vm.send(&cur, "[]", vec![*k])?,
             };
         }
@@ -97,7 +97,7 @@ pub fn init(vm: &mut Vm) {
     vm.def(&c, "first", |vm, s, a, _| {
         let v = items(vm, s)?;
         if a.is_empty() {
-            return Ok(v.first().cloned().unwrap_or(V::Nil));
+            return Ok(v.first().cloned().unwrap_or(Value::NIL));
         }
         let n = int_of(vm, &a[0])?.max(0) as usize;
         Ok(vm.array(v.into_iter().take(n).collect()))
@@ -105,7 +105,7 @@ pub fn init(vm: &mut Vm) {
     vm.def(&c, "last", |vm, s, a, _| {
         let v = items(vm, s)?;
         if a.is_empty() {
-            return Ok(v.last().cloned().unwrap_or(V::Nil));
+            return Ok(v.last().cloned().unwrap_or(Value::NIL));
         }
         let n = (int_of(vm, &a[0])?.max(0) as usize).min(v.len());
         Ok(vm.array(v[v.len() - n..].to_vec()))
@@ -118,13 +118,13 @@ pub fn init(vm: &mut Vm) {
     vm.def(&c, "append", push);
     vm.def(&c, "<<", push);
     vm.def(&c, "pop", |vm, s, _, _| {
-        Ok(vm.heap[this_ary(vm, s)?].borrow_mut().pop().unwrap_or(V::Nil))
+        Ok(vm.heap[this_ary(vm, s)?].borrow_mut().pop().unwrap_or(Value::NIL))
     });
     vm.def(&c, "shift", |vm, s, _, _| {
         let arr = this_ary(vm, s)?;
         let mut v = vm.heap[arr].borrow_mut();
         Ok(if v.is_empty() {
-            V::Nil
+            Value::NIL
         } else {
             v.remove(0)
         })
@@ -163,7 +163,7 @@ pub fn init(vm: &mut Vm) {
     });
     vm.def(&c, "delete", |vm, s, a, _| {
         let target = arg(a, 0);
-        let mut found = V::Nil;
+        let mut found = Value::NIL;
         let mut kept = Vec::new();
         for x in items(vm, s)? {
             if vm.equal(&x, &target)? {
@@ -181,7 +181,7 @@ pub fn init(vm: &mut Vm) {
         Ok(
             match norm_index(int_of(vm, &arg(a, 0))?, len).filter(|&i| i < len) {
                 Some(i) => vm.heap[arr].borrow_mut().remove(i),
-                None => V::Nil,
+                None => Value::NIL,
             },
         )
     });
@@ -229,9 +229,9 @@ pub fn init(vm: &mut Vm) {
         Ok(vm.array(v))
     });
     vm.def(&c, "join", |vm, s, a, _| {
-        let sep = match arg(a, 0) {
+        let sep = match vm.kind(arg(a, 0)) {
             V::Nil => String::new(),
-            v => str_of(vm, &v)?,
+            v => str_of(vm, &Value::from(v))?,
         };
         Ok({ let v = join(vm, s, &sep)?; vm.str(v) })
     });
@@ -249,13 +249,13 @@ pub fn init(vm: &mut Vm) {
                 .collect(),
         ))
     });
-    vm.def(&c, "*", |vm, s, a, _| match arg(a, 0) {
+    vm.def(&c, "*", |vm, s, a, _| match vm.kind(arg(a, 0)) {
         V::Str(sep) => {
             let sep = vm.heap[sep].borrow().clone();
             Ok({ let v = join(vm, s, &sep)?; vm.str(v) })
         }
         n => {
-            let n = int_of(vm, &n)?;
+            let n = int_of(vm, &Value::from(n))?;
             if n < 0 {
                 return Err(vm.arg_err("negative argument"));
             }
@@ -299,15 +299,15 @@ pub fn init(vm: &mut Vm) {
                 _ => vm.equal(&x, &arg(a, 0))?,
             };
             if hit {
-                return Ok(V::Int(i as i64));
+                return Ok(Value::small_int(i as i64));
             }
         }
-        Ok(V::Nil)
+        Ok(Value::NIL)
     });
     vm.def(&c, "count", |vm, s, a, b| {
         let v = items(vm, s)?;
         if a.is_empty() && b.is_none() {
-            return Ok(V::Int(v.len() as i64));
+            return Ok(Value::small_int(v.len() as i64));
         }
         let mut n = 0;
         for x in v {
@@ -317,7 +317,7 @@ pub fn init(vm: &mut Vm) {
             };
             n += hit as i64;
         }
-        Ok(V::Int(n))
+        Ok(vm.int(n))
     });
     vm.def(&c, "fill", |vm, s, a, _| {
         let v = arg(a, 0);
@@ -352,7 +352,7 @@ pub fn init(vm: &mut Vm) {
     });
     vm.def(&c, "assoc", |vm, s, a, _| {
         for x in items(vm, s)? {
-            if let V::Array(pair) = &x
+            if let V::Array(pair) = vm.kind(x)
                 && vm.heap[pair]
                     .borrow()
                     .first()
@@ -361,10 +361,10 @@ pub fn init(vm: &mut Vm) {
                 return Ok(x);
             }
         }
-        Ok(V::Nil)
+        Ok(Value::NIL)
     });
     vm.def(&c, "hash", |vm, s, _, _| {
-        Ok(V::Int(items(vm, s)?.len() as i64))
+        Ok(Value::small_int(items(vm, s)?.len() as i64))
     });
 }
 
@@ -374,7 +374,7 @@ fn aset(vm: &mut Vm, s: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
     let arr = this_ary(vm, s)?;
     let len = vm.heap[arr].borrow().len() as i64;
     let value = a[a.len() - 1];
-    let (start, count) = match (&a[0], a.len()) {
+    let (start, count) = match (vm.kind(a[0]), a.len()) {
         (V::Range(r), 2) => {
             let lo = if vm.heap[r].0.is_nil() { 0 } else { int_of(vm, &vm.heap[r].0)? };
             let lo = if lo < 0 { lo + len } else { lo };
@@ -387,16 +387,16 @@ fn aset(vm: &mut Vm, s: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
             let hi = if vm.heap[r].2 && !vm.heap[r].1.is_nil() { hi - 1 } else { hi };
             (lo, (hi - lo + 1).max(0))
         }
-        (i, 3) => {
+        (_, 3) => {
             let n = int_of(vm, &a[1])?;
             if n < 0 {
                 return Err(vm.err(&vm.c.index_error, format!("negative length ({n})")));
             }
-            let i = int_of(vm, i)?;
+            let i = int_of(vm, &a[0])?;
             (if i < 0 { i + len } else { i }, n)
         }
-        (i, _) => {
-            let i = int_of(vm, i)?;
+        (_, _) => {
+            let i = int_of(vm, &a[0])?;
             let i = if i < 0 { i + len } else { i };
             if i < 0 {
                 return Err(vm.err(
@@ -407,7 +407,7 @@ fn aset(vm: &mut Vm, s: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
             let mut v = vm.heap[arr].borrow_mut();
             let i = i as usize;
             if i >= v.len() {
-                v.resize(i + 1, V::Nil);
+                v.resize(i + 1, Value::NIL);
             }
             v[i] = value;
             return Ok(value);
@@ -419,14 +419,14 @@ fn aset(vm: &mut Vm, s: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
             format!("index {} too small for array", start - len),
         ));
     }
-    let replacement = match &value {
+    let replacement = match vm.kind(value) {
         V::Array(x) => vm.heap[x].borrow().clone(),
-        v => vec![*v],
+        _ => vec![value],
     };
     let mut v = vm.heap[arr].borrow_mut();
     let start = start as usize;
     if start > v.len() {
-        v.resize(start, V::Nil);
+        v.resize(start, Value::NIL);
     }
     let end = (start + count as usize).min(v.len());
     v.splice(start..end, replacement);
@@ -435,27 +435,29 @@ fn aset(vm: &mut Vm, s: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
 
 fn aref(vm: &mut Vm, s: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
     // `a[i]` is hot (Ruby iterators index in a loop): read it in place
-    if let [V::Int(i)] = a {
+    if let [x] = a
+        && let V::Int(i) = vm.kind(*x)
+    {
         let v = vm.heap[this_ary(vm, s)?].borrow();
-        return Ok(norm_index(*i, v.len()).and_then(|i| v.get(i).cloned()).unwrap_or(V::Nil));
+        return Ok(norm_index(i, v.len()).and_then(|i| v.get(i).cloned()).unwrap_or(Value::NIL));
     }
     let v = items(vm, s)?;
     let len = v.len();
-    match (arg(a, 0), a.len()) {
+    match (vm.kind(arg(a, 0)), a.len()) {
         (V::Int(i), 1) => Ok(norm_index(i, len)
             .and_then(|i| v.get(i).cloned())
-            .unwrap_or(V::Nil)),
+            .unwrap_or(Value::NIL)),
         (V::Int(i), 2) => {
             let n = int_of(vm, &a[1])?;
             Ok(match norm_index(i, len) {
                 Some(i) if n >= 0 => vm.array(v[i..(i + n as usize).min(len)].to_vec()),
-                _ => V::Nil,
+                _ => Value::NIL,
             })
         }
         (V::Range(r), _) => {
             let lo = int_of(vm, &vm.heap[r].0)?;
             let Some(start) = norm_index(lo, len) else {
-                return Ok(V::Nil);
+                return Ok(Value::NIL);
             };
             let hi = if vm.heap[r].1.is_nil() {
                 len as i64 - 1
@@ -471,10 +473,10 @@ fn aref(vm: &mut Vm, s: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
         }
         (V::Float(f), 1) => Ok(norm_index(f as i64, len)
             .and_then(|i| v.get(i).cloned())
-            .unwrap_or(V::Nil)),
+            .unwrap_or(Value::NIL)),
         (other, _) => Err(vm.type_err(format!(
             "no implicit conversion of {} into Integer",
-            vm.class_name(&other)
+            vm.class_name(&Value::from(other))
         ))),
     }
 }
@@ -491,7 +493,7 @@ fn join_rec(vm: &mut Vm, s: &Value, sep: &str, seen: &mut Vec<u64>) -> Result<St
     seen.push(id);
     let mut parts = Vec::new();
     for x in items(vm, s)? {
-        parts.push(match &x {
+        parts.push(match vm.kind(x) {
             V::Array(_) => join_rec(vm, &x, sep, seen)?,
             _ => vm.to_s(&x)?,
         });
@@ -512,7 +514,7 @@ pub fn uniq(vm: &Vm, v: Vec<Value>) -> Vec<Value> {
 
 fn flatten(vm: &Vm, v: &[Value], depth: i64, out: &mut Vec<Value>, seen: &mut Vec<u64>) -> bool {
     for x in v {
-        match x {
+        match vm.kind(*x) {
             V::Array(inner) if depth != 0 => {
                 let id = inner.id();
                 if seen.contains(&id) {

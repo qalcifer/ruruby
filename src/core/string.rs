@@ -50,7 +50,7 @@ pub fn init(vm: &mut Vm) {
                 break;
             }
         }
-        Ok(V::Int(t[..end].replace('_', "").parse().unwrap_or(0)))
+        Ok(vm.int(t[..end].replace('_', "").parse().unwrap_or(0)))
     });
     vm.def(&c, "to_f", |vm, s, _, _| {
         let s = s_of(vm, s)?;
@@ -59,19 +59,19 @@ pub fn init(vm: &mut Vm) {
             .rev()
             .filter(|&i| t.is_char_boundary(i))
             .find_map(|i| t[..i].parse::<f64>().ok());
-        Ok(V::Float(best.unwrap_or(0.0)))
+        Ok(Value::float(best.unwrap_or(0.0)))
     });
     vm.def(&c, "length", |vm, s, _, _| {
-        Ok(V::Int(s_of(vm, s)?.chars().count() as i64))
+        Ok(Value::small_int(s_of(vm, s)?.chars().count() as i64))
     });
     vm.def(&c, "size", |vm, s, _, _| {
-        Ok(V::Int(s_of(vm, s)?.chars().count() as i64))
+        Ok(Value::small_int(s_of(vm, s)?.chars().count() as i64))
     });
     vm.def(&c, "bytesize", |vm, s, _, _| {
-        Ok(V::Int(s_of(vm, s)?.len() as i64))
+        Ok(Value::small_int(s_of(vm, s)?.len() as i64))
     });
     vm.def(&c, "empty?", |vm, s, _, _| {
-        Ok(V::Bool(s_of(vm, s)?.is_empty()))
+        Ok(Value::bool(s_of(vm, s)?.is_empty()))
     });
     vm.def(&c, "upcase", |vm, s, _, _| {
         map_str(vm, s, |x| x.to_uppercase())
@@ -134,7 +134,7 @@ pub fn init(vm: &mut Vm) {
     });
     vm.def(&c, "bytes", |vm, s, _, _| {
         Ok(vm.array(
-            s_of(vm, s)?.bytes().map(|b| V::Int(b as i64)).collect(),
+            s_of(vm, s)?.bytes().map(|b| Value::small_int(b as i64)).collect(),
         ))
     });
     vm.def(&c, "lines", |vm, s, _, _| {
@@ -161,7 +161,7 @@ pub fn init(vm: &mut Vm) {
         s_of(vm, s)?
             .chars()
             .next()
-            .map(|c| V::Int(c as i64))
+            .map(|c| Value::small_int(c as i64))
             .ok_or_else(|| vm.arg_err("empty string"))
     });
     vm.def(&c, "+", |vm, s, a, _| {
@@ -177,9 +177,9 @@ pub fn init(vm: &mut Vm) {
     });
     vm.def(&c, "%", |vm, s, a, _| {
         let fmt = s_of(vm, s)?;
-        let args = match arg(a, 0) {
+        let args = match vm.kind(arg(a, 0)) {
             V::Array(v) => vm.heap[v].borrow().clone(),
-            v => vec![v],
+            _ => vec![arg(a, 0)],
         };
         let out = kernel::format(vm, &fmt, &args)?;
         Ok(vm.str(out))
@@ -197,61 +197,61 @@ pub fn init(vm: &mut Vm) {
         Ok(*s)
     });
     vm.def(&c, "==", |vm, s, a, _| {
-        Ok(V::Bool(values_eq(&vm.heap, s, &arg(a, 0))))
+        Ok(Value::bool(values_eq(&vm.heap, s, &arg(a, 0))))
     });
     vm.def(&c, "eql?", |vm, s, a, _| {
-        Ok(V::Bool(values_eq(&vm.heap, s, &arg(a, 0))))
+        Ok(Value::bool(values_eq(&vm.heap, s, &arg(a, 0))))
     });
-    vm.def(&c, "<=>", |vm, s, a, _| match arg(a, 0) {
-        V::Str(o) => Ok(V::Int(
+    vm.def(&c, "<=>", |vm, s, a, _| match vm.kind(arg(a, 0)) {
+        V::Str(o) => Ok(Value::small_int(
             s_of(vm, s)?.as_str().cmp(vm.heap[o].borrow().as_str()) as i64
         )),
-        _ => Ok(V::Nil),
+        _ => Ok(Value::NIL),
     });
     vm.def(&c, "<", |vm, s, a, _| {
-        Ok(V::Bool(compare(vm, s, &arg(a, 0))?.is_lt()))
+        Ok(Value::bool(compare(vm, s, &arg(a, 0))?.is_lt()))
     });
     vm.def(&c, "<=", |vm, s, a, _| {
-        Ok(V::Bool(compare(vm, s, &arg(a, 0))?.is_le()))
+        Ok(Value::bool(compare(vm, s, &arg(a, 0))?.is_le()))
     });
     vm.def(&c, ">", |vm, s, a, _| {
-        Ok(V::Bool(compare(vm, s, &arg(a, 0))?.is_gt()))
+        Ok(Value::bool(compare(vm, s, &arg(a, 0))?.is_gt()))
     });
     vm.def(&c, ">=", |vm, s, a, _| {
-        Ok(V::Bool(compare(vm, s, &arg(a, 0))?.is_ge()))
+        Ok(Value::bool(compare(vm, s, &arg(a, 0))?.is_ge()))
     });
     vm.def(&c, "include?", |vm, s, a, _| {
         let needle = str_of(vm, &arg(a, 0))?;
-        Ok(V::Bool(s_of(vm, s)?.contains(&needle)))
+        Ok(Value::bool(s_of(vm, s)?.contains(&needle)))
     });
     vm.def(&c, "start_with?", |vm, s, a, _| {
         let s = s_of(vm, s)?;
         for p in a {
             if s.starts_with(&str_of(vm, p)?) {
-                return Ok(V::Bool(true));
+                return Ok(Value::TRUE);
             }
         }
-        Ok(V::Bool(false))
+        Ok(Value::FALSE)
     });
     vm.def(&c, "end_with?", |vm, s, a, _| {
         let s = s_of(vm, s)?;
         for p in a {
             if s.ends_with(&str_of(vm, p)?) {
-                return Ok(V::Bool(true));
+                return Ok(Value::TRUE);
             }
         }
-        Ok(V::Bool(false))
+        Ok(Value::FALSE)
     });
     vm.def(&c, "index", |vm, s, a, _| {
         let s = s_of(vm, s)?;
         let needle = str_of(vm, &arg(a, 0))?;
-        Ok(s.find(&needle)
+        Ok(Value::from(s.find(&needle)
             .map(|b| V::Int(s[..b].chars().count() as i64))
-            .unwrap_or(V::Nil))
+            .unwrap_or(V::Nil)))
     });
     vm.def(&c, "count", |vm, s, a, _| {
         let set: Vec<char> = str_of(vm, &arg(a, 0))?.chars().collect();
-        Ok(V::Int(
+        Ok(Value::small_int(
             s_of(vm, s)?.chars().filter(|c| set.contains(c)).count() as i64,
         ))
     });
@@ -295,10 +295,10 @@ pub fn init(vm: &mut Vm) {
     });
     vm.def(&c, "split", |vm, s, a, _| {
         let s = s_of(vm, s)?;
-        let parts: Vec<String> = match arg(a, 0) {
+        let parts: Vec<String> = match vm.kind(arg(a, 0)) {
             V::Nil => s.split_whitespace().map(String::from).collect(),
             sep => {
-                let sep = str_of(vm, &sep)?;
+                let sep = str_of(vm, &Value::from(sep))?;
                 if sep == " " {
                     s.split_whitespace().map(String::from).collect()
                 } else if sep.is_empty() {
@@ -329,13 +329,13 @@ pub fn init(vm: &mut Vm) {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
         s_of(vm, s)?.hash(&mut h);
-        Ok(V::Int(h.finish() as i64))
+        Ok(vm.int(h.finish() as i64))
     });
 }
 
 fn to_sym(vm: &mut Vm, s: &Value, _: &[Value], _: Option<&Value>) -> VmResult {
     let s = s_of(vm, s)?;
-    Ok(V::Sym(vm.intern(&s)))
+    Ok(Value::sym(vm.intern(&s)))
 }
 
 fn pad(vm: &mut Vm, s: &Value, a: &[Value], mode: u8) -> VmResult {
@@ -363,23 +363,23 @@ fn slice(vm: &mut Vm, s: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
     let chars: Vec<char> = s_of(vm, s)?.chars().collect();
     let len = chars.len();
     let sub = |start: usize, n: usize| chars[start..(start + n).min(len)].iter().collect::<String>();
-    match (arg(a, 0), a.len()) {
+    match (vm.kind(arg(a, 0)), a.len()) {
         (V::Int(i), 1) => Ok(match norm_index(i, len) {
             Some(i) if i < len => vm.str(chars[i].to_string()),
-            _ => V::Nil,
+            _ => Value::NIL,
         }),
         (V::Int(i), 2) => {
             let n = int_of(vm, &a[1])?;
             Ok(match norm_index(i, len) {
                 Some(i) if n >= 0 => vm.str(sub(i, n as usize)),
-                _ => V::Nil,
+                _ => Value::NIL,
             })
         }
         (V::Range(r), _) => {
             let r = vm.heap[r];
             let (lo, hi) = (int_of(vm, &r.0)?, if r.1.is_nil() { -1 } else { int_of(vm, &r.1)? });
             let Some(start) = norm_index(lo, len) else {
-                return Ok(V::Nil);
+                return Ok(Value::NIL);
             };
             let mut end = if hi < 0 { hi + len as i64 } else { hi };
             if !r.2 || r.1.is_nil() {
@@ -392,7 +392,7 @@ fn slice(vm: &mut Vm, s: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
             Ok(if chars.iter().collect::<String>().contains(&needle) {
                 vm.str(needle)
             } else {
-                V::Nil
+                Value::NIL
             })
         }
         _ => Err(vm.type_err("no implicit conversion into Integer")),

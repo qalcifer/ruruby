@@ -21,7 +21,7 @@ fn init_object(vm: &mut Vm) {
             let s = vm.to_s(v)?;
             vm.write(&s);
         }
-        Ok(V::Nil)
+        Ok(Value::NIL)
     });
     vm.def(&o, "p", |vm, _, a, _| {
         for v in a {
@@ -30,7 +30,7 @@ fn init_object(vm: &mut Vm) {
             vm.write("\n");
         }
         Ok(match a.len() {
-            0 => V::Nil,
+            0 => Value::NIL,
             1 => a[0],
             _ => vm.array(a.to_vec()),
         })
@@ -46,7 +46,7 @@ fn init_object(vm: &mut Vm) {
     vm.def(&o, "gets", |vm, _, _, _| {
         let mut line = String::new();
         match std::io::stdin().read_line(&mut line) {
-            Ok(0) | Err(_) => Ok(V::Nil),
+            Ok(0) | Err(_) => Ok(Value::NIL),
             Ok(_) => Ok(vm.str(line)),
         }
     });
@@ -59,34 +59,38 @@ fn init_object(vm: &mut Vm) {
     });
     vm.def(&o, "proc", |vm, _, _, b| need_block(vm, b));
     vm.def(&o, "lambda", |vm, _, _, b| need_block(vm, b));
-    vm.def(&o, "Integer", |vm, _, a, _| match arg(a, 0) {
+    vm.def(&o, "Integer", |vm, _, a, _| match vm.kind(arg(a, 0)) {
         V::Str(s) => {
             let t = vm.heap[s].borrow().trim().replace('_', "");
-            t.parse::<i64>().map(V::Int).map_err(|_| {
+            let parsed = t.parse::<i64>().map_err(|_| {
                 vm.arg_err(format!(
                     "invalid value for Integer(): {}",
                     inspect_str(&vm.heap[s].borrow())
                 ))
-            })
+            })?;
+            Ok(vm.int(parsed))
         }
-        v => Ok(V::Int(int_of(vm, &v)?)),
+        _ => {
+            let n = int_of(vm, &arg(a, 0))?;
+            Ok(vm.int(n))
+        }
     });
-    vm.def(&o, "Float", |vm, _, a, _| match arg(a, 0) {
+    vm.def(&o, "Float", |vm, _, a, _| match vm.kind(arg(a, 0)) {
         V::Str(s) => vm.heap[s]
             .borrow()
             .trim()
             .parse::<f64>()
-            .map(V::Float)
+            .map(Value::float)
             .map_err(|_| {
                 vm.arg_err(format!(
                     "invalid value for Float(): {}",
                     inspect_str(&vm.heap[s].borrow())
                 ))
             }),
-        v => Ok(V::Float(float_of(vm, &v)?)),
+        v => Ok(Value::float(float_of(vm, &Value::from(v))?)),
     });
-    vm.def(&o, "initialize", |_, _, _, _| Ok(V::Nil));
-    vm.def(&o, "class", |vm, s, _, _| Ok(V::Class(vm.class_of(s))));
+    vm.def(&o, "initialize", |_, _, _, _| Ok(Value::NIL));
+    vm.def(&o, "class", |vm, s, _, _| Ok(Value::from(vm.class_of(s))));
     vm.def(&o, "to_s", |vm, s, _, _| {
         if s.identical(&vm.main_obj) {
             return Ok(vm.str("main"));
@@ -95,47 +99,48 @@ fn init_object(vm: &mut Vm) {
     });
     vm.def(&o, "inspect", obj_inspect);
     vm.def(&o, "==", |_, s, a, _| {
-        Ok(V::Bool(s.identical(&arg(a, 0))))
+        Ok(Value::bool(s.identical(&arg(a, 0))))
     });
     vm.def(&o, "!=", |vm, s, a, _| {
-        Ok(V::Bool(!vm.equal(s, &arg(a, 0))?))
+        Ok(Value::bool(!vm.equal(s, &arg(a, 0))?))
     });
     vm.def(&o, "equal?", |_, s, a, _| {
-        Ok(V::Bool(s.identical(&arg(a, 0))))
+        Ok(Value::bool(s.identical(&arg(a, 0))))
     });
-    vm.def(&o, "eql?", |vm, s, a, _| Ok(V::Bool(eql(&vm.heap, s, &arg(a, 0)))));
+    vm.def(&o, "eql?", |vm, s, a, _| Ok(Value::bool(eql(&vm.heap, s, &arg(a, 0)))));
     vm.def(&o, "===", |vm, s, a, _| {
-        Ok(V::Bool(vm.equal(s, &arg(a, 0))?))
+        Ok(Value::bool(vm.equal(s, &arg(a, 0))?))
     });
-    vm.def(&o, "nil?", |_, _, _, _| Ok(V::Bool(false)));
+    vm.def(&o, "nil?", |_, _, _, _| Ok(Value::FALSE));
     vm.def(&o, "is_a?", is_a);
     vm.def(&o, "kind_of?", is_a);
-    vm.def(&o, "instance_of?", |vm, s, a, _| match arg(a, 0) {
-        V::Class(c) => Ok(V::Bool(vm.class_of(s) == c)),
+    vm.def(&o, "instance_of?", |vm, s, a, _| match vm.kind(arg(a, 0)) {
+        V::Class(c) => Ok(Value::bool(vm.class_of(s) == c)),
         _ => Err(vm.type_err("class or module required")),
     });
     vm.def(&o, "respond_to?", |vm, s, a, _| {
         let m = sym_of(vm, &arg(a, 0))?;
-        Ok(V::Bool(vm.respond_to(s, m)))
+        Ok(Value::bool(vm.respond_to(s, m)))
     });
     vm.def(&o, "send", send);
     vm.def(&o, "__send__", send);
     vm.def(&o, "public_send", send);
-    vm.def(&o, "object_id", |_, s, _, _| {
-        Ok(V::Int(match s {
+    vm.def(&o, "object_id", |vm, s, _, _| {
+        let id = match vm.kind(*s) {
             V::Nil => 8,
             V::Bool(true) => 20,
             V::Bool(false) => 0,
-            V::Int(i) => 2 * i + 1,
+            V::Int(i) => i.wrapping_mul(2).wrapping_add(1),
             V::Sym(s) => s.0 as i64 * 16 + 12,
             V::Float(f) => f.to_bits() as i64,
-            v => v.heap_id() as i64 * 8,
-        }))
+            _ => s.heap_id() as i64 * 8,
+        };
+        Ok(vm.int(id))
     });
     vm.def(&o, "freeze", |_, s, _, _| Ok(*s));
-    vm.def(&o, "frozen?", |_, s, _, _| {
-        Ok(V::Bool(!matches!(
-            s,
+    vm.def(&o, "frozen?", |vm, s, _, _| {
+        Ok(Value::bool(!matches!(
+            vm.kind(*s),
             V::Str(_) | V::Array(_) | V::Hash(_) | V::Object(_)
         )))
     });
@@ -161,13 +166,13 @@ fn init_object(vm: &mut Vm) {
         Ok(arg(a, 1))
     });
     vm.def(&o, "instance_variables", |vm, s, _, _| {
-        let names = match s {
+        let names = match vm.kind(*s) {
             V::Object(o) => vm.heap[o]
                 .ivars
                 .borrow()
                 .items
                 .iter()
-                .map(|(k, _)| V::Sym(*k))
+                .map(|(k, _)| Value::sym(*k))
                 .collect(),
             _ => vec![],
         };
@@ -177,7 +182,7 @@ fn init_object(vm: &mut Vm) {
 
 fn puts(vm: &mut Vm, _: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
     fn put_one(vm: &mut Vm, v: &Value) -> Result<(), Unwind> {
-        if let V::Array(arr) = v {
+        if let V::Array(arr) = vm.kind(*v) {
             let items = vm.heap[arr].borrow().clone();
             if items.is_empty() {
                 vm.write("\n");
@@ -200,11 +205,11 @@ fn puts(vm: &mut Vm, _: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
     for v in a {
         put_one(vm, v)?;
     }
-    Ok(V::Nil)
+    Ok(Value::NIL)
 }
 
 fn obj_inspect(vm: &mut Vm, s: &Value, _: &[Value], _: Option<&Value>) -> VmResult {
-    let V::Object(o) = s else {
+    let V::Object(o) = vm.kind(*s) else {
         return Ok(vm.str(format!("#<{}>", vm.class_name(s))));
     };
     if s.identical(&vm.main_obj) {
@@ -225,8 +230,8 @@ fn obj_inspect(vm: &mut Vm, s: &Value, _: &[Value], _: Option<&Value>) -> VmResu
 }
 
 fn is_a(vm: &mut Vm, s: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
-    match arg(a, 0) {
-        V::Class(c) => Ok(V::Bool(vm.is_a(s, &c))),
+    match vm.kind(arg(a, 0)) {
+        V::Class(c) => Ok(Value::bool(vm.is_a(s, &c))),
         _ => Err(vm.type_err("class or module required")),
     }
 }
@@ -240,7 +245,7 @@ fn send(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>) -> VmResult {
 }
 
 fn dup(vm: &mut Vm, s: &Value, _: &[Value], _: Option<&Value>) -> VmResult {
-    Ok(match s {
+    Ok(match vm.kind(*s) {
         V::Str(x) => { let v = vm.heap[x].borrow().clone(); vm.str(v) },
         V::Array(x) => { let v = vm.heap[x].borrow().clone(); vm.array(v) },
         V::Hash(x) => { let v = vm.heap[x].borrow().clone(); vm.hash(v) },
@@ -250,7 +255,7 @@ fn dup(vm: &mut Vm, s: &Value, _: &[Value], _: Option<&Value>) -> VmResult {
             *copy.ivars.borrow_mut() = IvTable { items: ivars };
             vm.object(copy)
         }
-        other => *other,
+        other => Value::from(other),
     })
 }
 
@@ -260,13 +265,13 @@ fn raise(vm: &mut Vm, _: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
             let c = vm.c.runtime_error;
             vm.make_exception(&c, "unhandled exception")
         }
-        [V::Str(m)] => {
-            let (c, m) = (vm.c.runtime_error, vm.heap[m].borrow().clone());
+        [m] if let Some(m) = vm.string(m) => {
+            let c = vm.c.runtime_error;
             vm.make_exception(&c, m)
         }
-        [cls @ V::Class(_)] => vm.send(cls, "new", vec![])?,
-        [cls @ V::Class(_), msg] => vm.send(cls, "new", vec![*msg])?,
-        [e @ V::Object(_)] => *e,
+        [cls] if matches!(vm.kind(*cls), V::Class(_)) => vm.send(cls, "new", vec![])?,
+        [cls, msg] if matches!(vm.kind(*cls), V::Class(_)) => vm.send(cls, "new", vec![*msg])?,
+        [e] if matches!(vm.kind(*e), V::Object(_)) => *e,
         _ => return Err(vm.type_err("exception class/object expected")),
     };
     if !vm.is_a(&exc, &vm.c.exception.clone()) {
@@ -276,7 +281,7 @@ fn raise(vm: &mut Vm, _: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
 }
 
 fn class_new(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>) -> VmResult {
-    let &V::Class(cls) = s else { unreachable!() };
+    let V::Class(cls) = vm.kind(*s) else { unreachable!() };
     if cls == vm.c.array {
         let n = if a.is_empty() {
             0
@@ -286,7 +291,7 @@ fn class_new(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>) -> VmResult
         let mut v = Vec::with_capacity(n);
         for i in 0..n {
             v.push(match b {
-                Some(b) => vm.call_block(b, vec![V::Int(i as i64)])?,
+                Some(b) => vm.call_block(b, vec![Value::small_int(i as i64)])?,
                 None => arg(a, 1),
             });
         }
@@ -330,7 +335,7 @@ fn class_new(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>) -> VmResult
 }
 
 fn attr(vm: &mut Vm, s: &Value, a: &[Value], reader: bool, writer: bool) -> VmResult {
-    let &V::Class(cls) = s else { unreachable!() };
+    let V::Class(cls) = vm.kind(*s) else { unreachable!() };
     for name in a {
         let n = sym_of(vm, name)?;
         let n = vm.sym_name(n).to_string();
@@ -344,14 +349,14 @@ fn attr(vm: &mut Vm, s: &Value, a: &[Value], reader: bool, writer: bool) -> VmRe
             vm.heap[cls].methods.insert(m, Method::AttrWriter(iv));
         }
     }
-    Ok(V::Nil)
+    Ok(Value::NIL)
 }
 
 fn init_module(vm: &mut Vm) {
     let m = vm.c.module;
-    let name: NativeFn = |vm, s, _, _| match s {
+    let name: NativeFn = |vm, s, _, _| match vm.kind(*s) {
         V::Class(c) => Ok(vm.str(vm.heap[c].name())),
-        _ => Ok(V::Nil),
+        _ => Ok(Value::NIL),
     };
     vm.def(&m, "name", name);
     vm.def(&m, "to_s", name);
@@ -362,11 +367,11 @@ fn init_module(vm: &mut Vm) {
     vm.def(&m, "attr_reader", |vm, s, a, _| attr(vm, s, a, true, false));
     vm.def(&m, "attr_writer", |vm, s, a, _| attr(vm, s, a, false, true));
     vm.def(&m, "include", |vm, s, a, _| {
-        let &V::Class(cls) = s else { unreachable!() };
+        let V::Class(cls) = vm.kind(*s) else { unreachable!() };
         for m in a {
-            match m {
+            match vm.kind(*m) {
                 V::Class(module) if vm.heap[module].is_module => {
-                    vm.heap[cls].includes.push(*module)
+                    vm.heap[cls].includes.push(module)
                 }
                 _ => return Err(vm.type_err("wrong argument type (expected Module)")),
             }
@@ -374,13 +379,13 @@ fn init_module(vm: &mut Vm) {
         Ok(*s)
     });
     vm.def(&m, "ancestors", |vm, s, _, _| {
-        let &V::Class(cls) = s else { unreachable!() };
+        let V::Class(cls) = vm.kind(*s) else { unreachable!() };
         Ok(vm.array(
-            vm.ancestors(&cls).into_iter().map(V::Class).collect(),
+            vm.ancestors(&cls).into_iter().map(Value::from).collect(),
         ))
     });
     vm.def(&m, "instance_methods", |vm, s, _, _| {
-        let &V::Class(cls) = s else { unreachable!() };
+        let V::Class(cls) = vm.kind(*s) else { unreachable!() };
         let mut names: Vec<String> = vm.heap[cls]
             .methods
             .borrow()
@@ -388,20 +393,20 @@ fn init_module(vm: &mut Vm) {
             .map(|k| vm.sym_name(*k).to_string())
             .collect();
         names.sort();
-        let syms = names.iter().map(|n| V::Sym(vm.intern(n))).collect();
+        let syms = names.iter().map(|n| Value::sym(vm.intern(n))).collect();
         Ok(vm.array(syms))
     });
     vm.def(&m, "method_defined?", |vm, s, a, _| {
-        let &V::Class(cls) = s else { unreachable!() };
+        let V::Class(cls) = vm.kind(*s) else { unreachable!() };
         let mid = sym_of(vm, &arg(a, 0))?;
-        Ok(V::Bool(vm.find_method(&cls, mid).is_some()))
+        Ok(Value::bool(vm.find_method(&cls, mid).is_some()))
     });
     vm.def(&m, "===", |vm, s, a, _| {
-        let &V::Class(cls) = s else { unreachable!() };
-        Ok(V::Bool(vm.is_a(&arg(a, 0), &cls)))
+        let V::Class(cls) = vm.kind(*s) else { unreachable!() };
+        Ok(Value::bool(vm.is_a(&arg(a, 0), &cls)))
     });
     vm.def(&m, "const_get", |vm, s, a, _| {
-        let &V::Class(cls) = s else { unreachable!() };
+        let V::Class(cls) = vm.kind(*s) else { unreachable!() };
         let n = sym_of(vm, &arg(a, 0))?;
         let v = vm.heap[cls].consts.borrow().get(&n).cloned();
         v.ok_or_else(|| {
@@ -419,26 +424,26 @@ fn init_module(vm: &mut Vm) {
         "module_function",
         "private_constant",
     ] {
-        vm.def(&m, name, |_, _, _, _| Ok(V::Nil));
+        vm.def(&m, name, |_, _, _, _| Ok(Value::NIL));
     }
 
     let c = vm.c.class;
     vm.def(&c, "new", class_new);
-    vm.def(&c, "superclass", |vm, s, _, _| match s {
-        V::Class(c) => Ok(vm.heap[c].superclass.map(V::Class).unwrap_or(V::Nil)),
-        _ => Ok(V::Nil),
+    vm.def(&c, "superclass", |vm, s, _, _| match vm.kind(*s) {
+        V::Class(c) => Ok(vm.heap[c].superclass.map(Value::from).unwrap_or(Value::NIL)),
+        _ => Ok(Value::NIL),
     });
 }
 
 fn init_exception(vm: &mut Vm) {
     let e = vm.c.exception;
     vm.def(&e, "initialize", |vm, s, a, _| {
-        let msg = match arg(a, 0) {
+        let msg = match vm.kind(arg(a, 0)) {
             V::Nil => vm.str(vm.class_name(s)),
-            m => m,
+            m => Value::from(m),
         };
         vm.ivar_set(s, vm.s.message, msg)?;
-        Ok(V::Nil)
+        Ok(Value::NIL)
     });
     let message: NativeFn = |vm, s, _, _| {
         let m = vm.ivar_get(s, vm.s.message);
@@ -457,7 +462,7 @@ fn init_exception(vm: &mut Vm) {
             vm.class_name(s)
         )))
     });
-    vm.def(&e, "backtrace", |_, _, _, _| Ok(V::Nil));
+    vm.def(&e, "backtrace", |_, _, _, _| Ok(Value::NIL));
     vm.def_singleton(&e, "exception", |vm, s, a, b| {
         let new = vm.intern("new");
         vm.call_with_block(s, new, a.to_vec(), b.cloned())
@@ -472,7 +477,7 @@ fn init_exception(vm: &mut Vm) {
     });
     vm.def(&e, "==", |vm, s, a, _| {
         let o = arg(a, 0);
-        Ok(V::Bool(
+        Ok(Value::bool(
             s.identical(&o)
                 || (vm.class_of(s) == vm.class_of(&o)
                     && vm.exc_message(s) == vm.exc_message(&o)),
@@ -487,8 +492,8 @@ fn init_misc(vm: &mut Vm) {
         vm.heap[p].methods.insert(s, Method::ProcCall);
     }
     vm.def(&p, "to_proc", |_, s, _, _| Ok(*s));
-    vm.def(&p, "arity", |vm, s, _, _| match s {
-        V::Proc(p) => Ok(V::Int(match &vm.heap[p].body {
+    vm.def(&p, "arity", |vm, s, _, _| match vm.kind(*s) {
+        V::Proc(p) => Ok(vm.int(match &vm.heap[p].body {
             ProcBody::Ruby { irep, .. } if vm.heap[p].lambda => irep.spec.arity(),
             ProcBody::Ruby { irep, .. } => {
                 // a proc's optional parameters don't count unless it also has a rest
@@ -498,28 +503,28 @@ fn init_misc(vm: &mut Vm) {
             }
             _ => -1,
         })),
-        _ => Ok(V::Int(-1)),
+        _ => Ok(Value::small_int(-1)),
     });
 
     let n = vm.c.nil;
     vm.def(&n, "to_s", |vm, _, _, _| Ok(vm.str("")));
     vm.def(&n, "to_a", |vm, _, _, _| Ok(vm.array(vec![])));
-    vm.def(&n, "to_i", |_, _, _, _| Ok(V::Int(0)));
+    vm.def(&n, "to_i", |_, _, _, _| Ok(Value::small_int(0)));
     vm.def(&n, "inspect", |vm, _, _, _| Ok(vm.str("nil")));
-    vm.def(&n, "nil?", |_, _, _, _| Ok(V::Bool(true)));
+    vm.def(&n, "nil?", |_, _, _, _| Ok(Value::TRUE));
 
     for cls in [vm.c.true_, vm.c.false_] {
         let to_s: NativeFn = |vm, s, _, _| Ok(vm.str(if s.truthy() { "true" } else { "false" }));
         vm.def(&cls, "to_s", to_s);
         vm.def(&cls, "inspect", to_s);
         vm.def(&cls, "&", |_, s, a, _| {
-            Ok(V::Bool(s.truthy() && arg(a, 0).truthy()))
+            Ok(Value::bool(s.truthy() && arg(a, 0).truthy()))
         });
         vm.def(&cls, "|", |_, s, a, _| {
-            Ok(V::Bool(s.truthy() || arg(a, 0).truthy()))
+            Ok(Value::bool(s.truthy() || arg(a, 0).truthy()))
         });
         vm.def(&cls, "^", |_, s, a, _| {
-            Ok(V::Bool(s.truthy() != arg(a, 0).truthy()))
+            Ok(Value::bool(s.truthy() != arg(a, 0).truthy()))
         });
     }
 
@@ -530,22 +535,22 @@ fn init_misc(vm: &mut Vm) {
     vm.def(&sy, "id2name", to_s);
     vm.def(&sy, "to_sym", |_, s, _, _| Ok(*s));
     vm.def(&sy, "inspect", |vm, s, _, _| Ok({ let v = vm.inspect(s)?; vm.str(v) }));
-    vm.def(&sy, "to_proc", |vm, s, _, _| match s {
-        V::Sym(m) => Ok(vm.proc_value(ProcBody::SymCall(*m))),
+    vm.def(&sy, "to_proc", |vm, s, _, _| match vm.kind(*s) {
+        V::Sym(m) => Ok(vm.proc_value(ProcBody::SymCall(m))),
         _ => unreachable!(),
     });
     vm.def(&sy, "length", |vm, s, _, _| {
-        Ok(V::Int(vm.to_s(s)?.chars().count() as i64))
+        Ok(Value::small_int(vm.to_s(s)?.chars().count() as i64))
     });
     vm.def(&sy, "size", |vm, s, _, _| {
-        Ok(V::Int(vm.to_s(s)?.chars().count() as i64))
+        Ok(Value::small_int(vm.to_s(s)?.chars().count() as i64))
     });
-    vm.def(&sy, "<=>", |vm, s, a, _| match arg(a, 0) {
+    vm.def(&sy, "<=>", |vm, s, a, _| match vm.kind(arg(a, 0)) {
         V::Sym(o) => {
             let (x, y) = (vm.to_s(s)?, vm.sym_name(o).to_string());
-            Ok(V::Int(x.cmp(&y) as i64))
+            Ok(vm.int(x.cmp(&y) as i64))
         }
-        _ => Ok(V::Nil),
+        _ => Ok(Value::NIL),
     });
 }
 
@@ -555,26 +560,26 @@ fn init_comparable(vm: &mut Vm) {
         compare(vm, s, &arg(a, 0))
     }
     vm.def(&c, "<", |vm, s, a, _| {
-        Ok(V::Bool(cmp(vm, s, a)?.is_lt()))
+        Ok(Value::bool(cmp(vm, s, a)?.is_lt()))
     });
     vm.def(&c, "<=", |vm, s, a, _| {
-        Ok(V::Bool(cmp(vm, s, a)?.is_le()))
+        Ok(Value::bool(cmp(vm, s, a)?.is_le()))
     });
     vm.def(&c, ">", |vm, s, a, _| {
-        Ok(V::Bool(cmp(vm, s, a)?.is_gt()))
+        Ok(Value::bool(cmp(vm, s, a)?.is_gt()))
     });
     vm.def(&c, ">=", |vm, s, a, _| {
-        Ok(V::Bool(cmp(vm, s, a)?.is_ge()))
+        Ok(Value::bool(cmp(vm, s, a)?.is_ge()))
     });
     vm.def(&c, "==", |vm, s, a, _| {
         if s.identical(&arg(a, 0)) {
-            return Ok(V::Bool(true));
+            return Ok(Value::TRUE);
         }
         let r = vm.call_method(s, vm.s.cmp, vec![arg(a, 0)], None)?;
-        Ok(V::Bool(matches!(r, V::Int(0))))
+        Ok(Value::bool(matches!(vm.kind(r), V::Int(0))))
     });
     vm.def(&c, "between?", |vm, s, a, _| {
-        Ok(V::Bool(
+        Ok(Value::bool(
             compare(vm, s, &arg(a, 0))?.is_ge() && compare(vm, s, &arg(a, 1))?.is_le(),
         ))
     });
@@ -652,10 +657,10 @@ pub fn format(vm: &mut Vm, fmt: &str, args: &[Value]) -> Result<String, Unwind> 
         };
         let (prefix, body, numeric) = match conv {
             'd' | 'i' | 'u' => {
-                let n = match &v {
+                let n = match vm.kind(v) {
                     V::Float(f) => f.floor() as i64,
                     V::Str(s) => vm.heap[s].borrow().trim().parse().unwrap_or(0),
-                    other => int_of(vm, other)?,
+                    _ => int_of(vm, &v)?,
                 };
                 (sign(n < 0), n.unsigned_abs().to_string(), true)
             }
@@ -687,14 +692,14 @@ pub fn format(vm: &mut Vm, fmt: &str, args: &[Value]) -> Result<String, Unwind> 
             }
             'c' => (
                 "",
-                match &v {
+                match vm.kind(v) {
                     V::Str(s) => vm.heap[s]
                         .borrow()
                         .chars()
                         .next()
                         .map(String::from)
                         .unwrap_or_default(),
-                    other => char::from_u32(int_of(vm, other)? as u32)
+                    _ => char::from_u32(int_of(vm, &v)? as u32)
                         .map(String::from)
                         .unwrap_or_default(),
                 },

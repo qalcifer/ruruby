@@ -322,10 +322,10 @@ impl<'h> Marker<'h> {
     }
 
     pub fn value(&mut self, v: &Value) {
-        match v {
+        match self.heap.kind(*v) {
             V::Nil | V::Bool(_) | V::Int(_) | V::Float(_) | V::Sym(_) => {}
-            V::Class(c) => self.class(*c),
-            v => self.gray.push(Gray::Val(*v)),
+            V::Class(c) => self.class(c),
+            v => self.gray.push(Gray::Val(Value::from(v))),
         }
     }
 
@@ -354,7 +354,7 @@ impl<'h> Marker<'h> {
     fn trace(&mut self, g: Gray) {
         let heap = self.heap;
         match g {
-            Gray::Val(v) => match v {
+            Gray::Val(v) => match heap.kind(v) {
                 V::Str(h) => {
                     self.visit(h);
                 }
@@ -463,7 +463,7 @@ impl<'h> Marker<'h> {
         self.class(p.target);
         match &p.body {
             ProcBody::Ruby { env, .. } => self.env(*env),
-            ProcBody::Collect(buf) => self.value(&V::Array(*buf)),
+            ProcBody::Collect(buf) => self.value(&Value::from(*buf)),
             ProcBody::SymCall(_) => {}
         }
     }

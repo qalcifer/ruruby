@@ -44,7 +44,7 @@ pub fn load_prelude(vm: &mut Vm) {
 
 /// Argument `i`, or nil when missing.
 pub fn arg(a: &[Value], i: usize) -> Value {
-    a.get(i).cloned().unwrap_or(V::Nil)
+    a.get(i).cloned().unwrap_or(Value::NIL)
 }
 
 pub fn check_argc(vm: &Vm, a: &[Value], min: usize, max: usize) -> Result<(), Unwind> {
@@ -69,9 +69,9 @@ pub fn need_block(vm: &Vm, b: Option<&Value>) -> Result<Value, Unwind> {
 }
 
 pub fn int_of(vm: &Vm, v: &Value) -> Result<i64, Unwind> {
-    match v {
-        V::Int(i) => Ok(*i),
-        V::Float(f) => Ok(*f as i64),
+    match vm.kind(*v) {
+        V::Int(i) => Ok(i),
+        V::Float(f) => Ok(f as i64),
         _ => Err(vm.type_err(format!(
             "no implicit conversion of {} into Integer",
             describe(vm, v)
@@ -80,15 +80,15 @@ pub fn int_of(vm: &Vm, v: &Value) -> Result<i64, Unwind> {
 }
 
 pub fn float_of(vm: &Vm, v: &Value) -> Result<f64, Unwind> {
-    match v {
-        V::Int(i) => Ok(*i as f64),
-        V::Float(f) => Ok(*f),
+    match vm.kind(*v) {
+        V::Int(i) => Ok(i as f64),
+        V::Float(f) => Ok(f),
         _ => Err(vm.type_err(format!("can't convert {} into Float", describe(vm, v)))),
     }
 }
 
 pub fn str_of(vm: &Vm, v: &Value) -> Result<String, Unwind> {
-    match v {
+    match vm.kind(*v) {
         V::Str(s) => Ok(vm.heap[s].borrow().clone()),
         _ => Err(vm.type_err(format!(
             "no implicit conversion of {} into String",
@@ -98,8 +98,8 @@ pub fn str_of(vm: &Vm, v: &Value) -> Result<String, Unwind> {
 }
 
 pub fn sym_of(vm: &mut Vm, v: &Value) -> Result<Sym, Unwind> {
-    match v {
-        V::Sym(s) => Ok(*s),
+    match vm.kind(*v) {
+        V::Sym(s) => Ok(s),
         V::Str(s) => {
             let s = vm.heap[s].borrow().clone();
             Ok(vm.intern(&s))
@@ -117,35 +117,35 @@ fn describe(vm: &Vm, v: &Value) -> String {
 }
 
 pub fn this_str(vm: &Vm, v: &Value) -> Result<StrRef, Unwind> {
-    match v {
-        V::Str(s) => Ok(*s),
+    match vm.kind(*v) {
+        V::Str(s) => Ok(s),
         _ => Err(vm.type_err("expected a String receiver")),
     }
 }
 
 pub fn this_ary(vm: &Vm, v: &Value) -> Result<ArrayRef, Unwind> {
-    match v {
-        V::Array(a) => Ok(*a),
+    match vm.kind(*v) {
+        V::Array(a) => Ok(a),
         _ => Err(vm.type_err("expected an Array receiver")),
     }
 }
 
 pub fn this_hash(vm: &Vm, v: &Value) -> Result<HashRef, Unwind> {
-    match v {
-        V::Hash(h) => Ok(*h),
+    match vm.kind(*v) {
+        V::Hash(h) => Ok(h),
         _ => Err(vm.type_err("expected a Hash receiver")),
     }
 }
 
 /// `a <=> b` as an Ordering (numbers and strings natively, otherwise via `<=>`).
 pub fn compare(vm: &mut Vm, a: &Value, b: &Value) -> Result<Ordering, Unwind> {
-    if let Some(o) = num_cmp(a, b) {
+    if let Some(o) = num_cmp(&vm.heap, a, b) {
         return Ok(o);
     }
-    if let (V::Str(x), V::Str(y)) = (a, b) {
+    if let (V::Str(x), V::Str(y)) = (vm.kind(*a), vm.kind(*b)) {
         return Ok(vm.heap[x].borrow().as_str().cmp(vm.heap[y].borrow().as_str()));
     }
-    if let (V::Array(x), V::Array(y)) = (a, b) {
+    if let (V::Array(x), V::Array(y)) = (vm.kind(*a), vm.kind(*b)) {
         let (x, y) = (vm.heap[x].borrow().clone(), vm.heap[y].borrow().clone());
         for (p, q) in x.iter().zip(&y) {
             let o = compare(vm, p, q)?;
@@ -155,12 +155,12 @@ pub fn compare(vm: &mut Vm, a: &Value, b: &Value) -> Result<Ordering, Unwind> {
         }
         return Ok(x.len().cmp(&y.len()));
     }
-    let r = if a.is_numeric() || matches!(a, V::Str(_)) {
-        V::Nil
+    let r = if a.is_numeric() || matches!(vm.kind(*a), V::Str(_)) {
+        Value::NIL
     } else {
         vm.call_method(a, vm.s.cmp, vec![*b], None)?
     };
-    match r {
+    match vm.kind(r) {
         V::Int(i) => Ok(i.cmp(&0)),
         _ => Err(vm.arg_err(format!(
             "comparison of {} with {} failed",
@@ -203,7 +203,7 @@ pub fn sort_values(vm: &mut Vm, v: Vec<Value>, blk: Option<&Value>) -> Result<Ve
             merge_sort(
                 vm,
                 v,
-                &mut |vm, x, y| match vm.call_block(&b, vec![*x, *y])? {
+                &mut |vm, x, y| match vm.call_block(&b, vec![*x, *y]).map(|r| vm.kind(r))? {
                     V::Int(i) => Ok(i.cmp(&0)),
                     _ => Err(vm.arg_err("comparison failed")),
                 },
@@ -216,7 +216,7 @@ pub fn sort_values(vm: &mut Vm, v: Vec<Value>, blk: Option<&Value>) -> Result<Ve
 /// Materializes anything enumerable: Array, Hash (as [k, v] pairs), Range,
 /// or any object with an `each` method.
 pub fn to_vec(vm: &mut Vm, v: &Value) -> Result<Vec<Value>, Unwind> {
-    match v {
+    match vm.kind(*v) {
         V::Array(a) => Ok(vm.heap[a].borrow().clone()),
         V::Hash(h) => {
             let pairs = vm.heap[h].borrow().pairs.clone();

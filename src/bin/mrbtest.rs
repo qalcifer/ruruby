@@ -91,11 +91,12 @@ fn emit(kind: &str, msg: &str) {
 
 fn global(interp: &mut Interpreter, name: &str) -> Value {
     let s = interp.vm.intern(name);
-    interp.vm.globals.get(&s).cloned().unwrap_or(V::Nil)
+    interp.vm.globals.get(&s).cloned().unwrap_or(Value::NIL)
 }
 
 fn global_int(interp: &mut Interpreter, name: &str) -> i64 {
-    match global(interp, name) {
+    let v = global(interp, name);
+    match interp.vm.kind(v) {
         V::Int(i) => i,
         _ => 0,
     }
@@ -228,11 +229,12 @@ fn child(file: &Path, gc_stress: bool) -> ExitCode {
             }
         }
         // stream new failure messages and the running totals
-        if let V::Array(a) = global(&mut interp, "$asserts") {
+        let asserts = global(&mut interp, "$asserts");
+        if let V::Array(a) = interp.vm.kind(asserts) {
             let heap = &interp.vm.heap;
             let msgs: Vec<String> = heap[a].borrow()[reported..]
                 .iter()
-                .map(|m| match m {
+                .map(|m| match heap.kind(*m) {
                     V::Str(s) => heap[s].borrow().clone(),
                     _ => String::new(),
                 })
