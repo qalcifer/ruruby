@@ -71,7 +71,12 @@ pub fn need_block(vm: &Vm, b: Option<&Value>) -> Result<Value, Unwind> {
 pub fn int_of(vm: &Vm, v: &Value) -> Result<i64, Unwind> {
     match vm.kind(*v) {
         V::Int(i) => Ok(i),
-        V::Float(f) => Ok(f as i64),
+        // truncated; RangeError where no Integer fits (NaN, infinite, huge)
+        V::Float(f) if f.is_finite() && f.abs() < 9.2e18 => Ok(f as i64),
+        V::Float(f) => Err(vm.err(
+            &vm.c.range_error,
+            format!("float {} out of range of integer", crate::value::fmt_float(f)),
+        )),
         _ => Err(vm.type_err(format!(
             "no implicit conversion of {} into Integer",
             describe(vm, v)
