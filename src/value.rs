@@ -283,6 +283,8 @@ pub enum ProcBody {
     SymCall(Sym),
     /// Internal: collects yielded values (used to run Enumerable over `each`).
     Collect(ArrayRef),
+    /// `Method#to_proc`: calls the Method object.
+    Method(Value),
 }
 
 pub struct RProc {

@@ -605,6 +605,7 @@ impl<'h> Marker<'h> {
             ProcBody::Ruby { env, .. } => self.env(*env),
             ProcBody::Collect(buf) => self.value(&Value::from(*buf)),
             ProcBody::SymCall(_) => {}
+            ProcBody::Method(m) => self.value(m),
         }
     }
 }

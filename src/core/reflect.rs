@@ -60,6 +60,7 @@ pub fn init(vm: &mut Vm) {
     init_proc(vm);
     init_pattern_support(vm);
     init_introspection(vm);
+    init_method_objects(vm);
 }
 
 fn init_kernel(vm: &mut Vm) {
@@ -270,19 +271,6 @@ fn init_module(vm: &mut Vm) {
     };
     vm.def(&m, "class_exec", class_exec);
     vm.def(&m, "module_exec", class_exec);
-    vm.def(&m, "instance_method", |vm, s, a, _| {
-        let cls = this_class(vm, s)?;
-        let mid = sym_of(vm, &arg(a, 0))?;
-        if vm.find_method(&cls, mid).is_none() {
-            let msg = format!(
-                "undefined method '{}' for class '{}'",
-                vm.sym_name(mid),
-                vm.heap[cls].name()
-            );
-            return Err(vm.name_err(msg));
-        }
-        Ok(Value::sym(mid))
-    });
     // with names; without, `private` & co. are compiled as a scope's
     // default (Op::DefaultVis), so a call that gets here changes nothing
     vm.def(&m, "private", |vm, s, a, _| set_vis(vm, s, a, Vis::Private));
@@ -733,3 +721,181 @@ fn init_introspection(vm: &mut Vm) {
 fn inherit(a: &[Value], i: usize) -> bool {
     a.get(i).is_none_or(|v| v.truthy())
 }
+
+// ---- Method and UnboundMethod ---------------------------------------
+//
+// Objects of class Method / UnboundMethod with hidden ivars (names without
+// `@`, so `instance_variables` doesn't show them): `__recv` (Method only),
+// `__owner` (the class or module defining the method) and `__name`.
+// Calling looks the method up from the owner (Vm::call_resolved), so a
+// method bound to an instance of a subclass is still the owner's.
+
+fn method_object(vm: &mut Vm, cls: ClassRef, recv: Option<Value>, owner: ClassRef, name: Sym) -> VmResult {
+    let obj = vm.object(RObject::new(cls));
+    let (r, o, n) = (vm.s.m_recv, vm.s.m_owner, vm.s.m_name);
+    if let Some(recv) = recv {
+        vm.ivar_set(&obj, r, recv)?;
+    }
+    vm.ivar_set(&obj, o, Value::from(owner))?;
+    vm.ivar_set(&obj, n, Value::sym(name))?;
+    Ok(obj)
+}
+
+/// The (owner, name) of a Method or UnboundMethod.
+fn method_of(vm: &Vm, m: &Value) -> Result<(ClassRef, Sym), Unwind> {
+    let owner = vm.ivar_lookup(m, vm.s.m_owner).map(|o| vm.kind(o));
+    let name = vm.ivar_lookup(m, vm.s.m_name).map(|n| vm.kind(n));
+    match (owner, name) {
+        (Some(V::Class(o)), Some(V::Sym(n))) => Ok((o, n)),
+        _ => Err(vm.type_err("not a method")),
+    }
+}
+
+/// `obj.method(:name)`: NameError when there is no such method.
+fn find_for_object(vm: &mut Vm, s: &Value, a: &[Value], public_only: bool) -> VmResult {
+    let name = sym_of(vm, &arg(a, 0))?;
+    let cls = vm.dispatch_class(s);
+    match vm.find_method_vis(&cls, name) {
+        Some((_, _, vis)) if public_only && vis != Vis::Public => Err(vm.not_visible(vis, s, name)),
+        Some((_, owner, _)) => {
+            let c = vm.c.method_;
+            method_object(vm, c, Some(*s), owner, name)
+        }
+        None => {
+            let msg = format!("undefined method '{}' for {}", vm.sym_name(name), vm.recv_desc(s));
+            Err(vm.name_err(msg))
+        }
+    }
+}
+
+/// `Mod.instance_method(:name)`.
+fn find_for_module(vm: &mut Vm, s: &Value, a: &[Value], public_only: bool) -> VmResult {
+    let cls = this_class(vm, s)?;
+    let name = sym_of(vm, &arg(a, 0))?;
+    match vm.find_method_vis(&cls, name) {
+        Some((_, _, vis)) if public_only && vis != Vis::Public => {
+            let kind = if vm.heap[cls].is_module { "module" } else { "class" };
+            let vis = if vis == Vis::Protected { "protected" } else { "private" };
+            let msg = format!(
+                "method '{}' for {kind} '{}' is {vis}",
+                vm.sym_name(name),
+                vm.heap[cls].name()
+            );
+            Err(vm.name_err(msg))
+        }
+        Some((_, owner, _)) => {
+            let c = vm.c.unbound_method;
+            method_object(vm, c, None, owner, name)
+        }
+        None => {
+            let kind = if vm.heap[cls].is_module { "module" } else { "class" };
+            let msg = format!("undefined method '{}' for {kind} '{}'", vm.sym_name(name), vm.heap[cls].name());
+            Err(vm.name_err(msg))
+        }
+    }
+}
+
+/// Like `Proc#arity` for a lambda: required count, or -(required + 1)
+/// with optional or rest parameters; natives say -1.
+fn method_arity(vm: &Vm, owner: ClassRef, name: Sym) -> i64 {
+    match vm.find_method(&owner, name).map(|(m, _)| m) {
+        Some(Method::Ruby(irep)) => irep.spec.arity(),
+        Some(Method::AttrReader(_)) => 0,
+        Some(Method::AttrWriter(_)) => 1,
+        Some(Method::Proc(p)) => match vm.kind(p) {
+            V::Proc(p) => match &vm.heap[p].body {
+                ProcBody::Ruby { irep, .. } => irep.spec.arity(),
+                _ => -1,
+            },
+            _ => -1,
+        },
+        _ => -1,
+    }
+}
+
+fn method_inspect(vm: &mut Vm, s: &Value, kind: &str) -> VmResult {
+    let (owner, name) = method_of(vm, s)?;
+    let sep = if vm.heap[owner].is_singleton { "." } else { "#" };
+    let owner_name = match vm.heap[owner].attached.get() {
+        Some(c) if vm.heap[owner].is_singleton => vm.heap[c].name(),
+        _ => vm.heap[owner].name(),
+    };
+    Ok(vm.str(format!("#<{kind}: {owner_name}{sep}{}>", vm.sym_name(name))))
+}
+
+fn init_method_objects(vm: &mut Vm) {
+    let k = vm.c.kernel;
+    vm.def(&k, "method", |vm, s, a, _| find_for_object(vm, s, a, false));
+    vm.def(&k, "public_method", |vm, s, a, _| find_for_object(vm, s, a, true));
+    let m = vm.c.module;
+    vm.def(&m, "instance_method", |vm, s, a, _| find_for_module(vm, s, a, false));
+    vm.def(&m, "public_instance_method", |vm, s, a, _| find_for_module(vm, s, a, true));
+
+    let me = vm.c.method_;
+    let call: NativeFn = |vm, s, a, b| {
+        let (recv, owner, name) = vm.method_parts(s)?;
+        vm.call_resolved(recv, owner, name, a.to_vec(), b.cloned())
+    };
+    for name in ["call", "()", "[]", "==="] {
+        vm.def(&me, name, call);
+    }
+    vm.def(&me, "to_proc", |vm, s, _, _| {
+        let p = vm.proc_value(ProcBody::Method(*s));
+        Ok(vm.to_lambda(&p))
+    });
+    vm.def(&me, "receiver", |vm, s, _, _| Ok(vm.method_parts(s)?.0));
+    vm.def(&me, "owner", |vm, s, _, _| Ok(Value::from(method_of(vm, s)?.0)));
+    vm.def(&me, "name", |vm, s, _, _| Ok(Value::sym(method_of(vm, s)?.1)));
+    vm.def(&me, "arity", |vm, s, _, _| {
+        let (owner, name) = method_of(vm, s)?;
+        Ok(vm.int(method_arity(vm, owner, name)))
+    });
+    vm.def(&me, "unbind", |vm, s, _, _| {
+        let (owner, name) = method_of(vm, s)?;
+        let c = vm.c.unbound_method;
+        method_object(vm, c, None, owner, name)
+    });
+    vm.def(&me, "inspect", |vm, s, _, _| method_inspect(vm, s, "Method"));
+    vm.def(&me, "to_s", |vm, s, _, _| method_inspect(vm, s, "Method"));
+    vm.def(&me, "==", |vm, s, a, _| {
+        let o = arg(a, 0);
+        if vm.class_of(&o) != vm.c.method_ {
+            return Ok(Value::FALSE);
+        }
+        let (x, y) = (vm.method_parts(s)?, vm.method_parts(&o)?);
+        Ok(Value::bool(vm.heap.identical(&x.0, &y.0) && x.1 == y.1 && x.2 == y.2))
+    });
+
+    let um = vm.c.unbound_method;
+    // bind(obj): a Method of obj, which must be an instance of the owner
+    vm.def(&um, "bind", |vm, s, a, _| {
+        let (owner, name) = method_of(vm, s)?;
+        let recv = arg(a, 0);
+        if !vm.is_a(&recv, &owner) {
+            let msg = format!("bind argument must be an instance of {}", vm.heap[owner].name());
+            return Err(vm.type_err(msg));
+        }
+        let c = vm.c.method_;
+        method_object(vm, c, Some(recv), owner, name)
+    });
+    vm.def(&um, "bind_call", |vm, s, a, b| {
+        let (owner, name) = method_of(vm, s)?;
+        let Some((recv, args)) = a.split_first() else {
+            return Err(vm.arg_err("wrong number of arguments (given 0, expected 1+)"));
+        };
+        if !vm.is_a(recv, &owner) {
+            let msg = format!("bind argument must be an instance of {}", vm.heap[owner].name());
+            return Err(vm.type_err(msg));
+        }
+        vm.call_resolved(*recv, owner, name, args.to_vec(), b.cloned())
+    });
+    vm.def(&um, "owner", |vm, s, _, _| Ok(Value::from(method_of(vm, s)?.0)));
+    vm.def(&um, "name", |vm, s, _, _| Ok(Value::sym(method_of(vm, s)?.1)));
+    vm.def(&um, "arity", |vm, s, _, _| {
+        let (owner, name) = method_of(vm, s)?;
+        Ok(vm.int(method_arity(vm, owner, name)))
+    });
+    vm.def(&um, "inspect", |vm, s, _, _| method_inspect(vm, s, "UnboundMethod"));
+    vm.def(&um, "to_s", |vm, s, _, _| method_inspect(vm, s, "UnboundMethod"));
+}
+

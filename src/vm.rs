@@ -70,6 +70,8 @@ pub struct Classes {
     pub hash: ClassRef,
     pub range: ClassRef,
     pub proc_: ClassRef,
+    pub method_: ClassRef,
+    pub unbound_method: ClassRef,
     pub nil: ClassRef,
     pub true_: ClassRef,
     pub false_: ClassRef,
@@ -117,6 +119,8 @@ impl Classes {
             hash,
             range,
             proc_,
+            method_,
+            unbound_method,
             nil,
             true_,
             false_,
@@ -144,7 +148,7 @@ impl Classes {
         } = self;
         vec![
             *basic_object, *object, *kernel, *module, *class, *comparable, *enumerable,
-            *numeric, *integer, *float, *string, *symbol, *array, *hash, *range, *proc_,
+            *numeric, *integer, *float, *string, *symbol, *array, *hash, *range, *proc_, *method_, *unbound_method,
             *nil, *true_, *false_, *exception, *script_error, *syntax_error,
             *not_implemented_error, *standard_error, *runtime_error, *frozen_error,
             *argument_error, *type_error, *name_error, *no_method_error,
@@ -181,6 +185,10 @@ pub struct CommonSyms {
     pub eql: Sym,
     pub initialize_copy: Sym,
     pub respond_to_missing: Sym,
+    /// Hidden ivars of Method/UnboundMethod objects.
+    pub m_recv: Sym,
+    pub m_owner: Sym,
+    pub m_name: Sym,
 }
 
 pub struct Vm {
@@ -424,6 +432,8 @@ impl Vm {
             hash: sub("Hash", object),
             range: sub("Range", object),
             proc_: sub("Proc", object),
+            method_: sub("Method", object),
+            unbound_method: sub("UnboundMethod", object),
             nil: sub("NilClass", object),
             true_: sub("TrueClass", object),
             false_: sub("FalseClass", object),
@@ -489,6 +499,9 @@ impl Vm {
             eql: syms.intern("eql?"),
             initialize_copy: syms.intern("initialize_copy"),
             respond_to_missing: syms.intern("respond_to_missing?"),
+            m_recv: syms.intern("__recv"),
+            m_owner: syms.intern("__owner"),
+            m_name: syms.intern("__name"),
             to_proc: syms.intern("to_proc"),
         };
         let main_obj = Value::from(heap.alloc(RObject::new(c.object)));
@@ -1265,6 +1278,45 @@ impl Vm {
         }
     }
 
+    /// The (receiver, owner, name) a Method object holds (see
+    /// core::reflect, Method objects).
+    pub fn method_parts(&self, m: &Value) -> Result<(Value, ClassRef, Sym), Unwind> {
+        let get = |s: Sym| self.ivar_lookup(m, s);
+        let (recv, owner, name) = (get(self.s.m_recv), get(self.s.m_owner), get(self.s.m_name));
+        match (recv, owner.map(|o| self.kind(o)), name.map(|n| self.kind(n))) {
+            (Some(recv), Some(V::Class(owner)), Some(V::Sym(name))) => Ok((recv, owner, name)),
+            _ => Err(self.type_err("not a bound method")),
+        }
+    }
+
+    /// Calls `name` as `owner` defines it (or inherits it), on `recv`: what
+    /// a Method object runs, whatever `recv`'s class overrides.
+    pub fn call_resolved(
+        &mut self,
+        recv: Value,
+        owner: ClassRef,
+        name: Sym,
+        args: Vec<Value>,
+        block: Option<Value>,
+    ) -> VmResult {
+        let call = self.start_resolved(recv, owner, name, Args::Owned(args), block)?;
+        self.finish(call)
+    }
+
+    fn start_resolved(
+        &mut self,
+        recv: Value,
+        owner: ClassRef,
+        name: Sym,
+        args: Args,
+        block: Option<Value>,
+    ) -> Result<Call, Unwind> {
+        match self.find_method(&owner, name) {
+            Some((m, found)) => self.start_invoke(m, found, recv, name, args, block),
+            None => Err(self.no_method(&recv, name)),
+        }
+    }
+
     /// Runs a resolved call to completion.
     fn finish(&mut self, call: Call) -> VmResult {
         match call {
@@ -1279,7 +1331,7 @@ impl Vm {
     }
 
     /// How error messages name a receiver: "nil", "class Foo", "an instance of Foo".
-    fn recv_desc(&self, recv: &Value) -> String {
+    pub fn recv_desc(&self, recv: &Value) -> String {
         match self.kind(*recv) {
             V::Nil => "nil".to_string(),
             V::Bool(b) => b.to_string(),
@@ -1610,6 +1662,11 @@ impl Vm {
                 let recv = it.next().ok_or_else(|| self.arg_err("no receiver given"))?;
                 Ok(Call::Done(self.call_method(&recv, sym, it.collect(), block)?))
             }
+            ProcBody::Method(m) => {
+                let args = args.into_vec(self);
+                let (recv, owner, name) = self.method_parts(&m)?;
+                self.start_resolved(recv, owner, name, Args::Owned(args), block)
+            }
             ProcBody::Collect(buf) => {
                 let mut args = args.into_vec(self);
                 let v = if args.len() == 1 {
@@ -1839,7 +1896,14 @@ impl Vm {
 
     /// The names of `obj`'s instance variables, in order.
     pub fn ivar_names(&self, obj: &Value) -> Vec<Sym> {
-        let names = |t: &IvTable| t.items.iter().map(|(k, _)| *k).collect();
+        // names without `@` are the VM's own (Method objects), not shown
+        let names = |t: &IvTable| {
+            t.items
+                .iter()
+                .map(|(k, _)| *k)
+                .filter(|k| self.sym_name(*k).starts_with('@'))
+                .collect()
+        };
         match self.kind(*obj) {
             V::Object(o) => names(&self.heap[o].ivars.borrow()),
             V::Class(c) => names(&self.heap[c].ivars.borrow()),
