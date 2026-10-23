@@ -235,11 +235,32 @@ fn send(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>) -> VmResult {
     vm.call_with_block(s, mid, rest.to_vec(), b.cloned())
 }
 
+/// `dup`/`clone`: a copy with the same class and instance variables.
 fn dup(vm: &mut Vm, s: &Value, _: &[Value], _: Option<&Value>) -> VmResult {
-    Ok(match vm.kind(*s) {
+    let copy = match vm.kind(*s) {
         V::Str(x) => { let v = vm.heap[x].borrow().clone(); vm.str(v) },
         V::Array(x) => { let v = vm.heap[x].borrow().clone(); vm.array(v) },
         V::Hash(x) => { let v = vm.heap[x].borrow().clone(); vm.hash(v) },
+        _ => return dup_other(vm, s),
+    };
+    copy_extra(vm, s, &copy);
+    Ok(copy)
+}
+
+/// Gives the String/Array/Hash `to` the class and instance variables of
+/// `from` (a subclass instance's; see gc::Extra), as `dup` does.
+pub fn copy_extra(vm: &mut Vm, from: &Value, to: &Value) {
+    if let Some(x) = vm.heap.extra_of(from) {
+        let (class, ivars) = (x.class, x.ivars.items.clone());
+        if let Some(e) = vm.heap.extra_of_mut(to) {
+            e.class = class;
+            e.ivars.items = ivars;
+        }
+    }
+}
+
+fn dup_other(vm: &mut Vm, s: &Value) -> VmResult {
+    Ok(match vm.kind(*s) {
         V::Object(o) => {
             let ivars = vm.heap[o].ivars.borrow().items.clone();
             let copy = RObject::new(vm.heap[o].class);

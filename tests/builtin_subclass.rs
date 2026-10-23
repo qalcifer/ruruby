@@ -75,3 +75,27 @@ fn new_and_brackets_on_the_builtin_classes() {
          {a: 1}\n\"q\"\n\"odd number of arguments for Hash\"\n\"negative array size\"\n"
     );
 }
+
+#[test]
+fn copies_keep_class_and_ivars() {
+    let out = run(r##"
+        class E < Array; def hi = :hi; end
+        e = E[3, 1, 2]
+        e.instance_variable_set(:@t, 1)
+        d = e.dup
+        p d.class, d.hi, d.instance_variable_get(:@t), d.reverse!.class, d, e, e.clone.class
+        c = Class.new(Hash) { attr_accessor :foo }
+        h = c.new(0)
+        h.foo = :iv
+        h[:a] = 1
+        m = h.merge({b: 2})
+        p m.class == c, m.foo, m, m[:zz], {}.merge(h).class, h.clone.foo
+        s = Class.new(String).new("x")
+        p s.dup.class == s.class, [1].dup.class, "y".dup.class
+    "##);
+    assert_eq!(
+        out,
+        "E\n:hi\n1\nE\n[2, 1, 3]\n[3, 1, 2]\nE\ntrue\n:iv\n{a: 1, b: 2}\n0\nHash\n:iv\n\
+         true\nArray\nString\n"
+    );
+}

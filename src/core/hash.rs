@@ -212,6 +212,8 @@ pub fn init(vm: &mut Vm) {
     vm.def(&c, "merge", |vm, s, a, b| {
         let copy = vm.heap[this_hash(vm, s)?].borrow().clone();
         let hv = vm.hash(copy);
+        // a copy of the receiver: its class and ivars too
+        super::kernel::copy_extra(vm, s, &hv);
         merge_into(vm, this_hash(vm, &hv)?, a, b)?;
         Ok(hv)
     });
