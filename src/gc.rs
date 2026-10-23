@@ -50,6 +50,34 @@ impl<T> fmt::Debug for Gc<T> {
     }
 }
 
+/// Generations wrap at 2^13: a handle in a [`Value`] has 13 bits for it
+/// (next to 32 bits of index and 3 of type). A stale handle is still caught
+/// unless its slot was reused a multiple of 8,192 times since.
+pub const GEN_BITS: u32 = 13;
+const GEN_MASK: u32 = (1 << GEN_BITS) - 1;
+
+impl<T> Gc<T> {
+    /// The handle a [`Value`] packed as `(idx, generation)`.
+    #[inline]
+    pub(crate) fn from_raw(idx: u32, generation: u32) -> Self {
+        Gc {
+            idx,
+            generation,
+            _t: PhantomData,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn idx(self) -> u32 {
+        self.idx
+    }
+
+    #[inline]
+    pub(crate) fn generation(self) -> u32 {
+        self.generation
+    }
+}
+
 impl<T: HeapObj> Gc<T> {
     /// Identity of the object, unique among live objects of all types and
     /// never 0. The low 4 bits hold the type's tag (1..=15).
@@ -66,6 +94,8 @@ pub type ProcRef = Gc<RProc>;
 pub type ObjRef = Gc<RObject>;
 pub type EnvRef = Gc<Env>;
 pub type ClassRef = Gc<RClass>;
+/// An Integer that doesn't fit a [`Value`]'s 48 bits.
+pub type IntRef = Gc<i64>;
 
 struct Slot<T> {
     generation: u32,
@@ -126,7 +156,7 @@ impl<T> Arena<T> {
         for (i, slot) in self.slots.iter_mut().enumerate() {
             if slot.val.is_some() && !marks.get(i).copied().unwrap_or(false) {
                 slot.val = None;
-                slot.generation = slot.generation.wrapping_add(1);
+                slot.generation = (slot.generation + 1) & GEN_MASK;
                 self.free.push(i as u32);
                 freed += 1;
             }
@@ -209,6 +239,7 @@ heap_types! {
     objects: RObject = 6,
     envs: Env = 7,
     classes: RClass = 8,
+    ints: i64 = 9,
 }
 
 /// A collection runs once this many objects were allocated since the last
@@ -322,10 +353,13 @@ impl<'h> Marker<'h> {
     }
 
     pub fn value(&mut self, v: &Value) {
-        match self.heap.kind(*v) {
-            V::Nil | V::Bool(_) | V::Int(_) | V::Float(_) | V::Sym(_) => {}
-            V::Class(c) => self.class(c),
-            v => self.gray.push(Gray::Val(Value::from(v))),
+        match v.decode() {
+            Ok(V::Nil | V::Bool(_) | V::Int(_) | V::Float(_) | V::Sym(_)) => {}
+            Ok(V::Class(c)) => self.class(c),
+            Ok(_) => self.gray.push(Gray::Val(*v)),
+            Err(boxed) => {
+                self.visit(boxed);
+            }
         }
     }
 

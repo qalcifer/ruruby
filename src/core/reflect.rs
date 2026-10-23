@@ -403,8 +403,8 @@ fn init_module(vm: &mut Vm) {
         let mut cls = this_class(vm, s)?;
         let path = match vm.kind(arg(a, 0)) {
             V::Str(p) => vm.heap[p].borrow().clone(),
-            v => {
-                let sym = sym_of(vm, &Value::from(v))?;
+            _ => {
+                let sym = sym_of(vm, &arg(a, 0))?;
                 vm.sym_name(sym).to_string()
             }
         };
@@ -446,8 +446,8 @@ fn init_module(vm: &mut Vm) {
         Ok(vm.array(syms))
     });
     vm.def(&m, "freeze", |_, s, _, _| Ok(*s));
-    vm.def(&m, "==", |_, s, a, _| {
-        Ok(Value::bool(s.identical(&arg(a, 0))))
+    vm.def(&m, "==", |vm, s, a, _| {
+        Ok(Value::bool(vm.heap.identical(s, &arg(a, 0))))
     });
     vm.def(&m, "<", |vm, s, a, _| module_cmp(vm, s, &arg(a, 0), true));
     vm.def(&m, "<=", |vm, s, a, _| module_cmp(vm, s, &arg(a, 0), false));
@@ -522,8 +522,8 @@ fn init_proc(vm: &mut Vm) {
         Ok(vm.str(format!("#<Proc:0x{:016x}{lambda}>", p.id())))
     });
     vm.def(&p, "to_s", |vm, s, _, _| vm.send(s, "inspect", vec![]));
-    vm.def(&p, "==", |_, s, a, _| {
-        Ok(Value::bool(s.identical(&arg(a, 0))))
+    vm.def(&p, "==", |vm, s, a, _| {
+        Ok(Value::bool(vm.heap.identical(s, &arg(a, 0))))
     });
 }
 
@@ -538,8 +538,9 @@ fn init_pattern_support(vm: &mut Vm) {
         if !vm.send(&v, "respond_to?", vec![Value::sym(hook)])?.truthy() {
             return Ok(Value::NIL);
         }
-        match vm.call_method(&v, hook, vec![], None).map(|r| vm.kind(r))? {
-            r @ V::Array(_) => Ok(Value::from(r)),
+        let r = vm.call_method(&v, hook, vec![], None)?;
+        match vm.kind(r) {
+            V::Array(_) => Ok(r),
             _ => Err(vm.type_err("deconstruct must return Array")),
         }
     });
@@ -549,8 +550,9 @@ fn init_pattern_support(vm: &mut Vm) {
         if !vm.send(&v, "respond_to?", vec![Value::sym(hook)])?.truthy() {
             return Ok(Value::NIL);
         }
-        match vm.call_method(&v, hook, vec![arg(a, 1)], None).map(|r| vm.kind(r))? {
-            r @ V::Hash(_) => Ok(Value::from(r)),
+        let r = vm.call_method(&v, hook, vec![arg(a, 1)], None)?;
+        match vm.kind(r) {
+            V::Hash(_) => Ok(r),
             _ => Err(vm.type_err("deconstruct_keys must return Hash")),
         }
     });

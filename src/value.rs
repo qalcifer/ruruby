@@ -6,12 +6,15 @@
 //! and a `Value` holds a [`Gc`](crate::gc::Gc) handle to them, classes
 //! included, so a `Value` is `Copy`.
 
-use crate::gc::{ArrayRef, ClassRef, EnvRef, HashRef, Heap, ObjRef, ProcRef, RangeRef, StrRef};
+use crate::gc::{
+    ArrayRef, ClassRef, EnvRef, GEN_BITS, Gc, HashRef, Heap, IntRef, ObjRef, ProcRef, RangeRef, StrRef,
+};
 use crate::opcode::Irep;
 use crate::symbol::{Sym, SymMap};
 use crate::vm::{Vm, VmResult};
 use std::cell::RefCell;
 use std::cmp::Ordering;
+use std::fmt;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -316,116 +319,230 @@ pub enum V {
 /// through its view, `heap.kind(v)` (a [`V`]), and builds it with the
 /// constructors below; `vm.int(n)` for an Integer that may be large.
 ///
-/// Still a wrapper of `V`: the NaN-boxed 8-byte form comes next, which is
-/// why reading needs the heap (big Integers will be boxed there).
-#[derive(Clone, Copy, Default)]
-pub struct Value(V);
+/// NaN-boxed into 8 bytes. A Float is its own bits (every NaN is stored as
+/// the one quiet NaN `0x7FF8…`), which leaves the bit patterns from
+/// `0xFFF8 << 48` up for everything else, by the top 16 bits:
+///
+/// | top 16 bits | kind | low 48 bits |
+/// |---|---|---|
+/// | `FFF8` | nil, false, true | 0, 1, 2 |
+/// | `FFF9` | Integer | the value, signed |
+/// | `FFFA` | Symbol | its id |
+/// | `FFFB` | heap object | type (3) · generation (13) · slot index (32) |
+///
+/// An Integer outside 48 bits is a heap object (an `i64` box) whose view
+/// is still `V::Int`: that's why reading a value needs the heap.
+#[derive(Clone, Copy)]
+pub struct Value(u64);
+
+const _: () = assert!(std::mem::size_of::<Value>() == 8);
+
+const TAG_SPECIAL: u64 = 0xFFF8;
+const TAG_INT: u64 = 0xFFF9;
+const TAG_SYM: u64 = 0xFFFA;
+const TAG_HEAP: u64 = 0xFFFB;
+const CANONICAL_NAN: u64 = 0x7FF8_0000_0000_0000;
+const PAYLOAD: u64 = (1 << 48) - 1;
+const INT_MIN: i64 = -(1 << 47);
+const INT_MAX: i64 = (1 << 47) - 1;
+
+/// Heap object types as packed in a [`Value`] (3 bits).
+mod ty {
+    pub const STR: u64 = 0;
+    pub const ARRAY: u64 = 1;
+    pub const HASH: u64 = 2;
+    pub const RANGE: u64 = 3;
+    pub const PROC: u64 = 4;
+    pub const OBJECT: u64 = 5;
+    pub const CLASS: u64 = 6;
+    pub const INT: u64 = 7;
+}
+
+impl Default for Value {
+    fn default() -> Self {
+        Value::NIL
+    }
+}
+
+impl fmt::Debug for Value {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Value({:#018x})", self.0)
+    }
+}
+
+impl<T> Gc<T> {
+    #[inline]
+    fn pack(self, ty: u64) -> Value {
+        Value(
+            TAG_HEAP << 48
+                | ty << 45
+                | (self.generation() as u64) << 32
+                | self.idx() as u64,
+        )
+    }
+}
 
 macro_rules! value_from_handles {
-    ($($t:ty => $variant:ident),*) => {
+    ($($t:ty => $ty:ident),*) => {
         $(impl From<$t> for Value {
+            #[inline]
             fn from(h: $t) -> Value {
-                Value(V::$variant(h))
+                h.pack(ty::$ty)
             }
         })*
     };
 }
 
-value_from_handles!(StrRef => Str, ArrayRef => Array, HashRef => Hash, RangeRef => Range,
-    ProcRef => Proc, ClassRef => Class, ObjRef => Object);
-
-impl From<V> for Value {
-    fn from(v: V) -> Value {
-        Value(v)
-    }
-}
+value_from_handles!(StrRef => STR, ArrayRef => ARRAY, HashRef => HASH, RangeRef => RANGE,
+    ProcRef => PROC, ClassRef => CLASS, ObjRef => OBJECT);
 
 impl Value {
-    pub const NIL: Value = Value(V::Nil);
-    pub const TRUE: Value = Value(V::Bool(true));
-    pub const FALSE: Value = Value(V::Bool(false));
+    pub const NIL: Value = Value(TAG_SPECIAL << 48);
+    pub const FALSE: Value = Value(TAG_SPECIAL << 48 | 1);
+    pub const TRUE: Value = Value(TAG_SPECIAL << 48 | 2);
 
+    #[inline]
     pub fn bool(b: bool) -> Value {
-        Value(V::Bool(b))
+        if b { Value::TRUE } else { Value::FALSE }
     }
 
+    #[inline]
     pub fn float(f: f64) -> Value {
-        Value(V::Float(f))
+        Value(if f.is_nan() { CANONICAL_NAN } else { f.to_bits() })
     }
 
+    #[inline]
     pub fn sym(s: Sym) -> Value {
-        Value(V::Sym(s))
+        Value(TAG_SYM << 48 | s.0 as u64)
     }
 
     /// An Integer known to be small (a length, an index, a character code):
     /// it never needs the heap. Anything else uses `vm.int(n)`.
+    #[inline]
     pub fn small_int(n: i64) -> Value {
-        Value(V::Int(n))
+        Value::inline_int(n).expect("Value::small_int: Integer outside 48 bits")
     }
 
-    /// The view, for values that are never Integers' boxes; prefer
-    /// `heap.kind(v)`.
-    pub(crate) fn raw(self) -> V {
-        self.0
-    }
-
-    pub fn truthy(&self) -> bool {
-        !matches!(self.0, V::Nil | V::Bool(false))
-    }
-
-    pub fn is_numeric(&self) -> bool {
-        matches!(self.0, V::Int(_) | V::Float(_))
-    }
-
-    pub fn is_nil(&self) -> bool {
-        matches!(self.0, V::Nil)
-    }
-
-    /// Identity (`equal?`).
-    pub fn identical(&self, other: &Value) -> bool {
-        use V::*;
-        match (self.0, other.0) {
-            (Nil, Nil) => true,
-            (Bool(a), Bool(b)) => a == b,
-            (Int(a), Int(b)) => a == b,
-            (Float(a), Float(b)) => a == b,
-            (Sym(a), Sym(b)) => a == b,
-            (Str(a), Str(b)) => a == b,
-            (Array(a), Array(b)) => a == b,
-            (Hash(a), Hash(b)) => a == b,
-            (Range(a), Range(b)) => a == b,
-            (Proc(a), Proc(b)) => a == b,
-            (Class(a), Class(b)) => a == b,
-            (Object(a), Object(b)) => a == b,
-            _ => false,
+    /// The Integer `n` if it fits inline (48 bits).
+    #[inline]
+    pub fn inline_int(n: i64) -> Option<Value> {
+        if (INT_MIN..=INT_MAX).contains(&n) {
+            Some(Value(TAG_INT << 48 | (n as u64 & PAYLOAD)))
+        } else {
+            None
         }
     }
 
-    /// Identity as a number (`object_id`, recursion guards); 0 for immediates.
+    /// The Integer if it is stored inline; the VM's fast paths use this
+    /// and leave boxed ones to the slow path.
+    #[inline]
+    pub fn as_inline_int(self) -> Option<i64> {
+        if self.0 >> 48 == TAG_INT {
+            Some(((self.0 << 16) as i64) >> 16)
+        } else {
+            None
+        }
+    }
+
+    /// The view, without the heap: `Err` is a boxed Integer's handle.
+    #[inline]
+    pub(crate) fn decode(self) -> Result<V, IntRef> {
+        let b = self.0;
+        Ok(match b >> 48 {
+            TAG_SPECIAL => match b & 3 {
+                0 => V::Nil,
+                1 => V::Bool(false),
+                _ => V::Bool(true),
+            },
+            TAG_INT => V::Int(((b << 16) as i64) >> 16),
+            TAG_SYM => V::Sym(Sym(b as u32)),
+            TAG_HEAP => {
+                let (idx, generation) = (b as u32, (b >> 32) as u32 & ((1 << GEN_BITS) - 1));
+                match (b >> 45) & 7 {
+                    ty::STR => V::Str(Gc::from_raw(idx, generation)),
+                    ty::ARRAY => V::Array(Gc::from_raw(idx, generation)),
+                    ty::HASH => V::Hash(Gc::from_raw(idx, generation)),
+                    ty::RANGE => V::Range(Gc::from_raw(idx, generation)),
+                    ty::PROC => V::Proc(Gc::from_raw(idx, generation)),
+                    ty::OBJECT => V::Object(Gc::from_raw(idx, generation)),
+                    ty::CLASS => V::Class(Gc::from_raw(idx, generation)),
+                    _ => return Err(Gc::from_raw(idx, generation)),
+                }
+            }
+            _ => V::Float(f64::from_bits(b)),
+        })
+    }
+
+    #[inline]
+    pub fn truthy(&self) -> bool {
+        self.0 != Value::NIL.0 && self.0 != Value::FALSE.0
+    }
+
+    pub fn is_numeric(&self) -> bool {
+        match self.0 >> 48 {
+            TAG_INT => true,
+            TAG_HEAP => (self.0 >> 45) & 7 == ty::INT,
+            t => t < TAG_SPECIAL,
+        }
+    }
+
+    #[inline]
+    pub fn is_nil(&self) -> bool {
+        self.0 == Value::NIL.0
+    }
+
+    /// Identity as a number (`object_id`, recursion guards); 0 for immediates
+    /// (an Integer is one, boxed or not).
     pub fn heap_id(&self) -> u64 {
-        match self.0 {
-            V::Str(h) => h.id(),
-            V::Array(h) => h.id(),
-            V::Hash(h) => h.id(),
-            V::Range(h) => h.id(),
-            V::Proc(h) => h.id(),
-            V::Object(h) => h.id(),
-            V::Class(h) => h.id(),
+        match self.decode() {
+            Ok(V::Str(h)) => h.id(),
+            Ok(V::Array(h)) => h.id(),
+            Ok(V::Hash(h)) => h.id(),
+            Ok(V::Range(h)) => h.id(),
+            Ok(V::Proc(h)) => h.id(),
+            Ok(V::Object(h)) => h.id(),
+            Ok(V::Class(h)) => h.id(),
             _ => 0,
         }
     }
 }
 
 impl Heap {
-    /// The view of `v` (decoding a boxed Integer needs the heap).
+    /// The view of `v`.
     #[inline]
     pub fn kind(&self, v: Value) -> V {
-        v.0
+        match v.decode() {
+            Ok(v) => v,
+            Err(boxed) => V::Int(self[boxed]),
+        }
     }
 
-    /// An Integer value; one that doesn't fit inline will be boxed here.
+    /// An Integer value: inline if it fits 48 bits, else boxed here.
+    #[inline]
     pub fn int(&mut self, n: i64) -> Value {
-        Value(V::Int(n))
+        match Value::inline_int(n) {
+            Some(v) => v,
+            None => self.box_int(n),
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn box_int(&mut self, n: i64) -> Value {
+        self.alloc(n).pack(ty::INT)
+    }
+
+    /// Identity (`equal?`): Integers and Floats by value.
+    pub fn identical(&self, a: &Value, b: &Value) -> bool {
+        if a.0 == b.0 {
+            // the one NaN isn't identical to itself, as before boxing
+            return !(a.0 >> 48 < TAG_SPECIAL && f64::from_bits(a.0).is_nan());
+        }
+        match (self.kind(*a), self.kind(*b)) {
+            (V::Int(x), V::Int(y)) => x == y,
+            (V::Float(x), V::Float(y)) => x == y,
+            _ => false,
+        }
     }
 }
 
@@ -480,7 +597,7 @@ fn eq_rec(heap: &Heap, a: &Value, b: &Value, in_progress: &mut InProgress) -> bo
             let (x, y) = (&heap[x], &heap[y]);
             eq_rec(heap, &x.0, &y.0, in_progress) && eq_rec(heap, &x.1, &y.1, in_progress) && x.2 == y.2
         }
-        _ => a.identical(b),
+        _ => heap.identical(a, b),
     }
 }
 

@@ -231,7 +231,7 @@ pub fn init(vm: &mut Vm) {
     vm.def(&c, "join", |vm, s, a, _| {
         let sep = match vm.kind(arg(a, 0)) {
             V::Nil => String::new(),
-            v => str_of(vm, &Value::from(v))?,
+            _ => str_of(vm, &arg(a, 0))?,
         };
         Ok({ let v = join(vm, s, &sep)?; vm.str(v) })
     });
@@ -254,8 +254,8 @@ pub fn init(vm: &mut Vm) {
             let sep = vm.heap[sep].borrow().clone();
             Ok({ let v = join(vm, s, &sep)?; vm.str(v) })
         }
-        n => {
-            let n = int_of(vm, &Value::from(n))?;
+        _ => {
+            let n = int_of(vm, &arg(a, 0))?;
             if n < 0 {
                 return Err(vm.arg_err("negative argument"));
             }
@@ -474,9 +474,9 @@ fn aref(vm: &mut Vm, s: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
         (V::Float(f), 1) => Ok(norm_index(f as i64, len)
             .and_then(|i| v.get(i).cloned())
             .unwrap_or(Value::NIL)),
-        (other, _) => Err(vm.type_err(format!(
+        _ => Err(vm.type_err(format!(
             "no implicit conversion of {} into Integer",
-            vm.class_name(&Value::from(other))
+            vm.class_name(&arg(a, 0))
         ))),
     }
 }

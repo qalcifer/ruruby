@@ -26,11 +26,11 @@ pub fn init(vm: &mut Vm) {
         let d = arg(a, 0);
         let q = vm.arith(Arith::Div, s, &d)?;
         let q = match vm.kind(q) {
-            V::Float(f) => V::Float(f.floor()),
-            q => q,
+            V::Float(f) => Value::float(f.floor()),
+            _ => q,
         };
         let m = vm.arith(Arith::Mod, s, &d)?;
-        Ok(vm.array(vec![Value::from(q), m]))
+        Ok(vm.array(vec![q, m]))
     });
     vm.def(&n, "-@", |vm, s, _, _| {
         vm.arith(Arith::Sub, &Value::small_int(0), s)

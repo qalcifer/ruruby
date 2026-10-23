@@ -87,25 +87,25 @@ fn init_object(vm: &mut Vm) {
                     inspect_str(&vm.heap[s].borrow())
                 ))
             }),
-        v => Ok(Value::float(float_of(vm, &Value::from(v))?)),
+        _ => Ok(Value::float(float_of(vm, &arg(a, 0))?)),
     });
     vm.def(&o, "initialize", |_, _, _, _| Ok(Value::NIL));
     vm.def(&o, "class", |vm, s, _, _| Ok(Value::from(vm.class_of(s))));
     vm.def(&o, "to_s", |vm, s, _, _| {
-        if s.identical(&vm.main_obj) {
+        if vm.heap.identical(s, &vm.main_obj) {
             return Ok(vm.str("main"));
         }
         Ok(vm.str(format!("#<{}>", vm.class_name(s))))
     });
     vm.def(&o, "inspect", obj_inspect);
-    vm.def(&o, "==", |_, s, a, _| {
-        Ok(Value::bool(s.identical(&arg(a, 0))))
+    vm.def(&o, "==", |vm, s, a, _| {
+        Ok(Value::bool(vm.heap.identical(s, &arg(a, 0))))
     });
     vm.def(&o, "!=", |vm, s, a, _| {
         Ok(Value::bool(!vm.equal(s, &arg(a, 0))?))
     });
-    vm.def(&o, "equal?", |_, s, a, _| {
-        Ok(Value::bool(s.identical(&arg(a, 0))))
+    vm.def(&o, "equal?", |vm, s, a, _| {
+        Ok(Value::bool(vm.heap.identical(s, &arg(a, 0))))
     });
     vm.def(&o, "eql?", |vm, s, a, _| Ok(Value::bool(eql(&vm.heap, s, &arg(a, 0)))));
     vm.def(&o, "===", |vm, s, a, _| {
@@ -212,7 +212,7 @@ fn obj_inspect(vm: &mut Vm, s: &Value, _: &[Value], _: Option<&Value>) -> VmResu
     let V::Object(o) = vm.kind(*s) else {
         return Ok(vm.str(format!("#<{}>", vm.class_name(s))));
     };
-    if s.identical(&vm.main_obj) {
+    if vm.heap.identical(s, &vm.main_obj) {
         return Ok(vm.str("main"));
     }
     let ivars = vm.heap[o].ivars.borrow().items.clone();
@@ -255,7 +255,7 @@ fn dup(vm: &mut Vm, s: &Value, _: &[Value], _: Option<&Value>) -> VmResult {
             *copy.ivars.borrow_mut() = IvTable { items: ivars };
             vm.object(copy)
         }
-        other => Value::from(other),
+        _ => *s,
     })
 }
 
@@ -440,7 +440,7 @@ fn init_exception(vm: &mut Vm) {
     vm.def(&e, "initialize", |vm, s, a, _| {
         let msg = match vm.kind(arg(a, 0)) {
             V::Nil => vm.str(vm.class_name(s)),
-            m => Value::from(m),
+            _ => arg(a, 0),
         };
         vm.ivar_set(s, vm.s.message, msg)?;
         Ok(Value::NIL)
@@ -478,7 +478,7 @@ fn init_exception(vm: &mut Vm) {
     vm.def(&e, "==", |vm, s, a, _| {
         let o = arg(a, 0);
         Ok(Value::bool(
-            s.identical(&o)
+            vm.heap.identical(s, &o)
                 || (vm.class_of(s) == vm.class_of(&o)
                     && vm.exc_message(s) == vm.exc_message(&o)),
         ))
@@ -572,7 +572,7 @@ fn init_comparable(vm: &mut Vm) {
         Ok(Value::bool(cmp(vm, s, a)?.is_ge()))
     });
     vm.def(&c, "==", |vm, s, a, _| {
-        if s.identical(&arg(a, 0)) {
+        if vm.heap.identical(s, &arg(a, 0)) {
             return Ok(Value::TRUE);
         }
         let r = vm.call_method(s, vm.s.cmp, vec![arg(a, 0)], None)?;

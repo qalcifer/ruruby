@@ -245,9 +245,9 @@ pub fn init(vm: &mut Vm) {
     vm.def(&c, "index", |vm, s, a, _| {
         let s = s_of(vm, s)?;
         let needle = str_of(vm, &arg(a, 0))?;
-        Ok(Value::from(s.find(&needle)
-            .map(|b| V::Int(s[..b].chars().count() as i64))
-            .unwrap_or(V::Nil)))
+        Ok(s.find(&needle)
+            .map(|b| Value::small_int(s[..b].chars().count() as i64))
+            .unwrap_or(Value::NIL))
     });
     vm.def(&c, "count", |vm, s, a, _| {
         let set: Vec<char> = str_of(vm, &arg(a, 0))?.chars().collect();
@@ -297,8 +297,8 @@ pub fn init(vm: &mut Vm) {
         let s = s_of(vm, s)?;
         let parts: Vec<String> = match vm.kind(arg(a, 0)) {
             V::Nil => s.split_whitespace().map(String::from).collect(),
-            sep => {
-                let sep = str_of(vm, &Value::from(sep))?;
+            _ => {
+                let sep = str_of(vm, &arg(a, 0))?;
                 if sep == " " {
                     s.split_whitespace().map(String::from).collect()
                 } else if sep.is_empty() {
