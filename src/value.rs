@@ -251,6 +251,13 @@ impl RObject {
 pub struct Env {
     pub regs: RefCell<EnvRegs>,
     pub upper: Option<EnvRef>,
+    /// The default visibility of the scope (method or class body) this env
+    /// belongs to, when it is the scope's own env: blocks share it, so a
+    /// `private` in a block reaches the scope.
+    pub vis: Cell<Vis>,
+    /// For a block's env, the env of the scope it is in (that has `vis`);
+    /// None for a scope's own env.
+    pub scope: Option<EnvRef>,
 }
 
 /// Where an [`Env`]'s variables are: while the frame that owns them runs,
@@ -284,9 +291,6 @@ pub struct RProc {
     pub target: ClassRef,
     /// Lambdas check arity strictly and `return` from themselves.
     pub lambda: bool,
-    /// The default visibility where the block was written: a block in a
-    /// class body under `private` defines private methods.
-    pub vis: Vis,
 }
 
 /// A value as code inspects it: what `match heap.kind(v)` gives.

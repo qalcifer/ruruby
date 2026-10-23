@@ -18,7 +18,7 @@ use crate::rhash::stored_hash;
 use crate::opcode::{ArgSpec, CallCache, DefinedKind, Irep, Literal, Op, Reg};
 use crate::symbol::{Sym, SymMap, SymbolTable};
 use crate::value::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
 use std::rc::Rc;
 
@@ -212,6 +212,9 @@ pub struct Vm {
     /// visibility runs: that frame's (target, visibility), for natives that
     /// define methods (attr_reader, define_method). See [`Vm::scope_vis`].
     native_scope: Option<(ClassRef, Vis)>,
+    /// Set once some env (a scope shared with blocks) holds a non-public
+    /// default visibility; until then blocks needn't look it up.
+    shared_vis: bool,
     /// Native stack (bytes) the VM may use for natives calling back into Ruby
     /// before raising SystemStackError. Raise it when running on a big stack.
     pub stack_budget: usize,
@@ -257,8 +260,12 @@ struct Frame {
     is_home: bool,
     /// A lambda: `break` in its own body returns from it.
     lambda: bool,
-    /// Visibility `def` gives methods (`private` with no arguments).
+    /// Visibility `def` gives methods (`private` with no arguments) until
+    /// the frame has an env, which then holds it; see [`Vm::frame_vis`].
     vis: Vis,
+    /// A scope of its own (method, class body, a `class_eval` block): a
+    /// block shares the visibility of the scope it was written in instead.
+    own_scope: bool,
 }
 
 impl Frame {
@@ -284,6 +291,7 @@ impl Frame {
             is_home: false,
             lambda: false,
             vis: Vis::Public,
+            own_scope: true,
         }
     }
 }
@@ -500,6 +508,7 @@ impl Vm {
             stack_base: 0,
             gc_level: 0,
             native_scope: None,
+            shared_vis: false,
             stack_budget: DEFAULT_STACK_BUDGET,
             inspecting: Vec::new(),
             live_breaks: Vec::new(),
@@ -718,10 +727,32 @@ impl Vm {
         let e = self.heap.alloc(Env {
             regs: RefCell::new(EnvRegs::Stack { base: f.base, len }),
             upper: f.upper,
+            vis: Cell::new(f.vis),
+            scope: if f.own_scope { None } else { self.scope_env(f) },
         });
+        self.shared_vis |= f.vis != Vis::Public;
         f.env = Some(e);
         e
     }
+
+    /// The env holding the default visibility of `f`'s scope, if any: the
+    /// frame's own env for a scope, the scope's env for a block.
+    fn scope_env(&self, f: &Frame) -> Option<EnvRef> {
+        if f.own_scope {
+            return f.env;
+        }
+        let up = f.upper?;
+        Some(self.heap[up].scope.unwrap_or(up))
+    }
+
+    /// The default visibility `def` uses in frame `f`.
+    fn frame_vis(&self, f: &Frame) -> Vis {
+        match self.scope_env(f) {
+            Some(e) => self.heap[e].vis.get(),
+            None => f.vis,
+        }
+    }
+
 
     /// A finished frame gives back its stack window; an env its blocks
     /// captured keeps a copy of the registers.
@@ -1567,10 +1598,13 @@ impl Vm {
                 let self_ = call.self_.unwrap_or(rp.self_);
                 let target = call.target.unwrap_or(rp.target);
                 let method = call.method.or(rp.method);
-                let (outer_block, home, vis) = (rp.block, rp.home, rp.vis);
+                // run under another class (class_eval & co.): a scope of its
+                // own, starting public; else the scope the block was written in
+
+                let (outer_block, home) = (rp.block, rp.home);
                 let bound = self.bind_args(&irep, &self_, args, &block, lambda)?;
                 let mut f = Frame::new(irep, bound.base, self_, target);
-                f.vis = vis;
+                f.own_scope = call.target.is_some();
                 f.upper = Some(env);
                 f.block = outer_block;
                 f.method = method;
@@ -1595,7 +1629,6 @@ impl Vm {
             method: None,
             target,
             lambda: false,
-            vis: Vis::Public,
         }))
     }
 
@@ -1612,7 +1645,6 @@ impl Vm {
                     method: p.method,
                     target: p.target,
                     lambda: true,
-                    vis: p.vis,
                 };
                 Value::from(self.heap.alloc(copy))
             }
@@ -2055,39 +2087,52 @@ impl Vm {
         let tag = proc_tag(&blk);
         let args = Args::Stack { at: f.base + a + 1, n: argc };
         let Some((m, owner, vis)) = self.cached_lookup(f, &recv, mid) else {
-            return self.with_scope(f, |vm, f| {
+            let scope = self.scope_of(f);
+            return self.with_scope(scope, |vm| {
                 vm.call_flow(f, a, tag, |vm| vm.start_call(recv, mid, args, blk))
             });
         };
         if vis != Vis::Public && !self.visible(vis, &owner, &recv, &f.self_) {
             return Err(self.not_visible(vis, &recv, mid));
         }
-        // natives take their arguments as a slice: no Vec for the common case
         if let Method::Native(native) = m {
-            if f.vis != Vis::Public || self.native_scope.is_some() || argc > MAX_INLINE_ARGS {
-                return self.with_scope(f, |vm, f| {
+            let scope = self.scope_of(f);
+            if scope.is_some() || self.native_scope.is_some() {
+                return self.with_scope(scope, |vm| {
                     vm.call_flow(f, a, tag, |vm| vm.start_invoke(m, owner, recv, mid, args, blk))
                 });
             }
-            let mut buf: [Value; MAX_INLINE_ARGS] = Default::default();
-            let at = f.base + a + 1;
-            buf[..argc].clone_from_slice(&self.stack[at..at + argc]);
-            let args = &buf[..argc];
-            return self.call_flow(f, a, tag, |vm| {
-                Ok(Call::Done(native(vm, &recv, args, blk.as_ref())?))
-            });
+            // natives take their arguments as a slice: no Vec for the common case
+            if argc <= MAX_INLINE_ARGS {
+                let mut buf: [Value; MAX_INLINE_ARGS] = Default::default();
+                let at = f.base + a + 1;
+                buf[..argc].clone_from_slice(&self.stack[at..at + argc]);
+                let args = &buf[..argc];
+                return self.call_flow(f, a, tag, |vm| {
+                    Ok(Call::Done(native(vm, &recv, args, blk.as_ref())?))
+                });
+            }
         }
         self.call_flow(f, a, tag, |vm| vm.start_invoke(m, owner, recv, mid, args, blk))
     }
 
-    /// Runs `call` (a call from frame `f` that may run a native) with
-    /// [`Vm::native_scope`] set to `f`'s default visibility, for natives
-    /// that define methods (attr_reader, define_method).
+    /// `f`'s (target, default visibility) when the visibility isn't public.
+    #[inline]
+    fn scope_of(&self, f: &Frame) -> Option<(ClassRef, Vis)> {
+        if f.vis == Vis::Public && (!self.shared_vis || (f.own_scope && f.env.is_none())) {
+            return None;
+        }
+        let vis = self.frame_vis(f);
+        (vis != Vis::Public).then_some((f.target, vis))
+    }
+
+    /// Runs `call` (a call that may run a native) with [`Vm::native_scope`]
+    /// set to the caller's `scope`, for natives that define methods
+    /// (attr_reader, define_method).
     #[inline(never)]
-    fn with_scope<R>(&mut self, f: &mut Frame, call: impl FnOnce(&mut Self, &mut Frame) -> R) -> R {
-        let scope = (f.vis != Vis::Public).then_some((f.target, f.vis));
+    fn with_scope<R>(&mut self, scope: Option<(ClassRef, Vis)>, call: impl FnOnce(&mut Self) -> R) -> R {
         let outer = std::mem::replace(&mut self.native_scope, scope);
-        let r = call(self, f);
+        let r = call(self);
         self.native_scope = outer;
         r
     }
@@ -2246,11 +2291,10 @@ impl Vm {
                     return Err(self.not_visible(vis, &recv, mid));
                 }
                 let args = Args::Owned(args);
-                let scope = (f.vis != Vis::Public).then_some((f.target, f.vis));
-                let outer = std::mem::replace(&mut self.native_scope, scope);
-                let r = self.call_flow(f, a, tag, |vm| vm.start_call(recv, mid, args, blk));
-                self.native_scope = outer;
-                return r;
+                let scope = self.scope_of(f);
+                return self.with_scope(scope, |vm| {
+                    vm.call_flow(f, a, tag, |vm| vm.start_call(recv, mid, args, blk))
+                });
             }
             Op::Super(a, argc) => {
                 let args: Vec<Value> = (0..argc).map(|i| self.reg(f, a + 1 + i)).collect();
@@ -2452,21 +2496,27 @@ impl Vm {
                     method: f.method,
                     target: f.target,
                     lambda: matches!(op, Op::Lambda(..)),
-                    vis: f.vis,
                 };
                 let p = Value::from(self.heap.alloc(p));
                 self.set_reg(f, a, p);
             }
             Op::TDef(s, idx) => {
                 let irep = f.irep.reps[idx].clone();
-                let vis = if self.always_private(s) { Vis::Private } else { f.vis };
-                if f.vis == Vis::ModuleFunction {
+                let scope_vis = self.frame_vis(f);
+                let vis = if self.always_private(s) { Vis::Private } else { scope_vis };
+                if scope_vis == Vis::ModuleFunction {
                     let meta = self.singleton_class(&Value::from(f.target))?;
                     self.heap[meta].methods.insert(s, Method::Ruby(irep.clone()));
                 }
                 self.heap[f.target].methods.insert_vis(s, Method::Ruby(irep), vis);
             }
-            Op::DefaultVis(vis) => f.vis = vis,
+            Op::DefaultVis(vis) => match self.scope_env(f) {
+                Some(e) => {
+                    self.shared_vis |= vis != Vis::Public;
+                    self.heap[e].vis.set(vis);
+                }
+                None => f.vis = vis,
+            },
             Op::SDef(a, s, idx) => {
                 let cls = self.singleton_class(&self.reg(f, a))?;
                 self.heap[cls].methods.insert(s, Method::Ruby(f.irep.reps[idx].clone()));

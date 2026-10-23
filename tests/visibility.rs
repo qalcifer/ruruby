@@ -244,3 +244,19 @@ fn listings_by_visibility() {
          true\nfalse\nfalse\n[:single]\nfalse\ntrue\ntrue\ntrue\nfalse\n[:priv]\n"
     );
 }
+
+#[test]
+fn blocks_share_the_scope_visibility() {
+    // a `private` in a block reaches the scope it was written in; blocks
+    // run by class_eval & co. are scopes of their own, starting public
+    let out = run(r##"
+        a = Class.new { -> { private }.call; def m = 1 }
+        b = Class.new { private; [1].each { [2].each { def n = 1 } }; def o = 1 }
+        c = Class.new { private; class_eval { def q = 1; [1].each { def r = 1 } }; def s = 1 }
+        d = Class.new { class_eval { private }; def t = 1 }
+        p a.private_method_defined?(:m), b.private_instance_methods(false).sort
+        p c.public_instance_methods(false).sort, c.private_method_defined?(:s)
+        p d.public_method_defined?(:t)
+    "##);
+    assert_eq!(out, "true\n[:n, :o]\n[:q, :r]\ntrue\ntrue\n");
+}

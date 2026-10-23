@@ -452,8 +452,8 @@ impl<'h> Marker<'h> {
                             self.value(v);
                         }
                     }
-                    if let Some(up) = e.upper {
-                        self.env(up);
+                    for up in e.upper.iter().chain(&e.scope) {
+                        self.env(*up);
                     }
                 }
             }
