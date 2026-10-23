@@ -2265,6 +2265,10 @@ impl Vm {
             }
             Op::BlkPush(a, _) if f.block.is_some() => self.set_reg(f, a, f.block.unwrap()),
             Op::Send(a, mid, argc, has_block) => return self.send_op(f, a, mid, argc, has_block),
+            Op::SendSelf(a, mid, argc, has_block) => {
+                self.set_reg(f, a, f.self_);
+                return self.send_op(f, a, mid, argc, has_block);
+            }
             Op::AddI(a, i) | Op::SubI(a, i) => {
                 let add = matches!(op, Op::AddI(..));
                 if let Some(x) = self.reg(f, a).as_inline_int()
@@ -2572,6 +2576,10 @@ impl Vm {
                 return Err(Unwind::Error(v));
             }
             Op::Send(a, mid, argc, has_block) => return self.send_op(f, a, mid, argc, has_block),
+            Op::SendSelf(a, mid, argc, has_block) => {
+                self.set_reg(f, a, f.self_);
+                return self.send_op(f, a, mid, argc, has_block);
+            }
             Op::SendV(a, mid, has_block) => {
                 let recv = self.reg(f, a);
                 let args = self.args_from_array(self.reg(f, a + 1));

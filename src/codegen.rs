@@ -899,8 +899,12 @@ impl Codegen<'_> {
             return Ok(());
         }
         let a = self.op_reg(dst);
+        // `foo(x)`: SendSelf puts self in R[a] itself (a splat needs it
+        // there before the arguments, which SendV doesn't do)
+        let self_send = recv.is_none() && !has_splat(args);
         match recv {
             Some(r) => self.expr(r, a)?,
+            None if self_send => {}
             None => _ = self.emit(Op::LoadSelf(a)),
         }
         let skip = if safe {
@@ -912,6 +916,7 @@ impl Codegen<'_> {
         let has_block = self.block_arg(block, block_arg)?;
         let mid = self.sym(name);
         match argc {
+            Some(n) if self_send => self.emit(Op::SendSelf(a, mid, n, has_block)),
             Some(n) => self.emit(Op::Send(a, mid, n, has_block)),
             None => self.emit(Op::SendV(a, mid, has_block)),
         };

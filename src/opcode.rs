@@ -109,6 +109,8 @@ pub enum Op {
     Raise(Reg),
     /// R[a] = R[a].send(sym, R[a+1]..R[a+n]) with block R[a+n+1] if flag
     Send(Reg, Sym, usize, bool),
+    /// Send with self as the receiver (`foo(x)`): R[a] = self first
+    SendSelf(Reg, Sym, usize, bool),
     /// R[a] = R[a].send(sym, *R[a+1]) with block R[a+2] if flag
     SendV(Reg, Sym, bool),
     /// R[a] = super(R[a+1]..R[a+n]) with block R[a+n+1]
@@ -219,6 +221,7 @@ impl Op {
             | Op::GetMCnst(_, s)
             | Op::SetMCnst(_, s)
             | Op::Send(_, s, _, _)
+            | Op::SendSelf(_, s, _, _)
             | Op::SendV(_, s, _)
             | Op::TDef(s, _)
             | Op::SDef(_, s, _)
