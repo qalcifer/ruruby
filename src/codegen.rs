@@ -467,11 +467,14 @@ impl Codegen<'_> {
             } => self.super_call(args.as_deref(), block.as_deref(), block_arg.as_deref(), dst)?,
             Node::Yield(args) => {
                 let a = self.op_reg(dst);
-                self.emit(Op::BlkPush(a, true));
-                let call = self.sym("call");
-                match self.args(args)? {
-                    None => _ = self.emit(Op::SendV(a, call, false)),
-                    Some(n) => _ = self.emit(Op::Send(a, call, n, false)),
+                if has_splat(args) {
+                    self.emit(Op::BlkPush(a, true));
+                    let call = self.sym("call");
+                    self.args(args)?;
+                    self.emit(Op::SendV(a, call, false));
+                } else {
+                    let n = self.args(args)?.expect("no splat");
+                    self.emit(Op::Yield(a, n));
                 }
                 self.op_done(a, dst);
             }

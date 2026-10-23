@@ -111,6 +111,9 @@ pub enum Op {
     Send(Reg, Sym, usize, bool),
     /// Send with self as the receiver (`foo(x)`): R[a] = self first
     SendSelf(Reg, Sym, usize, bool),
+    /// R[a] = yield R[a+1]..R[a+n]: runs the frame's block directly (no
+    /// lookup of `call`); LocalJumpError without one
+    Yield(Reg, usize),
     /// R[a] = R[a].send(sym, *R[a+1]) with block R[a+2] if flag
     SendV(Reg, Sym, bool),
     /// R[a] = super(R[a+1]..R[a+n]) with block R[a+n+1]

@@ -2266,6 +2266,13 @@ impl Vm {
                 self.set_reg(f, a, f.self_);
                 return self.send_op(f, a, mid, argc, has_block);
             }
+            Op::Yield(a, argc) => {
+                let Some(b) = f.block else {
+                    return Err(self.err(&self.c.local_jump_error, "no block given (yield)"));
+                };
+                let args = Args::Stack { at: f.base + a + 1, n: argc };
+                return self.call_flow(f, a, 0, |vm| vm.start_proc(&b, args, None, ProcCall::default()));
+            }
             Op::AddI(a, i) | Op::SubI(a, i) => {
                 let add = matches!(op, Op::AddI(..));
                 if let Some(x) = self.reg(f, a).as_inline_int()
@@ -2576,6 +2583,13 @@ impl Vm {
             Op::SendSelf(a, mid, argc, has_block) => {
                 self.set_reg(f, a, f.self_);
                 return self.send_op(f, a, mid, argc, has_block);
+            }
+            Op::Yield(a, argc) => {
+                let Some(b) = f.block else {
+                    return Err(self.err(&self.c.local_jump_error, "no block given (yield)"));
+                };
+                let args = Args::Stack { at: f.base + a + 1, n: argc };
+                return self.call_flow(f, a, 0, |vm| vm.start_proc(&b, args, None, ProcCall::default()));
             }
             Op::SendV(a, mid, has_block) => {
                 let recv = self.reg(f, a);
