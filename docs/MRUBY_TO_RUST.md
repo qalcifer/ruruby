@@ -229,8 +229,10 @@ Each step can be checked against mruby's own tests.
    Integers and larger ones boxed in the heap: memory for a value-heavy
    script 82 → 60 MB, speed about neutral (the dispatch loop, not value
    size, is the limit), immediates compared by bits (Hash lookups 2×).
-   Next: an index for big hashes (lookups are a linear scan); fewer frame
-   copies per call.
+   Hashes with more than 8 pairs got an index (open addressing over the
+   insertion-ordered pairs, like mruby's split between small and big
+   hashes): 250k inserts and lookups ~50 s → 0.12 s.
+   Next: fewer frame copies per call.
 7. **Numbers.** Bignum (`num-bigint`, matching `mruby-bigint`), Rational, Complex.
 8. **Enumerators.** `Enumerator`, external iteration (needs Fibers), `lazy`.
 9. **Standard gems** as Cargo features: `mruby-io`/`mruby-dir`, `mruby-time`,
