@@ -252,7 +252,13 @@ Each step can be checked against mruby's own tests.
    entries that are compacted later (O(1) instead of shifting), and keys
    whose class defines `hash`/`eql?` are hashed and compared through them,
    raising if a callback changes the hash under the lookup.
-   Next: fewer frame copies per call.
+   A third round worked on the instructions themselves: a peephole pass
+   (jumps to returns), `x ± int` on a local in one instruction, a fused
+   compare-and-branch for conditions on locals, `SendSelf`, a direct `Yield`,
+   and no env for blocks that don't reach outer locals: fib(34) 1.32 → 1.06 s
+   (CRuby 2.6: 0.71), a `while` loop 0.47 → 0.37 s (CRuby: 0.67), `times`
+   0.15 → 0.12 s (CRuby: 0.11).
+   Next: fewer frame copies per call, no heap object per block literal.
 7. **Numbers.** Bignum (`num-bigint`, matching `mruby-bigint`), Rational, Complex.
 8. **Enumerators.** `Enumerator`, external iteration (needs Fibers), `lazy`.
 9. **Standard gems** as Cargo features: `mruby-io`/`mruby-dir`, `mruby-time`,
