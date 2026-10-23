@@ -260,7 +260,7 @@ struct Frame {
     proc_tag: u64,
     exc: Option<Value>,
     /// A `break`/`return` paused while an `ensure` clause runs; `Raise` of nil resumes it.
-    pending: Option<Unwind>,
+    pending: Option<Box<Unwind>>,
     /// Next instruction.
     pc: usize,
     /// The caller's register that receives this frame's value.
@@ -2146,7 +2146,7 @@ impl Vm {
                 match ensure.map(|h| h.target) {
                     Some(target) => {
                         f.pc = target;
-                        f.pending = Some(e);
+                        f.pending = Some(Box::new(e));
                         f.exc = None;
                         None
                     }
@@ -2596,7 +2596,7 @@ impl Vm {
                 if v.is_nil()
                     && let Some(pending) = f.pending.take()
                 {
-                    return Err(pending); // end of an ensure run for a break/return
+                    return Err(*pending); // end of an ensure run for a break/return
                 }
                 return Err(Unwind::Error(v));
             }
@@ -3238,7 +3238,7 @@ fn mark_frame(m: &mut Marker, f: &Frame) {
     if let Some((owner, _)) = f.method {
         m.class(owner);
     }
-    match &f.pending {
+    match f.pending.as_deref() {
         Some(Unwind::Error(v) | Unwind::Break { value: v, .. } | Unwind::Return { value: v, .. }) => {
             m.value(v)
         }
