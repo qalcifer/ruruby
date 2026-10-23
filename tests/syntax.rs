@@ -374,3 +374,24 @@ fn local_increments_and_discarded_values() {
     "##;
     assert_eq!(run(src), "1\n3\n3\n3\n2.5\n\"ab\"\n7\n23\n3\nnil\n10\n");
 }
+
+#[test]
+fn jumps_to_returns_keep_their_results() {
+    // the peephole pass turns jumps to a Return into the Return, and
+    // `Move(a, b); Return(a)` into `Return(b)`
+    let out = run(r#"
+        def a(x) = x ? (x > 1 ? :big : :one) : :none
+        def b(x)
+          if x
+            y = x * 2
+            y
+          else
+            unless x.nil? then :false else :nil end
+          end
+        end
+        def c(x) = while x > 0; x -= 1; break :broke if x == 2; end
+        p a(5), a(1), a(nil), b(3), b(false), b(nil), c(5), c(1)
+        p [1, 2, 3].map { |v| v.odd? ? v : -v }
+    "#);
+    assert_eq!(out, ":big\n:one\n:none\n6\n:false\n:nil\n:broke\nnil\n[1, -2, 3]\n");
+}

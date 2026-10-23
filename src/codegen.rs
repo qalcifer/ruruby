@@ -146,6 +146,9 @@ impl Codegen<'_> {
 
     fn pop_scope(&mut self) -> Irep {
         let mut irep = self.scopes.pop().unwrap().irep;
+        if irep.catch.is_empty() {
+            peephole(&mut irep.code);
+        }
         irep.caches = irep.code.iter().map(|_| RefCell::default()).collect();
         irep
     }
@@ -1546,3 +1549,35 @@ impl Codegen<'_> {
         Ok(())
     }
 }
+
+/// Rewrites that keep every instruction at its place (so no jump target
+/// moves), for code without exception handlers:
+/// - a `Jmp` goes straight to the end of a chain of jumps, and a jump to a
+///   `Return` is that `Return` (`c ? x : y` as a method's last expression);
+/// - `Move(a, b); Return(a)` returns `b` directly.
+fn peephole(code: &mut [Op]) {
+    for i in 0..code.len() {
+        if let Op::Jmp(mut t) = code[i] {
+            let mut hops = 0;
+            while let Some(Op::Jmp(next)) = code.get(t) {
+                if hops == code.len() {
+                    break;
+                }
+                t = *next;
+                hops += 1;
+            }
+            code[i] = match code.get(t) {
+                Some(Op::Return(r)) => Op::Return(*r),
+                _ => Op::Jmp(t),
+            };
+        }
+    }
+    for i in 0..code.len().saturating_sub(1) {
+        if let (Op::Move(a, b), Op::Return(r)) = (code[i], code[i + 1])
+            && a == r
+        {
+            code[i] = Op::Return(b);
+        }
+    }
+}
+
