@@ -338,8 +338,11 @@ fn class_new(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>) -> VmResult
     Ok(obj)
 }
 
+/// `attr_reader` & co.; returns the names of the methods defined (so
+/// `private attr_accessor :a` works).
 fn attr(vm: &mut Vm, s: &Value, a: &[Value], reader: bool, writer: bool) -> VmResult {
     let V::Class(cls) = vm.kind(*s) else { unreachable!() };
+    let mut defined = Vec::new();
     for name in a {
         let n = sym_of(vm, name)?;
         let n = vm.sym_name(n).to_string();
@@ -347,13 +350,15 @@ fn attr(vm: &mut Vm, s: &Value, a: &[Value], reader: bool, writer: bool) -> VmRe
         if reader {
             let m = vm.intern(&n);
             vm.heap[cls].methods.insert(m, Method::AttrReader(iv));
+            defined.push(Value::sym(m));
         }
         if writer {
             let m = vm.intern(&format!("{n}="));
             vm.heap[cls].methods.insert(m, Method::AttrWriter(iv));
+            defined.push(Value::sym(m));
         }
     }
-    Ok(Value::NIL)
+    Ok(vm.array(defined))
 }
 
 fn init_module(vm: &mut Vm) {
