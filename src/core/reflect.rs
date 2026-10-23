@@ -236,7 +236,12 @@ fn init_module(vm: &mut Vm) {
             (None, Some(p)) if matches!(vm.kind(*p), V::Proc(_)) => *p,
             _ => return Err(vm.arg_err("tried to create Proc object without a block")),
         };
-        vm.heap[cls].methods.insert(name, Method::Proc(body));
+        let vis = vm.scope_vis(cls);
+        if vis == Vis::ModuleFunction {
+            let meta = vm.singleton_class(s)?;
+            vm.heap[meta].methods.insert(name, Method::Proc(body));
+        }
+        vm.heap[cls].methods.insert_vis(name, Method::Proc(body), vis);
         Ok(Value::sym(name))
     });
     vm.def(&m, "alias_method", |vm, s, a, _| {
@@ -331,6 +336,23 @@ fn init_module(vm: &mut Vm) {
     vm.def(&m, "private", |vm, s, a, _| set_vis(vm, s, a, Vis::Private));
     vm.def(&m, "public", |vm, s, a, _| set_vis(vm, s, a, Vis::Public));
     vm.def(&m, "protected", |vm, s, a, _| set_vis(vm, s, a, Vis::Protected));
+    vm.def(&m, "module_function", |vm, s, a, _| {
+        // a public copy on the module, the instance method made private
+        let meta = vm.singleton_class(s)?;
+        let cls = this_class(vm, s)?;
+        for name in method_names(vm, a)? {
+            let Some((m, _)) = vm.find_method(&cls, name) else {
+                let msg = format!(
+                    "undefined method '{}' for module '{}'",
+                    vm.sym_name(name),
+                    vm.heap[cls].name()
+                );
+                return Err(vm.name_err(msg));
+            };
+            vm.heap[meta].methods.insert(name, m);
+        }
+        set_vis(vm, s, a, Vis::Private)
+    });
     vm.def(&m, "private_class_method", |vm, s, a, _| {
         let meta = vm.singleton_class(s)?;
         set_vis(vm, &Value::from(meta), a, Vis::Private)
@@ -338,17 +360,6 @@ fn init_module(vm: &mut Vm) {
     vm.def(&m, "public_class_method", |vm, s, a, _| {
         let meta = vm.singleton_class(s)?;
         set_vis(vm, &Value::from(meta), a, Vis::Public)
-    });
-    vm.def(&m, "module_function", |vm, s, a, _| {
-        let cls = this_class(vm, s)?;
-        let sc = vm.class_singleton(&cls);
-        for n in a {
-            let mid = sym_of(vm, n)?;
-            if let Some((meth, _)) = vm.find_method(&cls, mid) {
-                vm.heap[sc].methods.insert(mid, meth);
-            }
-        }
-        Ok(Value::NIL)
     });
     vm.def(&m, "attr", |vm, s, a, _| {
         let attr_reader = vm.intern("attr_reader");

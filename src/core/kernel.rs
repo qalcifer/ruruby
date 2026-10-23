@@ -342,6 +342,11 @@ fn class_new(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>) -> VmResult
 /// `private attr_accessor :a` works).
 fn attr(vm: &mut Vm, s: &Value, a: &[Value], reader: bool, writer: bool) -> VmResult {
     let V::Class(cls) = vm.kind(*s) else { unreachable!() };
+    // under module_function: private, and no module method is made
+    let vis = match vm.scope_vis(cls) {
+        Vis::ModuleFunction => Vis::Private,
+        v => v,
+    };
     let mut defined = Vec::new();
     for name in a {
         let n = sym_of(vm, name)?;
@@ -349,12 +354,12 @@ fn attr(vm: &mut Vm, s: &Value, a: &[Value], reader: bool, writer: bool) -> VmRe
         let iv = vm.intern(&format!("@{n}"));
         if reader {
             let m = vm.intern(&n);
-            vm.heap[cls].methods.insert(m, Method::AttrReader(iv));
+            vm.heap[cls].methods.insert_vis(m, Method::AttrReader(iv), vis);
             defined.push(Value::sym(m));
         }
         if writer {
             let m = vm.intern(&format!("{n}="));
-            vm.heap[cls].methods.insert(m, Method::AttrWriter(iv));
+            vm.heap[cls].methods.insert_vis(m, Method::AttrWriter(iv), vis);
             defined.push(Value::sym(m));
         }
     }

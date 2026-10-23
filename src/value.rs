@@ -284,6 +284,9 @@ pub struct RProc {
     pub target: ClassRef,
     /// Lambdas check arity strictly and `return` from themselves.
     pub lambda: bool,
+    /// The default visibility where the block was written: a block in a
+    /// class body under `private` defines private methods.
+    pub vis: Vis,
 }
 
 /// A value as code inspects it: what `match heap.kind(v)` gives.

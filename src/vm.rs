@@ -208,6 +208,10 @@ pub struct Vm {
     /// The `reentry` level of the loop where collection may run (the
     /// outermost loop of `run_main`); 0 when none is running.
     gc_level: usize,
+    /// While a native called from a frame with a non-public default
+    /// visibility runs: that frame's (target, visibility), for natives that
+    /// define methods (attr_reader, define_method). See [`Vm::scope_vis`].
+    native_scope: Option<(ClassRef, Vis)>,
     /// Native stack (bytes) the VM may use for natives calling back into Ruby
     /// before raising SystemStackError. Raise it when running on a big stack.
     pub stack_budget: usize,
@@ -495,6 +499,7 @@ impl Vm {
             reentry: 0,
             stack_base: 0,
             gc_level: 0,
+            native_scope: None,
             stack_budget: DEFAULT_STACK_BUDGET,
             inspecting: Vec::new(),
             live_breaks: Vec::new(),
@@ -595,6 +600,16 @@ impl Vm {
             self.hash_set(h, k, v)?;
         }
         Ok(())
+    }
+
+    /// The visibility a native defining methods in `cls` gives them: the
+    /// calling scope's default if `cls` is that scope's class (a class body
+    /// or a `class_eval` block under `private`), else public.
+    pub fn scope_vis(&self, cls: ClassRef) -> Vis {
+        match self.native_scope {
+            Some((target, vis)) if target == cls => vis,
+            _ => Vis::Public,
+        }
     }
 
     /// An object whose class defines its own `hash` or `eql?`: as a Hash
@@ -1545,9 +1560,10 @@ impl Vm {
                 let self_ = call.self_.unwrap_or(rp.self_);
                 let target = call.target.unwrap_or(rp.target);
                 let method = call.method.or(rp.method);
-                let (outer_block, home) = (rp.block, rp.home);
+                let (outer_block, home, vis) = (rp.block, rp.home, rp.vis);
                 let bound = self.bind_args(&irep, &self_, args, &block, lambda)?;
                 let mut f = Frame::new(irep, bound.base, self_, target);
+                f.vis = vis;
                 f.upper = Some(env);
                 f.block = outer_block;
                 f.method = method;
@@ -1572,6 +1588,7 @@ impl Vm {
             method: None,
             target,
             lambda: false,
+            vis: Vis::Public,
         }))
     }
 
@@ -1588,6 +1605,7 @@ impl Vm {
                     method: p.method,
                     target: p.target,
                     lambda: true,
+                    vis: p.vis,
                 };
                 Value::from(self.heap.alloc(copy))
             }
@@ -2030,15 +2048,20 @@ impl Vm {
         let tag = proc_tag(&blk);
         let args = Args::Stack { at: f.base + a + 1, n: argc };
         let Some((m, owner, vis)) = self.cached_lookup(f, &recv, mid) else {
-            return self.call_flow(f, a, tag, |vm| vm.start_call(recv, mid, args, blk));
+            return self.with_scope(f, |vm, f| {
+                vm.call_flow(f, a, tag, |vm| vm.start_call(recv, mid, args, blk))
+            });
         };
         if vis != Vis::Public && !self.visible(vis, &owner, &recv, &f.self_) {
             return Err(self.not_visible(vis, &recv, mid));
         }
         // natives take their arguments as a slice: no Vec for the common case
-        if let Method::Native(native) = m
-            && argc <= MAX_INLINE_ARGS
-        {
+        if let Method::Native(native) = m {
+            if f.vis != Vis::Public || self.native_scope.is_some() || argc > MAX_INLINE_ARGS {
+                return self.with_scope(f, |vm, f| {
+                    vm.call_flow(f, a, tag, |vm| vm.start_invoke(m, owner, recv, mid, args, blk))
+                });
+            }
             let mut buf: [Value; MAX_INLINE_ARGS] = Default::default();
             let at = f.base + a + 1;
             buf[..argc].clone_from_slice(&self.stack[at..at + argc]);
@@ -2048,6 +2071,18 @@ impl Vm {
             });
         }
         self.call_flow(f, a, tag, |vm| vm.start_invoke(m, owner, recv, mid, args, blk))
+    }
+
+    /// Runs `call` (a call from frame `f` that may run a native) with
+    /// [`Vm::native_scope`] set to `f`'s default visibility, for natives
+    /// that define methods (attr_reader, define_method).
+    #[inline(never)]
+    fn with_scope<R>(&mut self, f: &mut Frame, call: impl FnOnce(&mut Self, &mut Frame) -> R) -> R {
+        let scope = (f.vis != Vis::Public).then_some((f.target, f.vis));
+        let outer = std::mem::replace(&mut self.native_scope, scope);
+        let r = call(self, f);
+        self.native_scope = outer;
+        r
     }
 
     /// Every instruction, out of line (see [`Vm::step`]). It reads its
@@ -2204,7 +2239,11 @@ impl Vm {
                     return Err(self.not_visible(vis, &recv, mid));
                 }
                 let args = Args::Owned(args);
-                return self.call_flow(f, a, tag, |vm| vm.start_call(recv, mid, args, blk));
+                let scope = (f.vis != Vis::Public).then_some((f.target, f.vis));
+                let outer = std::mem::replace(&mut self.native_scope, scope);
+                let r = self.call_flow(f, a, tag, |vm| vm.start_call(recv, mid, args, blk));
+                self.native_scope = outer;
+                return r;
             }
             Op::Super(a, argc) => {
                 let args: Vec<Value> = (0..argc).map(|i| self.reg(f, a + 1 + i)).collect();
@@ -2406,6 +2445,7 @@ impl Vm {
                     method: f.method,
                     target: f.target,
                     lambda: matches!(op, Op::Lambda(..)),
+                    vis: f.vis,
                 };
                 let p = Value::from(self.heap.alloc(p));
                 self.set_reg(f, a, p);

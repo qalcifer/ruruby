@@ -118,3 +118,48 @@ fn scope_default_visibility() {
          \"private method 'f' called for an instance of B\"\n:inner\n:m\n:nested\n"
     );
 }
+
+#[test]
+fn natives_that_define_methods_follow_the_scope() {
+    // attr_* and define_method called in a class body (or a block in it,
+    // or a class_eval block) under `private` define private methods; called
+    // on another class or from a method they define public ones
+    let out = run(r##"
+        def err
+          yield
+        rescue NoMethodError
+          :private
+        end
+        other = Class.new
+        c = Class.new do
+          private
+          attr_accessor :a
+          [1].each { define_method(:d) { :d } }
+          other.attr_reader :pub
+          def self.make = attr_reader(:from_cm)
+        end
+        c.make
+        p err { c.new.a }, err { c.new.d }, other.new.pub, c.new.from_cm
+        e = Class.new
+        e.class_eval { private; attr_reader :r; define_method(:m) { :m } }
+        p err { e.new.r }, err { e.new.m }, e.new.send(:m)
+        mod = Module.new do
+          module_function
+          attr_reader :mf
+          define_method(:dm) { :dm }
+        end
+        k = Class.new { include mod; def call = [mf, dm] }
+        p mod.respond_to?(:mf), mod.dm, k.new.call, err { k.new.dm }
+        m2 = Module.new do
+          def f = :f
+          module_function :f
+        end
+        p m2.f, err { Class.new { include m2 }.new.f }
+        p (begin; Module.new { module_function :nope }; rescue NameError => e; e.message.start_with?("undefined method 'nope' for module"); end)
+    "##);
+    assert_eq!(
+        out,
+        ":private\n:private\nnil\nnil\n:private\n:private\n:m\nfalse\n:dm\n[nil, :dm]\n\
+         :private\n:f\n:private\ntrue\n"
+    );
+}
