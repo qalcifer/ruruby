@@ -23,6 +23,7 @@ pub mod gc;
 pub mod lexer;
 pub mod opcode;
 pub mod parser;
+pub mod rhash;
 pub mod symbol;
 pub mod value;
 pub mod vm;

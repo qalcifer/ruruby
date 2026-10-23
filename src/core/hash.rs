@@ -4,7 +4,7 @@ use super::*;
 use crate::vm::VmResult;
 
 fn pairs(vm: &Vm, s: &Value) -> Result<Vec<(Value, Value)>, Unwind> {
-    Ok(vm.heap[this_hash(vm, s)?].borrow().pairs.clone())
+    Ok(vm.heap[this_hash(vm, s)?].borrow().pairs().to_vec())
 }
 
 fn pair(vm: &mut Vm, k: &Value, v: &Value) -> Value {
@@ -97,17 +97,17 @@ pub fn init(vm: &mut Vm) {
         ))
     });
     vm.def(&c, "length", |vm, s, _, _| {
-        Ok(Value::small_int(vm.heap[this_hash(vm, s)?].borrow().pairs.len() as i64))
+        Ok(Value::small_int(vm.heap[this_hash(vm, s)?].borrow().len() as i64))
     });
     vm.def(&c, "size", |vm, s, _, _| {
-        Ok(Value::small_int(vm.heap[this_hash(vm, s)?].borrow().pairs.len() as i64))
+        Ok(Value::small_int(vm.heap[this_hash(vm, s)?].borrow().len() as i64))
     });
     vm.def(&c, "count", |vm, s, a, b| match b {
-        None if a.is_empty() => Ok(Value::small_int(vm.heap[this_hash(vm, s)?].borrow().pairs.len() as i64)),
+        None if a.is_empty() => Ok(Value::small_int(vm.heap[this_hash(vm, s)?].borrow().len() as i64)),
         _ => enumerable::count(vm, s, a, b),
     });
     vm.def(&c, "empty?", |vm, s, _, _| {
-        Ok(Value::bool(vm.heap[this_hash(vm, s)?].borrow().pairs.is_empty()))
+        Ok(Value::bool(vm.heap[this_hash(vm, s)?].borrow().is_empty()))
     });
     vm.def(&c, "to_h", |_, s, _, _| Ok(*s));
     vm.def(&c, "to_s", |vm, s, _, _| Ok({ let v = vm.inspect(s)?; vm.str(v) }));
@@ -152,7 +152,7 @@ pub fn init(vm: &mut Vm) {
             .unwrap_or(Value::NIL))
     });
     vm.def(&c, "clear", |vm, s, _, _| {
-        vm.heap[this_hash(vm, s)?].borrow_mut().pairs.clear();
+        vm.heap[this_hash(vm, s)?].borrow_mut().clear();
         Ok(*s)
     });
     vm.def(&c, "merge", |vm, s, a, b| {

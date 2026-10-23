@@ -302,11 +302,10 @@ fn class_new(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>) -> VmResult
     }
     let c = &vm.c;
     if cls == c.hash {
-        return Ok(vm.hash(RHash {
-            default: arg(a, 0),
-            default_proc: b.cloned(),
-            ..RHash::new()
-        }));
+        let mut h = RHash::new();
+        h.default = arg(a, 0);
+        h.default_proc = b.cloned();
+        return Ok(vm.hash(h));
     }
     if cls == c.string {
         return Ok(vm.str(if a.is_empty() {

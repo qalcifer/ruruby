@@ -10,6 +10,7 @@ use crate::gc::{
     ArrayRef, ClassRef, EnvRef, GEN_BITS, Gc, HashRef, Heap, IntRef, ObjRef, ProcRef, RangeRef, StrRef,
 };
 use crate::opcode::Irep;
+pub use crate::rhash::RHash;
 use crate::symbol::{Sym, SymMap};
 use crate::vm::{Vm, VmResult};
 use std::cell::RefCell;
@@ -241,60 +242,6 @@ pub struct RProc {
     pub target: ClassRef,
     /// Lambdas check arity strictly and `return` from themselves.
     pub lambda: bool,
-}
-
-/// Insertion-ordered hash (mruby: `struct RHash`; it uses open addressing
-/// for big tables and a flat array for small ones — this is the flat array only).
-#[derive(Clone)]
-pub struct RHash {
-    pub pairs: Vec<(Value, Value)>,
-    pub default: Value,
-    /// `Hash.new { |h, k| ... }`
-    pub default_proc: Option<Value>,
-    /// Built from keyword arguments (`f(a: 1)`), so it binds to keyword parameters.
-    pub kw: bool,
-}
-
-impl RHash {
-    pub fn new() -> Self {
-        RHash {
-            pairs: Vec::new(),
-            default: Value::NIL,
-            default_proc: None,
-            kw: false,
-        }
-    }
-
-    pub fn get(&self, heap: &Heap, k: &Value) -> Option<Value> {
-        self.pairs
-            .iter()
-            .find(|(key, _)| eql(heap, key, k))
-            .map(|(_, v)| *v)
-    }
-
-    pub fn contains(&self, heap: &Heap, k: &Value) -> bool {
-        self.pairs.iter().any(|(key, _)| eql(heap, key, k))
-    }
-
-    /// Sets `k`. A new String key must already be a private copy (Ruby
-    /// dups string keys); [`Vm::hash_set`](crate::vm::Vm::hash_set) does that.
-    pub fn set(&mut self, heap: &Heap, k: Value, v: Value) {
-        match self.pairs.iter_mut().find(|(key, _)| eql(heap, key, &k)) {
-            Some(slot) => slot.1 = v,
-            None => self.pairs.push((k, v)),
-        }
-    }
-
-    pub fn remove(&mut self, heap: &Heap, k: &Value) -> Option<Value> {
-        let i = self.pairs.iter().position(|(key, _)| eql(heap, key, k))?;
-        Some(self.pairs.remove(i).1)
-    }
-}
-
-impl Default for RHash {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 /// A value as code inspects it: what `match heap.kind(v)` gives.
@@ -597,8 +544,8 @@ fn eq_rec(heap: &Heap, a: &Value, b: &Value, in_progress: &mut InProgress) -> bo
         (Hash(x), Hash(y)) => {
             let (xh, yh) = (heap[x].borrow().clone(), heap[y].borrow().clone());
             guarded(x.id(), y.id(), in_progress, |ip| {
-                xh.pairs.len() == yh.pairs.len()
-                    && xh.pairs.iter().all(|(k, v)| {
+                xh.len() == yh.len()
+                    && xh.pairs().iter().all(|(k, v)| {
                         yh.get(heap, k)
                             .is_some_and(|w| eq_rec(heap, v, &w, ip))
                     })

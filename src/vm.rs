@@ -1236,7 +1236,7 @@ impl Vm {
                 kh.kw = false;
                 kwargs = Some(kh);
                 args.pop();
-            } else if self.heap[h].borrow().pairs.is_empty() {
+            } else if self.heap[h].borrow().is_empty() {
                 args.pop(); // `**{}` passes nothing
             } else {
                 self.heap[h].borrow_mut().kw = false; // a plain positional Hash from here on
@@ -1294,7 +1294,7 @@ impl Vm {
             r += 1;
         }
         let mut kw_mask = 0u64;
-        if spec.nokw && kwargs.as_ref().is_some_and(|h| !h.pairs.is_empty()) {
+        if spec.nokw && kwargs.as_ref().is_some_and(|h| !h.is_empty()) {
             self.stack.truncate(base);
             return Err(self.arg_err("no keywords accepted"));
         }
@@ -1324,9 +1324,9 @@ impl Vm {
             };
             self.stack[base + r] = kwrest;
             r += 1;
-        } else if !kwh.pairs.is_empty() {
+        } else if !kwh.is_empty() {
             let unknown: Vec<Sym> = kwh
-                .pairs
+                .pairs()
                 .iter()
                 .filter_map(|(k, _)| {
                     if let V::Sym(s) = self.kind(*k) {
@@ -1475,7 +1475,7 @@ impl Vm {
             V::Array(a) => self.heap[a].borrow().clone(),
             V::Nil => vec![],
             V::Hash(h) => {
-                let pairs = self.heap[h].borrow().pairs.clone();
+                let pairs = self.heap[h].borrow().pairs().to_vec();
                 pairs.into_iter().map(|(k, v)| self.array(vec![k, v])).collect()
             }
             V::Range(_) => crate::core::to_vec(self, v)?,
@@ -2189,7 +2189,7 @@ impl Vm {
             }
             Op::HashCat(a, b) => {
                 let pairs = match self.kind(self.reg(f, b)) {
-                    V::Hash(other) => self.heap[other].borrow().pairs.clone(),
+                    V::Hash(other) => self.heap[other].borrow().pairs().to_vec(),
                     V::Nil => vec![],
                     _ => {
                         let what = self.class_name(&self.reg(f, b));
@@ -2574,7 +2574,7 @@ impl Vm {
     }
 
     fn inspect_hash(&mut self, h: HashRef) -> Result<String, Unwind> {
-        let pairs = self.heap[h].borrow().pairs.clone();
+        let pairs = self.heap[h].borrow().pairs().to_vec();
         if pairs.is_empty() {
             return Ok("{}".into());
         }
