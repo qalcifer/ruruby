@@ -6,7 +6,7 @@
 //! and leaves `sp` where it found it. `dst` is always below `sp`.
 
 use crate::ast::*;
-use crate::opcode::{ArgSpec, CatchHandler, DefinedKind, Irep, Literal, Op, Reg};
+use crate::opcode::{ArgSpec, CatchHandler, Cmp, DefinedKind, Irep, Literal, Op, Reg};
 use crate::symbol::{Sym, SymbolTable};
 use crate::value::Vis;
 use std::cell::RefCell;
@@ -231,7 +231,59 @@ impl Codegen<'_> {
             | Op::JmpNil(_, t)
             | Op::OptArg(_, t)
             | Op::KwArg(_, t) => *t = target,
+            Op::JmpCmpI { target: t, .. } | Op::JmpCmpR { target: t, .. } => *t = target as u32,
             op => unreachable!("not a jump: {op:?}"),
+        }
+    }
+
+    /// Evaluates `cond` into `r` and jumps when its truth is `jump_if`;
+    /// returns the jumps to patch to the target. A comparison of a local
+    /// with an Integer literal or another local is first tried as a fused
+    /// JmpCmp, with the generic code after it for other operands.
+    fn cond_jump(&mut self, cond: &Node, r: Reg, jump_if: bool) -> CResult<Vec<usize>> {
+        let mut jumps = Vec::new();
+        if let Some(fused) = self.fused_compare(cond, jump_if) {
+            jumps.push(self.emit(fused));
+        }
+        self.expr(cond, r)?;
+        jumps.push(self.emit(if jump_if { Op::JmpIf(r, 0) } else { Op::JmpNot(r, 0) }));
+        let cont = self.pc() as u32;
+        if jumps.len() == 2
+            && let Op::JmpCmpI { cont: c, .. } | Op::JmpCmpR { cont: c, .. } = &mut self.cur().irep.code[jumps[0]]
+        {
+            *c = cont;
+        }
+        Ok(jumps)
+    }
+
+    /// `x < 2`, `i < n`, … with x, i, n locals of this scope.
+    fn fused_compare(&mut self, cond: &Node, jump_if: bool) -> Option<Op> {
+        let Node::Call { recv: Some(recv), name, args, block: None, block_arg: None, safe: false } = cond else {
+            return None;
+        };
+        let cmp = match name.as_str() {
+            "<" => Cmp::Lt,
+            "<=" => Cmp::Le,
+            ">" => Cmp::Gt,
+            ">=" => Cmp::Ge,
+            "==" => Cmp::Eq,
+            _ => return None,
+        };
+        let local = |cg: &Self, n: &Node| match n {
+            Node::LVar(v) => match cg.lookup(v) {
+                Some((0, r)) => Some(r as u32),
+                _ => None,
+            },
+            _ => None,
+        };
+        let a = local(self, recv)?;
+        match args.as_slice() {
+            [Node::Int(i)] => Some(Op::JmpCmpI { cmp, jump_if, a, imm: *i, target: 0, cont: 0 }),
+            [other] => {
+                let b = local(self, other)?;
+                Some(Op::JmpCmpR { cmp, jump_if, a, b, target: 0, cont: 0 })
+            }
+            _ => None,
         }
     }
 
@@ -432,11 +484,12 @@ impl Codegen<'_> {
                 self.patch(j);
             }
             Node::If(c, t, e) => {
-                self.expr(c, dst)?;
-                let jelse = self.emit(Op::JmpNot(dst, 0));
+                let jelse = self.cond_jump(c, dst, false)?;
                 self.expr(t, dst)?;
                 let jend = self.emit(Op::Jmp(0));
-                self.patch(jelse);
+                for j in jelse {
+                    self.patch(j);
+                }
                 self.expr(e, dst)?;
                 self.patch(jend);
             }
@@ -1115,19 +1168,14 @@ impl Codegen<'_> {
         } else {
             start = self.pc();
             cond_pc = start;
-            self.expr(cond, t)?;
-            jexit = Some(self.emit(if until {
-                Op::JmpIf(t, 0)
-            } else {
-                Op::JmpNot(t, 0)
-            }));
+            jexit = Some(self.cond_jump(cond, t, until)?);
             let body_start = self.pc();
             self.cur().loops.last_mut().unwrap().body_start = body_start;
             self.stmt(body)?;
             self.emit(Op::Jmp(start));
         }
         let lp = self.cur().loops.pop().unwrap();
-        if let Some(j) = jexit {
+        for j in jexit.into_iter().flatten() {
             self.patch(j);
         }
         self.emit(Op::LoadNil(dst));

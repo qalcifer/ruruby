@@ -9,7 +9,8 @@
 class Integer
   def times
     i = 0
-    while i < self
+    n = self # a local: the loop test compiles to one compare-and-branch
+    while i < n
       yield i
       i += 1
     end

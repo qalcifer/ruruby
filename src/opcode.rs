@@ -31,6 +31,29 @@ pub enum DefinedKind {
     Super,
 }
 
+/// The comparison of a fused compare-and-branch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cmp {
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Eq,
+}
+
+impl Cmp {
+    #[inline(always)]
+    pub fn test(self, x: i64, y: i64) -> bool {
+        match self {
+            Cmp::Lt => x < y,
+            Cmp::Le => x <= y,
+            Cmp::Gt => x > y,
+            Cmp::Ge => x >= y,
+            Cmp::Eq => x == y,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum Op {
     Nop,
@@ -64,6 +87,13 @@ pub enum Op {
     /// uvset(idx, depth, R[a])
     SetUpVar(Reg, usize, usize),
     Jmp(usize),
+    /// `if a < 2`, `while i < n` with inline Integers: compare R[a] with an
+    /// immediate (JmpCmpI) or R[b] (JmpCmpR); jump to `target` when the
+    /// result is `jump_if`, else continue at `cont` (past the generic code).
+    /// Other operands fall through to the next instruction, the generic
+    /// comparison and conditional jump.
+    JmpCmpI { cmp: Cmp, jump_if: bool, a: u32, imm: i64, target: u32, cont: u32 },
+    JmpCmpR { cmp: Cmp, jump_if: bool, a: u32, b: u32, target: u32, cont: u32 },
     JmpIf(Reg, usize),
     JmpNot(Reg, usize),
     JmpNil(Reg, usize),

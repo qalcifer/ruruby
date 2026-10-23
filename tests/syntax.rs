@@ -415,3 +415,33 @@ fn adding_an_immediate_to_a_local() {
          [3.5, 0.5, 7, 4.5]\n\"tag+1\"\n\"tag-1\"\n140737488355328\n-140737488355329\n"
     );
 }
+
+#[test]
+fn fused_comparisons_keep_their_meaning() {
+    // `if a < b` / `while i < n` with locals or Integer literals try a fused
+    // compare-and-branch; other operands take the generic path after it
+    let out = run(r#"
+        def cmp(a, b) = [a < b ? 1 : 0, a <= b ? 1 : 0, a > b ? 1 : 0, a >= b ? 1 : 0, a == b ? 1 : 0]
+        def lit(a) = [a < 2 ? :lt : :ge, (a == 2 ? :eq : :ne), (a >= 2 ? :ge : :lt)]
+        p cmp(1, 2), cmp(2, 2), cmp(1.5, 2), cmp(2**60, 2**61), cmp("a", "b")
+        p lit(1), lit(2), lit(2.0), lit(2**62)
+        nan = 0.0 / 0.0
+        p cmp(nan, 1.0), (nan < 2 ? :t : :f)
+        class V; include Comparable; attr_reader :v; def initialize(v) = @v = v; def <=>(o) = v <=> o.v; end
+        x, y = V.new(1), V.new(2)
+        p cmp(x, y)
+        i = 0; n = 5; s = 0
+        while i < n; s += i; i += 1; end
+        j = 10
+        until j <= 7; j -= 1; end
+        k = 0
+        k += 1 while k < 3.5
+        p s, j, k, 3.times.to_a rescue p s, j, k
+    "#);
+    assert_eq!(
+        out,
+        "[1, 1, 0, 0, 0]\n[0, 1, 0, 1, 1]\n[1, 1, 0, 0, 0]\n[1, 1, 0, 0, 0]\n[1, 1, 0, 0, 0]\n\
+         [:lt, :ne, :lt]\n[:ge, :eq, :ge]\n[:ge, :eq, :ge]\n[:ge, :ne, :ge]\n[0, 0, 0, 0, 0]\n:f\n\
+         [1, 1, 0, 0, 0]\n10\n7\n4\n"
+    );
+}

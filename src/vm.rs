@@ -2276,6 +2276,18 @@ impl Vm {
                     return self.step_slow(f);
                 }
             }
+            Op::JmpCmpI { cmp, jump_if, a, imm, target, cont } => {
+                if let Some(x) = self.reg(f, a as Reg).as_inline_int() {
+                    f.pc = if cmp.test(x, imm) == jump_if { target } else { cont } as usize;
+                }
+            }
+            Op::JmpCmpR { cmp, jump_if, a, b, target, cont } => {
+                if let (Some(x), Some(y)) =
+                    (self.reg(f, a as Reg).as_inline_int(), self.reg(f, b as Reg).as_inline_int())
+                {
+                    f.pc = if cmp.test(x, y) == jump_if { target } else { cont } as usize;
+                }
+            }
             Op::AddIR(a, b, i) | Op::SubIR(a, b, i) => {
                 let add = matches!(op, Op::AddIR(..));
                 if let Some(x) = self.reg(f, b).as_inline_int()
@@ -2416,6 +2428,18 @@ impl Vm {
         let op = f.irep.code[f.pc - 1];
         match op {
             Op::Nop => {}
+            Op::JmpCmpI { cmp, jump_if, a, imm, target, cont } => {
+                if let Some(x) = self.reg(f, a as Reg).as_inline_int() {
+                    f.pc = if cmp.test(x, imm) == jump_if { target } else { cont } as usize;
+                }
+            }
+            Op::JmpCmpR { cmp, jump_if, a, b, target, cont } => {
+                if let (Some(x), Some(y)) =
+                    (self.reg(f, a as Reg).as_inline_int(), self.reg(f, b as Reg).as_inline_int())
+                {
+                    f.pc = if cmp.test(x, y) == jump_if { target } else { cont } as usize;
+                }
+            }
             Op::Move(a, b) => self.set_reg(f, a, self.reg(f, b)),
             Op::LoadI(a, i) => { let v = self.int(i); self.set_reg(f, a, v) },
             Op::LoadL(a, i) => {
