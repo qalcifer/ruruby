@@ -125,11 +125,17 @@ pub fn init(vm: &mut Vm) {
     for name in ["key?", "has_key?", "include?", "member?"] {
         vm.def(&c, name, has_key);
     }
-    vm.def(&c, "value?", |vm, s, a, _| {
-        Ok(Value::bool(
-            pairs(vm, s)?.iter().any(|(_, v)| values_eq(&vm.heap, v, &arg(a, 0))),
-        ))
-    });
+    let has_value: NativeFn = |vm, s, a, _| {
+        let target = arg(a, 0);
+        for (_, v) in pairs(vm, s)? {
+            if vm.equal(&v, &target)? {
+                return Ok(Value::TRUE);
+            }
+        }
+        Ok(Value::FALSE)
+    };
+    vm.def(&c, "value?", has_value);
+    vm.def(&c, "has_value?", has_value);
     vm.def(&c, "key", |vm, s, a, _| {
         Ok(pairs(vm, s)?
             .into_iter()
@@ -198,9 +204,15 @@ pub fn init(vm: &mut Vm) {
         }
         Ok(*s)
     });
-    vm.def(&c, "delete", |vm, s, a, _| {
+    // delete(k) { |k| }: the block's value when k isn't there
+    vm.def(&c, "delete", |vm, s, a, b| {
         let h = this_hash(vm, s)?;
-        Ok(vm.hash_delete(h, &arg(a, 0))?.unwrap_or(Value::NIL))
+        let k = arg(a, 0);
+        match (vm.hash_delete(h, &k)?, b) {
+            (Some(v), _) => Ok(v),
+            (None, Some(b)) => vm.call_block(b, vec![k]),
+            (None, None) => Ok(Value::NIL),
+        }
     });
     vm.def(&c, "clear", |vm, s, _, _| {
         vm.check_frozen(s)?;
@@ -226,6 +238,87 @@ pub fn init(vm: &mut Vm) {
     };
     vm.def(&c, "merge!", update);
     vm.def(&c, "update", update);
+    vm.def(&c, "select!", |vm, s, _, b| filter_in_place(vm, s, b, true, true));
+    vm.def(&c, "filter!", |vm, s, _, b| filter_in_place(vm, s, b, true, true));
+    vm.def(&c, "keep_if", |vm, s, _, b| filter_in_place(vm, s, b, true, false));
+    vm.def(&c, "reject!", |vm, s, _, b| filter_in_place(vm, s, b, false, true));
+    vm.def(&c, "delete_if", |vm, s, _, b| filter_in_place(vm, s, b, false, false));
+    // shift: the first pair, removed (nil when empty, whatever the default)
+    vm.def(&c, "shift", |vm, s, _, _| {
+        let h = this_hash(vm, s)?;
+        vm.check_frozen(s)?;
+        let Some(p) = vm.heap[h].borrow().first() else {
+            return Ok(Value::NIL);
+        };
+        let k = vm.heap[h].borrow().key_at(p).unwrap_or(Value::NIL);
+        let v = vm.heap[h].borrow_mut().remove_at(&vm.heap, p);
+        Ok(pair(vm, &k, &v))
+    });
+    vm.def(&c, "assoc", |vm, s, a, _| {
+        let h = this_hash(vm, s)?;
+        let k = arg(a, 0);
+        Ok(match vm.hash_find(h, &k)? {
+            Some(p) => {
+                let (k, v) = {
+                    let r = vm.heap[h].borrow();
+                    (r.key_at(p).unwrap_or(Value::NIL), r.value_at(p))
+                };
+                pair(vm, &k, &v)
+            }
+            None => Value::NIL,
+        })
+    });
+    vm.def(&c, "rassoc", |vm, s, a, _| {
+        let target = arg(a, 0);
+        for (k, v) in pairs(vm, s)? {
+            if vm.equal(&v, &target)? {
+                return Ok(pair(vm, &k, &v));
+            }
+        }
+        Ok(Value::NIL)
+    });
+    vm.def(&c, "replace", |vm, s, a, _| {
+        let h = this_hash(vm, s)?;
+        vm.check_frozen(s)?;
+        let src = this_hash(vm, &arg(a, 0))?;
+        let copy = vm.heap[src].borrow().clone();
+        *vm.heap[h].borrow_mut() = copy;
+        Ok(*s)
+    });
+    vm.def(&c, "default_proc", |vm, s, _, _| {
+        Ok(vm.heap[this_hash(vm, s)?].borrow().default_proc.unwrap_or(Value::NIL))
+    });
+    vm.def(&c, "default_proc=", |vm, s, a, _| {
+        let h = this_hash(vm, s)?;
+        vm.check_frozen(s)?;
+        let p = arg(a, 0);
+        let p = match vm.kind(p) {
+            V::Nil => None,
+            V::Proc(_) => Some(p),
+            _ => return Err(vm.type_err(format!("wrong default_proc type {} (expected Proc)", vm.class_name(&p)))),
+        };
+        vm.heap[h].borrow_mut().default_proc = p;
+        Ok(arg(a, 0))
+    });
+    vm.def(&c, "compact", |vm, s, _, _| {
+        let (hv, h) = new_hash(vm);
+        for (k, v) in pairs(vm, s)? {
+            if !v.is_nil() {
+                vm.hash_set(h, k, v)?;
+            }
+        }
+        Ok(hv)
+    });
+    vm.def(&c, "except", |vm, s, a, _| {
+        let (hv, h) = new_hash(vm);
+        for (k, v) in pairs(vm, s)? {
+            vm.hash_set(h, k, v)?;
+        }
+        for k in a {
+            vm.hash_delete(h, k)?;
+        }
+        Ok(hv)
+    });
     vm.def(&c, "select", |vm, s, _, b| filter(vm, s, b, true));
     vm.def(&c, "filter", |vm, s, _, b| filter(vm, s, b, true));
     vm.def(&c, "reject", |vm, s, _, b| filter(vm, s, b, false));
@@ -304,13 +397,34 @@ fn merge_into(vm: &mut Vm, h: HashRef, others: &[Value], b: Option<&Value>) -> R
     Ok(())
 }
 
+/// `select`/`reject`: a new Hash of the pairs the block keeps. The block
+/// gets each pair as one `[k, v]` (a `|k, v|` block splats it).
 fn filter(vm: &mut Vm, s: &Value, b: Option<&Value>, keep: bool) -> VmResult {
     let b = need_block(vm, b)?;
     let (hv, h) = new_hash(vm);
     for (k, v) in pairs(vm, s)? {
-        if vm.call_block(&b, vec![k, v])?.truthy() == keep {
+        let kv = pair(vm, &k, &v);
+        if vm.call_block(&b, vec![kv])?.truthy() == keep {
             vm.hash_set(h, k, v)?;
         }
     }
     Ok(hv)
+}
+
+/// `select!`/`keep_if` (`keep`) and `reject!`/`delete_if`: removes the
+/// pairs the block doesn't keep. The bang forms answer nil when nothing
+/// was removed, the others the hash.
+fn filter_in_place(vm: &mut Vm, s: &Value, b: Option<&Value>, keep: bool, bang: bool) -> VmResult {
+    let b = need_block(vm, b)?;
+    let h = this_hash(vm, s)?;
+    vm.check_frozen(s)?;
+    let mut removed = false;
+    for (k, v) in pairs(vm, s)? {
+        let kv = pair(vm, &k, &v);
+        if vm.call_block(&b, vec![kv])?.truthy() != keep {
+            vm.hash_delete(h, &k)?;
+            removed = true;
+        }
+    }
+    Ok(if bang && !removed { Value::NIL } else { *s })
 }

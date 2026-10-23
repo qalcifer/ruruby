@@ -158,6 +158,11 @@ impl RHash {
         }
     }
 
+    /// Position of the first live entry (`Hash#shift`).
+    pub fn first(&self) -> Option<usize> {
+        self.entries.iter().position(|e| !e.key.is_deleted())
+    }
+
     /// The key at `p`, if that entry is live.
     pub fn key_at(&self, p: usize) -> Option<Value> {
         self.entries.get(p).map(|e| e.key).filter(|k| !k.is_deleted())
