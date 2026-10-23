@@ -2032,17 +2032,22 @@ impl Vm {
     }
 
     fn dispatch(&mut self, mut f: Frame, base: usize) -> VmResult {
+        // the running frame's next instruction, kept out of `f` so it can
+        // stay in a register; `f.pc` is only up to date while code out of
+        // line runs (see [`Vm::step`])
+        let mut pc = f.pc;
         loop {
             if self.heap.gc.due() && self.reentry == self.gc_level {
                 self.collect_garbage(&f);
             }
-            let at = f.pc;
+            let at = pc;
             let op = f.irep.code[at];
-            f.pc += 1;
-            let mut result = match self.step(&mut f, op) {
+            pc += 1;
+            let mut result = match self.step(&mut f, &mut pc, op) {
                 Ok(Flow::Next) => continue,
                 Ok(Flow::Call(callee)) if self.frames.len() < MAX_FRAMES => {
                     self.enter_frame(&callee);
+                    pc = callee.pc;
                     let caller = std::mem::replace(&mut f, callee);
                     self.frames.push(caller);
                     continue;
@@ -2059,7 +2064,10 @@ impl Vm {
                 // clauses (codegen inlines them)
                 let own = matches!(op, Op::Break(_) | Op::ReturnBlk(_));
                 match self.catch(&mut f, e, at, own) {
-                    None => continue,
+                    None => {
+                        pc = f.pc;
+                        continue;
+                    }
                     Some(e) => result = Err(e),
                 }
             }
@@ -2071,6 +2079,7 @@ impl Vm {
                 }
                 let caller = self.frames.pop().unwrap();
                 let done = std::mem::replace(&mut f, caller);
+                pc = f.pc;
                 match result {
                     Ok(v) => {
                         self.set_reg(&f, done.ret, v);
@@ -2079,7 +2088,10 @@ impl Vm {
                     Err(e) => {
                         let at = f.pc - 1; // the call instruction
                         match self.catch(&mut f, e, at, false) {
-                            None => break,
+                            None => {
+                                pc = f.pc;
+                                break;
+                            }
                             Some(e) => result = Err(e),
                         }
                     }
@@ -2226,7 +2238,16 @@ impl Vm {
     /// paths) right here in the dispatch loop, everything else out of line,
     /// so the loop stays small enough to keep its state in registers.
     #[inline(always)]
-    fn step(&mut self, f: &mut Frame, op: Op) -> Result<Flow, Unwind> {
+    fn step(&mut self, f: &mut Frame, pc: &mut usize, op: Op) -> Result<Flow, Unwind> {
+        // code out of line sees the frame's pc in `f.pc` (and may jump)
+        macro_rules! out_of_line {
+            ($e:expr) => {{
+                f.pc = *pc;
+                let r = $e;
+                *pc = f.pc;
+                return r;
+            }};
+        }
         match op {
             Op::Move(a, b) => {
                 let v = self.reg(f, b);
@@ -2238,15 +2259,15 @@ impl Vm {
             Op::LoadSelf(a) => self.set_reg(f, a, f.self_),
             Op::LoadTrue(a) => self.set_reg(f, a, Value::TRUE),
             Op::LoadFalse(a) => self.set_reg(f, a, Value::FALSE),
-            Op::Jmp(t) => f.pc = t,
+            Op::Jmp(t) => *pc = t,
             Op::JmpIf(a, t) => {
                 if self.reg(f, a).truthy() {
-                    f.pc = t;
+                    *pc = t;
                 }
             }
             Op::JmpNot(a, t) => {
                 if !self.reg(f, a).truthy() {
-                    f.pc = t;
+                    *pc = t;
                 }
             }
             Op::Return(a) => return Ok(Flow::Return(self.reg(f, a))),
@@ -2261,17 +2282,17 @@ impl Vm {
                 self.env_set(env, idx, v);
             }
             Op::BlkPush(a, _) if f.block.is_some() => self.set_reg(f, a, f.block.unwrap()),
-            Op::Send(a, mid, argc, has_block) => return self.send_op(f, a, mid, argc, has_block),
+            Op::Send(a, mid, argc, has_block) => out_of_line!(self.send_op(f, a, mid, argc, has_block)),
             Op::SendSelf(a, mid, argc, has_block) => {
                 self.set_reg(f, a, f.self_);
-                return self.send_op(f, a, mid, argc, has_block);
+                out_of_line!(self.send_op(f, a, mid, argc, has_block))
             }
             Op::Yield(a, argc) => {
                 let Some(b) = f.block else {
-                    return Err(self.err(&self.c.local_jump_error, "no block given (yield)"));
+                    out_of_line!(Err(self.err(&self.c.local_jump_error, "no block given (yield)")))
                 };
                 let args = Args::Stack { at: f.base + a + 1, n: argc };
-                return self.call_flow(f, a, 0, |vm| vm.start_proc(&b, args, None, ProcCall::default()));
+                out_of_line!(self.call_flow(f, a, 0, |vm| vm.start_proc(&b, args, None, ProcCall::default())))
             }
             Op::AddI(a, i) | Op::SubI(a, i) => {
                 let add = matches!(op, Op::AddI(..));
@@ -2281,19 +2302,19 @@ impl Vm {
                 {
                     self.set_reg(f, a, v);
                 } else {
-                    return self.step_slow(f);
+                    out_of_line!(self.step_slow(f));
                 }
             }
             Op::JmpCmpI { cmp, jump_if, a, imm, target, cont } => {
                 if let Some(x) = self.reg(f, a as Reg).as_inline_int() {
-                    f.pc = if cmp.test(x, imm) == jump_if { target } else { cont } as usize;
+                    *pc = if cmp.test(x, imm) == jump_if { target } else { cont } as usize;
                 }
             }
             Op::JmpCmpR { cmp, jump_if, a, b, target, cont } => {
                 if let (Some(x), Some(y)) =
                     (self.reg(f, a as Reg).as_inline_int(), self.reg(f, b as Reg).as_inline_int())
                 {
-                    f.pc = if cmp.test(x, y) == jump_if { target } else { cont } as usize;
+                    *pc = if cmp.test(x, y) == jump_if { target } else { cont } as usize;
                 }
             }
             Op::AddIR(a, b, i) | Op::SubIR(a, b, i) => {
@@ -2304,23 +2325,23 @@ impl Vm {
                 {
                     self.set_reg(f, a, v);
                 } else {
-                    return self.step_slow(f);
+                    out_of_line!(self.step_slow(f));
                 }
             }
             Op::Add(a) | Op::Sub(a) | Op::Lt(a) | Op::Le(a) | Op::Gt(a) | Op::Ge(a) => {
                 // inline Integers only: the sum of two 48-bit ones can't
                 // overflow i64, but may need boxing (the slow path does that)
                 let (Some(x), Some(y)) = (self.reg(f, a).as_inline_int(), self.reg(f, a + 1).as_inline_int()) else {
-                    return self.step_slow(f);
+                    out_of_line!(self.step_slow(f));
                 };
                 let v = match op {
                     Op::Add(_) => match Value::inline_int(x + y) {
                         Some(v) => v,
-                        None => return self.step_slow(f),
+                        None => out_of_line!(self.step_slow(f)),
                     },
                     Op::Sub(_) => match Value::inline_int(x - y) {
                         Some(v) => v,
-                        None => return self.step_slow(f),
+                        None => out_of_line!(self.step_slow(f)),
                     },
                     Op::Lt(_) => Value::bool(x < y),
                     Op::Le(_) => Value::bool(x <= y),
@@ -2329,7 +2350,7 @@ impl Vm {
                 };
                 self.set_reg(f, a, v);
             }
-            _ => return self.step_slow(f),
+            _ => out_of_line!(self.step_slow(f)),
         }
         Ok(Flow::Next)
     }
