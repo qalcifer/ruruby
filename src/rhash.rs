@@ -144,12 +144,17 @@ impl RHash {
         })
     }
 
-    /// The positions a key with stored hash `h` may be at: every entry
-    /// while the hash is small, else the live ones with hash `h`.
+    /// The positions a key with stored hash `h` may be at: the live
+    /// entries with hash `h`, and while the hash is small also those whose
+    /// hash isn't computed (built-in keys; like mruby, a small hash asks
+    /// `eql?` of them).
     pub fn candidates(&self, h: u64) -> Vec<usize> {
-        match self.indexed() {
-            None => (0..self.entries.len()).collect(),
-            Some(big) => self.probe(big, h).collect(),
+        match (self.indexed(), &self.big) {
+            (Some(big), _) => self.probe(big, h).collect(),
+            (None, Some(big)) => (0..self.entries.len())
+                .filter(|&p| big.hashes[p] == 0 || big.hashes[p] == h)
+                .collect(),
+            (None, None) => (0..self.entries.len()).collect(),
         }
     }
 
@@ -273,17 +278,6 @@ impl RHash {
                 }
                 place(&mut big.slots, *h, p);
             }
-        }
-    }
-
-    /// `Hash#rehash` for built-in keys: hashes them again, after they were
-    /// mutated. Keys that became `eql?` keep the last value, at the
-    /// first's place.
-    pub fn rehash(&mut self, heap: &Heap) {
-        let pairs = self.to_vec();
-        self.clear();
-        for (k, v) in pairs {
-            self.set(heap, k, v);
         }
     }
 }

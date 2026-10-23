@@ -268,12 +268,12 @@ pub fn init(vm: &mut Vm) {
         let h = this_hash(vm, &hv)?;
         for x in to_vec(vm, s)? {
             let k = yield1(vm, &b, &x)?;
-            let found = vm.heap[h].borrow().get(&vm.heap, &k);
+            let found = vm.hash_get(h, &k)?;
             match found.map(|v| vm.kind(v)) {
                 Some(V::Array(v)) => vm.heap[v].borrow_mut().push(x),
                 _ => {
                     let group = vm.array(vec![x]);
-                    vm.hash_set(h, k, group);
+                    vm.hash_set(h, k, group)?;
                 }
             }
         }
@@ -283,12 +283,12 @@ pub fn init(vm: &mut Vm) {
         let hv = vm.hash(RHash::new());
         let h = this_hash(vm, &hv)?;
         for x in to_vec(vm, s)? {
-            let n = match vm.heap[h].borrow().get(&vm.heap, &x).map(|v| vm.kind(v)) {
+            let n = match vm.hash_get(h, &x)?.map(|v| vm.kind(v)) {
                 Some(V::Int(n)) => n + 1,
                 _ => 1,
             };
             let n = vm.int(n);
-            vm.hash_set(h, x, n);
+            vm.hash_set(h, x, n)?;
         }
         Ok(hv)
     });

@@ -118,3 +118,62 @@ fn deletes_leave_no_trace() {
          [10017, 10018, 10019, 0]\n[10017, 10019, 0]\n29\n"
     );
 }
+
+const POINT: &str = r#"
+    class Pt
+      attr_reader :x, :y
+      def initialize(x, y) = (@x = x; @y = y)
+      def eql?(o) = o.is_a?(Pt) && x == o.x && y == o.y
+      def hash = [x, y].hash
+    end
+"#;
+
+#[test]
+fn keys_with_their_own_hash_and_eql() {
+    let out = run(&(POINT.to_owned()
+        + r#"
+        small = {Pt.new(1, 2) => :a, "s" => 1}
+        small[Pt.new(1, 2)] = :b
+        p small[Pt.new(1, 2)], small.key?(Pt.new(2, 1)), small.size, small["s"]
+        big = {}
+        100.times { |i| big[Pt.new(i, -i)] = i }
+        p big[Pt.new(42, -42)], big.fetch(Pt.new(3, -3)), big[Pt.new(42, 42)]
+        p big.delete(Pt.new(7, -7)), big.key?(Pt.new(7, -7)), big.size
+        big[Pt.new(42, -42)] = :x
+        p big.size, big[Pt.new(42, -42)], big.values_at(Pt.new(0, 0), Pt.new(9, -9))
+        p [Pt.new(1, 1), Pt.new(1, 1), Pt.new(2, 2)].tally.values
+        k = Pt.new(5, 5)
+        m = {k => 1}
+        k.instance_variable_set(:@x, 6)
+        p m[Pt.new(6, 5)], m.rehash[Pt.new(6, 5)]
+    "#));
+    assert_eq!(
+        out,
+        ":b\nfalse\n2\n1\n42\n3\nnil\n7\nfalse\n99\n99\n:x\n[0, 9]\n[2, 1]\nnil\n1\n"
+    );
+}
+
+#[test]
+fn eql_callbacks_that_change_the_hash() {
+    // a lookup that ran Ruby code checks the hash didn't change under it
+    let out = run(r#"
+        class Evil
+          def initialize(h) = @h = h
+          def eql?(o) = (@h.delete("b"); false)
+          def hash = 0
+        end
+        h = {"a" => 1, "b" => 2, "c" => 3}
+        r = begin; h[Evil.new(h)]; rescue RuntimeError => e; e.message; end
+        p r, h.keys, h.keys.all? { |k| h.key?(k) }
+        class Bad; def hash = "x"; end
+        p((begin; {Bad.new => 1}; rescue TypeError => e; e.message; end))
+        class Same; def eql?(o) = raise("not called for the same object"); end
+        s = Same.new
+        p({s => 1}[s])
+    "#);
+    assert_eq!(
+        out,
+        "\"hash modified during lookup\"\n[\"a\", \"c\"]\ntrue\n\
+         \"hash must return an Integer, not String\"\n1\n"
+    );
+}

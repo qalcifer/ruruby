@@ -24,27 +24,30 @@ pub fn init(vm: &mut Vm) {
     vm.def(&c, "[]", |vm, s, a, _| {
         let h = this_hash(vm, s)?;
         let key = arg(a, 0);
-        let (found, default, default_proc) = {
+        if let Some(v) = vm.hash_get(h, &key)? {
+            return Ok(v);
+        }
+        let (default, default_proc) = {
             let h = vm.heap[h].borrow();
-            (h.get(&vm.heap, &key), h.default, h.default_proc)
+            (h.default, h.default_proc)
         };
-        match (found, default_proc) {
-            (Some(v), _) => Ok(v),
-            (None, Some(p)) => vm.call_block(&p, vec![*s, key]),
-            (None, None) => Ok(default),
+        match default_proc {
+            Some(p) => vm.call_block(&p, vec![*s, key]),
+            None => Ok(default),
         }
     });
     let store: NativeFn = |vm, s, a, _| {
         check_argc(vm, a, 2, 2)?;
         let h = this_hash(vm, s)?;
-        vm.hash_set(h, a[0], a[1]);
+        vm.hash_set(h, a[0], a[1])?;
         Ok(a[1])
     };
     vm.def(&c, "[]=", store);
     vm.def(&c, "store", store);
     vm.def(&c, "fetch", |vm, s, a, b| {
         let key = arg(a, 0);
-        if let Some(v) = vm.heap[this_hash(vm, s)?].borrow().get(&vm.heap, &key) {
+        let h = this_hash(vm, s)?;
+        if let Some(v) = vm.hash_get(h, &key)? {
             return Ok(v);
         }
         if let Some(b) = b {
@@ -67,9 +70,8 @@ pub fn init(vm: &mut Vm) {
         Ok(cur)
     });
     let has_key: NativeFn = |vm, s, a, _| {
-        Ok(Value::bool(
-            vm.heap[this_hash(vm, s)?].borrow().get(&vm.heap, &arg(a, 0)).is_some(),
-        ))
+        let h = this_hash(vm, s)?;
+        Ok(Value::bool(vm.hash_find(h, &arg(a, 0))?.is_some()))
     };
     for name in ["key?", "has_key?", "include?", "member?"] {
         vm.def(&c, name, has_key);
@@ -147,9 +149,8 @@ pub fn init(vm: &mut Vm) {
         Ok(*s)
     });
     vm.def(&c, "delete", |vm, s, a, _| {
-        Ok(vm.heap[this_hash(vm, s)?].borrow_mut()
-            .remove(&vm.heap, &arg(a, 0))
-            .unwrap_or(Value::NIL))
+        let h = this_hash(vm, s)?;
+        Ok(vm.hash_delete(h, &arg(a, 0))?.unwrap_or(Value::NIL))
     });
     vm.def(&c, "clear", |vm, s, _, _| {
         vm.heap[this_hash(vm, s)?].borrow_mut().clear();
@@ -157,7 +158,7 @@ pub fn init(vm: &mut Vm) {
     });
     vm.def(&c, "rehash", |vm, s, _, _| {
         let h = this_hash(vm, s)?;
-        vm.heap[h].borrow_mut().rehash(&vm.heap);
+        vm.hash_rehash(h)?;
         Ok(*s)
     });
     vm.def(&c, "merge", |vm, s, a, b| {
@@ -180,7 +181,7 @@ pub fn init(vm: &mut Vm) {
         let (hv, h) = new_hash(vm);
         for (k, v) in pairs(vm, s)? {
             let v = vm.call_block(&b, vec![v])?;
-            vm.hash_set(h, k, v);
+            vm.hash_set(h, k, v)?;
         }
         Ok(hv)
     });
@@ -189,25 +190,24 @@ pub fn init(vm: &mut Vm) {
         let (hv, h) = new_hash(vm);
         for (k, v) in pairs(vm, s)? {
             let k = vm.call_block(&b, vec![k])?;
-            vm.hash_set(h, k, v);
+            vm.hash_set(h, k, v)?;
         }
         Ok(hv)
     });
     vm.def(&c, "invert", |vm, s, _, _| {
         let (hv, h) = new_hash(vm);
         for (k, v) in pairs(vm, s)? {
-            vm.hash_set(h, v, k);
+            vm.hash_set(h, v, k)?;
         }
         Ok(hv)
     });
     vm.def(&c, "values_at", |vm, s, a, _| {
         let h = this_hash(vm, s)?;
-        let values: Vec<Value> = {
-            let h = vm.heap[h].borrow();
-            a.iter()
-                .map(|k| h.get(&vm.heap, k).unwrap_or_else(|| h.default))
-                .collect()
-        };
+        let default = vm.heap[h].borrow().default;
+        let mut values = Vec::new();
+        for k in a {
+            values.push(vm.hash_get(h, k)?.unwrap_or(default));
+        }
         Ok(vm.array(values))
     });
     vm.def(&c, "sort", |vm, s, _, b| {
@@ -231,7 +231,7 @@ pub fn init(vm: &mut Vm) {
                 let p = vm.heap[p].borrow();
                 (p.first().cloned().unwrap_or(Value::NIL), p.get(1).cloned().unwrap_or(Value::NIL))
             };
-            vm.hash_set(h, k, v);
+            vm.hash_set(h, k, v)?;
         }
         Ok(hv)
     });
@@ -240,12 +240,12 @@ pub fn init(vm: &mut Vm) {
 fn merge_into(vm: &mut Vm, h: HashRef, others: &[Value], b: Option<&Value>) -> Result<(), Unwind> {
     for o in others {
         for (k, v) in pairs(vm, o)? {
-            let old = vm.heap[h].borrow().get(&vm.heap, &k);
+            let old = vm.hash_get(h, &k)?;
             let v = match (b, old) {
                 (Some(b), Some(old)) => vm.call_block(b, vec![k, old, v])?,
                 _ => v,
             };
-            vm.hash_set(h, k, v);
+            vm.hash_set(h, k, v)?;
         }
     }
     Ok(())
@@ -256,7 +256,7 @@ fn filter(vm: &mut Vm, s: &Value, b: Option<&Value>, keep: bool) -> VmResult {
     let (hv, h) = new_hash(vm);
     for (k, v) in pairs(vm, s)? {
         if vm.call_block(&b, vec![k, v])?.truthy() == keep {
-            vm.hash_set(h, k, v);
+            vm.hash_set(h, k, v)?;
         }
     }
     Ok(hv)

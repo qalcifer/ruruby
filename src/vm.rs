@@ -14,6 +14,7 @@
 //!   propagated with `?`, and each frame consults its irep's catch table.
 
 use crate::gc::{ArrayRef, ClassRef, EnvRef, HashRef, Heap, Marker};
+use crate::rhash::stored_hash;
 use crate::opcode::{ArgSpec, CallCache, DefinedKind, Irep, Literal, Op, Reg};
 use crate::symbol::{Sym, SymMap, SymbolTable};
 use crate::value::*;
@@ -176,6 +177,8 @@ pub struct CommonSyms {
     pub to_a: Sym,
     pub to_ary: Sym,
     pub to_proc: Sym,
+    pub hash: Sym,
+    pub eql: Sym,
 }
 
 pub struct Vm {
@@ -465,6 +468,8 @@ impl Vm {
             method_missing: syms.intern("method_missing"),
             to_a: syms.intern("to_a"),
             to_ary: syms.intern("to_ary"),
+            hash: syms.intern("hash"),
+            eql: syms.intern("eql?"),
             to_proc: syms.intern("to_proc"),
         };
         let main_obj = Value::from(heap.alloc(RObject::new(c.object)));
@@ -527,7 +532,10 @@ impl Vm {
     }
 
     /// `h[k] = v`. A new String key is copied, as Ruby dups (and freezes) them.
-    pub fn hash_set(&mut self, h: HashRef, k: Value, v: Value) {
+    pub fn hash_set(&mut self, h: HashRef, k: Value, v: Value) -> Result<(), Unwind> {
+        if self.custom_key(&k) {
+            return self.hash_set_custom(h, k, v);
+        }
         let k = match self.kind(k) {
             V::Str(s) if !self.heap[h].borrow().contains(&self.heap, &k) => {
                 let copy = self.heap[s].borrow().clone();
@@ -536,6 +544,100 @@ impl Vm {
             _ => k,
         };
         self.heap[h].borrow_mut().set(&self.heap, k, v);
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn hash_set_custom(&mut self, h: HashRef, k: Value, v: Value) -> Result<(), Unwind> {
+        match self.hash_find_custom(h, &k)? {
+            (Some(p), _) => self.heap[h].borrow_mut().set_value_at(p, v),
+            (None, code) => self.heap[h].borrow_mut().push(&self.heap, k, v, code),
+        }
+        Ok(())
+    }
+
+    /// `h[k]` without the default.
+    #[inline]
+    pub fn hash_get(&mut self, h: HashRef, k: &Value) -> Result<Option<Value>, Unwind> {
+        if !self.custom_key(k) {
+            return Ok(self.heap[h].borrow().get(&self.heap, k));
+        }
+        Ok(self.hash_find_custom(h, k)?.0.map(|p| self.heap[h].borrow().value_at(p)))
+    }
+
+    pub fn hash_delete(&mut self, h: HashRef, k: &Value) -> Result<Option<Value>, Unwind> {
+        Ok(self.hash_find(h, k)?.map(|p| self.heap[h].borrow_mut().remove_at(&self.heap, p)))
+    }
+
+    /// Position of `k` in `h`, through the key's own `hash` and `eql?`
+    /// when its class defines them.
+    #[inline]
+    pub fn hash_find(&mut self, h: HashRef, k: &Value) -> Result<Option<usize>, Unwind> {
+        if self.custom_key(k) {
+            Ok(self.hash_find_custom(h, k)?.0)
+        } else {
+            Ok(self.heap[h].borrow().find(&self.heap, k))
+        }
+    }
+
+    /// Ruby's `Hash#rehash`: hashes every key again (after keys mutated).
+    pub fn hash_rehash(&mut self, h: HashRef) -> Result<(), Unwind> {
+        let pairs = self.heap[h].borrow().to_vec();
+        self.heap[h].borrow_mut().clear();
+        for (k, v) in pairs {
+            self.hash_set(h, k, v)?;
+        }
+        Ok(())
+    }
+
+    /// An object whose class defines its own `hash` or `eql?`: as a Hash
+    /// key it is hashed and compared by calling them.
+    #[inline]
+    fn custom_key(&self, k: &Value) -> bool {
+        k.is_object() && self.custom_object_key(k)
+    }
+
+    #[inline(never)]
+    fn custom_object_key(&self, k: &Value) -> bool {
+        let cls = self.dispatch_class(k);
+        [self.s.hash, self.s.eql].into_iter().any(|m| match self.find_method(&cls, m) {
+            Some((Method::Native(_), owner)) => owner != self.c.kernel,
+            Some(_) => true,
+            None => false,
+        })
+    }
+
+    /// Looks up a custom key: its position, and the stored hash it has
+    /// (to add it with). Ruby code runs between the steps, so the hash may
+    /// change under the lookup; that raises rather than reading entries
+    /// that moved.
+    fn hash_find_custom(&mut self, h: HashRef, k: &Value) -> Result<(Option<usize>, u64), Unwind> {
+        let hv = self.call_method(k, self.s.hash, vec![], None)?;
+        if !matches!(self.kind(hv), V::Int(_)) {
+            let c = self.class_name(&hv);
+            return Err(self.type_err(format!("hash must return an Integer, not {c}")));
+        }
+        let code = stored_hash(hash_key(&self.heap, &hv));
+        let (candidates, version) = {
+            let r = self.heap[h].borrow();
+            (r.candidates(code), r.version())
+        };
+        for p in candidates {
+            let Some(stored) = self.heap[h].borrow().key_at(p) else {
+                continue;
+            };
+            if self.heap.identical(k, &stored) {
+                return Ok((Some(p), code));
+            }
+            let eq = self.call_method(k, self.s.eql, vec![stored], None)?.truthy();
+            if self.heap[h].borrow().version() != version {
+                return Err(self.err(&self.c.runtime_error, "hash modified during lookup"));
+            }
+            if eq {
+                return Ok((Some(p), code));
+            }
+        }
+        Ok((None, code))
     }
 
     /// Contents of a String value.
@@ -2176,14 +2278,14 @@ impl Vm {
                 };
                 for i in 0..n {
                     let (k, v) = (self.reg(f, b + 2 * i), self.reg(f, b + 2 * i + 1));
-                    self.hash_set(h, k, v);
+                    self.hash_set(h, k, v)?;
                 }
                 self.set_reg(f, a, Value::from(h));
             }
             Op::HashAdd(a, b) => {
                 if let V::Hash(h) = self.kind(self.reg(f, a)) {
                     let (k, v) = (self.reg(f, b), self.reg(f, b + 1));
-                    self.hash_set(h, k, v);
+                    self.hash_set(h, k, v)?;
                 }
             }
             Op::HashCat(a, b) => {
@@ -2199,7 +2301,7 @@ impl Vm {
                 };
                 if let V::Hash(h) = self.kind(self.reg(f, a)) {
                     for (k, v) in pairs {
-                        self.hash_set(h, k, v);
+                        self.hash_set(h, k, v)?;
                     }
                 }
             }

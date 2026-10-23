@@ -435,6 +435,12 @@ impl Value {
         matches!(self.0 >> 48, TAG_SPECIAL | TAG_INT | TAG_SYM)
     }
 
+    /// A user object (`V::Object`), by its bits.
+    #[inline]
+    pub fn is_object(self) -> bool {
+        self.0 >> 45 == (TAG_HEAP << 3 | ty::OBJECT)
+    }
+
     #[inline]
     pub fn truthy(&self) -> bool {
         self.0 != Value::NIL.0 && self.0 != Value::FALSE.0
