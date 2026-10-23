@@ -15,7 +15,7 @@
 //! the VM's own state (frames, globals, classes), and native code never
 //! needs to protect the values it holds (mruby's "GC arena").
 
-use crate::value::{Env, EnvRegs, Method, ProcBody, RClass, RHash, RObject, RProc, V, Value};
+use crate::value::{Env, EnvRegs, IvTable, Method, ProcBody, RClass, RHash, RObject, RProc, V, Value};
 use std::cell::RefCell;
 use std::fmt;
 use std::marker::PhantomData;
@@ -106,6 +106,18 @@ struct Slot<T> {
 pub struct Arena<T> {
     slots: Vec<Slot<T>>,
     free: Vec<u32>,
+    /// Per slot, what a String/Array/Hash carries besides its contents;
+    /// empty until some value of the arena has one.
+    extra: Vec<Option<Box<Extra>>>,
+}
+
+/// A class other than the built-in one (an instance of a subclass of
+/// Array, Hash or String) and instance variables, for the values of the
+/// built-in types that have them (step 5).
+#[derive(Default)]
+pub struct Extra {
+    pub class: Option<ClassRef>,
+    pub ivars: IvTable,
 }
 
 impl<T> Default for Arena<T> {
@@ -113,6 +125,7 @@ impl<T> Default for Arena<T> {
         Arena {
             slots: Vec::new(),
             free: Vec::new(),
+            extra: Vec::new(),
         }
     }
 }
@@ -145,6 +158,26 @@ impl<T> Arena<T> {
         }
     }
 
+    /// What the value at `h` carries besides its contents, if anything.
+    #[inline]
+    pub fn extra(&self, h: Gc<T>) -> Option<&Extra> {
+        if self.extra.is_empty() {
+            return None;
+        }
+        self.get(h);
+        self.extra.get(h.idx as usize)?.as_deref()
+    }
+
+    /// The extra of the value at `h`, made on first use.
+    pub fn extra_mut(&mut self, h: Gc<T>) -> &mut Extra {
+        self.get(h);
+        let i = h.idx as usize;
+        if self.extra.len() <= i {
+            self.extra.resize_with(self.slots.len().max(i + 1), || None);
+        }
+        self.extra[i].get_or_insert_with(Box::default)
+    }
+
     /// Number of live objects.
     pub fn len(&self) -> usize {
         self.slots.len() - self.free.len()
@@ -157,6 +190,9 @@ impl<T> Arena<T> {
             if slot.val.is_some() && !marks.get(i).copied().unwrap_or(false) {
                 slot.val = None;
                 slot.generation = (slot.generation + 1) & GEN_MASK;
+                if let Some(x) = self.extra.get_mut(i) {
+                    *x = None;
+                }
                 self.free.push(i as u32);
                 freed += 1;
             }
@@ -309,6 +345,29 @@ impl Heap {
     }
 }
 
+impl Heap {
+    /// The extra of a String, Array or Hash value (see [`Extra`]).
+    pub fn extra_of(&self, v: &Value) -> Option<&Extra> {
+        match self.kind(*v) {
+            V::Str(h) => self.strings.extra(h),
+            V::Array(h) => self.arrays.extra(h),
+            V::Hash(h) => self.hashes.extra(h),
+            _ => None,
+        }
+    }
+
+    /// The extra of a String, Array or Hash value, made on first use;
+    /// None for other values.
+    pub fn extra_of_mut(&mut self, v: &Value) -> Option<&mut Extra> {
+        match self.kind(*v) {
+            V::Str(h) => Some(self.strings.extra_mut(h)),
+            V::Array(h) => Some(self.arrays.extra_mut(h)),
+            V::Hash(h) => Some(self.hashes.extra_mut(h)),
+            _ => None,
+        }
+    }
+}
+
 impl<T: HeapObj> Index<Gc<T>> for Heap {
     type Output = T;
 
@@ -379,6 +438,17 @@ impl<'h> Marker<'h> {
         self.marks
     }
 
+    fn extra(&mut self, x: Option<&Extra>) {
+        if let Some(x) = x {
+            if let Some(c) = x.class {
+                self.class(c);
+            }
+            for (_, v) in &x.ivars.items {
+                self.value(v);
+            }
+        }
+    }
+
     /// Marks `h`; true the first time.
     fn visit<T: HeapObj>(&mut self, h: Gc<T>) -> bool {
         let bit = &mut T::marks(&mut self.marks)[h.idx as usize];
@@ -390,10 +460,13 @@ impl<'h> Marker<'h> {
         match g {
             Gray::Val(v) => match heap.kind(v) {
                 V::Str(h) => {
-                    self.visit(h);
+                    if self.visit(h) {
+                        self.extra(heap.strings.extra(h));
+                    }
                 }
                 V::Array(h) => {
                     if self.visit(h) {
+                        self.extra(heap.arrays.extra(h));
                         for x in heap[h].borrow().iter() {
                             self.value(x);
                         }
@@ -401,6 +474,7 @@ impl<'h> Marker<'h> {
                 }
                 V::Hash(h) => {
                     if self.visit(h) {
+                        self.extra(heap.hashes.extra(h));
                         let h = heap[h].borrow();
                         for (k, v) in h.iter() {
                             self.value(&k);

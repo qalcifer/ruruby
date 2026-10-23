@@ -899,9 +899,9 @@ impl Vm {
             V::Int(_) => c.integer,
             V::Float(_) => c.float,
             V::Sym(_) => c.symbol,
-            V::Str(_) => c.string,
-            V::Array(_) => c.array,
-            V::Hash(_) => c.hash,
+            V::Str(h) => self.heap.strings.extra(h).and_then(|x| x.class).unwrap_or(c.string),
+            V::Array(h) => self.heap.arrays.extra(h).and_then(|x| x.class).unwrap_or(c.array),
+            V::Hash(h) => self.heap.hashes.extra(h).and_then(|x| x.class).unwrap_or(c.hash),
             V::Range(_) => c.range,
             V::Proc(_) => c.proc_,
             V::Class(k) => {
@@ -1716,14 +1716,38 @@ impl Vm {
         match self.kind(*obj) {
             V::Object(o) => self.heap[o].ivars.borrow().get(iv),
             V::Class(c) => self.heap[c].ivars.borrow().get(iv),
-            _ => None,
+            _ => self.heap.extra_of(obj)?.ivars.get(iv),
         }
     }
 
-    pub fn ivar_set(&self, obj: &Value, iv: Sym, v: Value) -> Result<(), Unwind> {
+    /// The names of `obj`'s instance variables, in order.
+    pub fn ivar_names(&self, obj: &Value) -> Vec<Sym> {
+        let names = |t: &IvTable| t.items.iter().map(|(k, _)| *k).collect();
+        match self.kind(*obj) {
+            V::Object(o) => names(&self.heap[o].ivars.borrow()),
+            V::Class(c) => names(&self.heap[c].ivars.borrow()),
+            _ => self.heap.extra_of(obj).map(|x| names(&x.ivars)).unwrap_or_default(),
+        }
+    }
+
+    /// Removes an instance variable; its value if it was set.
+    pub fn ivar_remove(&mut self, obj: &Value, iv: Sym) -> Option<Value> {
+        let remove = |t: &mut IvTable| {
+            let i = t.items.iter().position(|(k, _)| *k == iv)?;
+            Some(t.items.remove(i).1)
+        };
+        match self.kind(*obj) {
+            V::Object(o) => remove(&mut self.heap[o].ivars.borrow_mut()),
+            V::Class(c) => remove(&mut self.heap[c].ivars.borrow_mut()),
+            _ => remove(&mut self.heap.extra_of_mut(obj)?.ivars),
+        }
+    }
+
+    pub fn ivar_set(&mut self, obj: &Value, iv: Sym, v: Value) -> Result<(), Unwind> {
         match self.kind(*obj) {
             V::Object(o) => self.heap[o].ivars.borrow_mut().set(iv, v),
             V::Class(c) => self.heap[c].ivars.borrow_mut().set(iv, v),
+            _ if let Some(x) = self.heap.extra_of_mut(obj) => x.ivars.set(iv, v),
             _ => {
                 return Err(self.err(
                     &self.c.runtime_error,

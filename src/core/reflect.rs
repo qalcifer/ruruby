@@ -109,14 +109,8 @@ fn init_kernel(vm: &mut Vm) {
     });
     vm.def(&k, "remove_instance_variable", |vm, s, a, _| {
         let iv = sym_of(vm, &arg(a, 0))?;
-        let table = match vm.kind(*s) {
-            V::Object(o) => &vm.heap[o].ivars,
-            V::Class(c) => &vm.heap[c].ivars,
-            _ => return Err(vm.name_err("instance variable not defined")),
-        };
-        let mut t = table.borrow_mut();
-        match t.items.iter().position(|(k, _)| *k == iv) {
-            Some(i) => Ok(t.items.remove(i).1),
+        match vm.ivar_remove(s, iv) {
+            Some(v) => Ok(v),
             None => Err(vm.name_err(format!("instance variable {} not defined", vm.sym_name(iv)))),
         }
     });

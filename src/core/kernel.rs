@@ -166,16 +166,7 @@ fn init_object(vm: &mut Vm) {
         Ok(arg(a, 1))
     });
     vm.def(&o, "instance_variables", |vm, s, _, _| {
-        let names = match vm.kind(*s) {
-            V::Object(o) => vm.heap[o]
-                .ivars
-                .borrow()
-                .items
-                .iter()
-                .map(|(k, _)| Value::sym(*k))
-                .collect(),
-            _ => vec![],
-        };
+        let names = vm.ivar_names(s).into_iter().map(Value::sym).collect();
         Ok(vm.array(names))
     });
 }
