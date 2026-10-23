@@ -1,46 +1,46 @@
 file                   asserts     OK    KO  Crash  Syntax  Skip  Warn TopErr   pass%  status
-argumenterror.rb             9      1     8      0       0     0     0      0   11.1%  
-array.rb                    64     41    11     12       0     0     0      0   64.1%  
+argumenterror.rb             9      3     6      0       0     0     0      0   33.3%  
+array.rb                    64     56     3      5       0     0     0      0   87.5%  
 basicobject.rb               5      2     2      1       0     0     0      0   40.0%  
 bs_block.rb                 46     46     0      0       0     0     0      0  100.0%  
 bs_literal.rb                9      9     0      0       0     0     0      0  100.0%  
-class.rb                    49     41     7      1       0     0     0      0   83.7%  
+class.rb                    49     43     6      0       0     0     0      0   87.8%  
 codegen.rb                  22     20     0      1       1     0     0      0   90.9%  
 comparable.rb                7      7     0      0       0     0     0      0  100.0%  
 ensure.rb                    6      6     0      0       0     0     0      0  100.0%  
-enumerable.rb               23     19     2      2       0     0     0      0   82.6%  
+enumerable.rb               23     21     2      0       0     0     0      0   91.3%  
 env.rb                       8      0     0      8       0     0     0      0    0.0%  
-exception.rb                39     31     2      6       0     0     0      0   79.5%  
+exception.rb                39     32     2      5       0     0     0      0   82.1%  
 false.rb                     6      6     0      0       0     0     0      0  100.0%  
-float.rb                    31     22     8      1       0     0     0      0   71.0%  
+float.rb                    31     23     8      0       0     0     0      0   74.2%  
 gc.rb                       27      2     0     25       0     0     0      0    7.4%  
-hash.rb                     48      6     4     38       0     0     0      1   12.5%  
+hash.rb                     49     29    10     10       0     0     0      0   59.2%  
 indexerror.rb                1      1     0      0       0     0     0      0  100.0%  
-integer.rb                  45     31    10      4       0     0     0      0   68.9%  
+integer.rb                  45     33    11      1       0     0     0      0   73.3%  
 iterations.rb                4      4     0      0       0     0     0      0  100.0%  
-kernel.rb                   43     22    12      9       0     0     0      0   51.2%  
+kernel.rb                   43     33     4      6       0     0     0      0   76.7%  
 lang.rb                      2      2     0      0       0     0     0      0  100.0%  
 literals.rb                 12      9     1      0       1     1     0      6   75.0%  
 localjumperror.rb            1      1     0      0       0     0     0      0  100.0%  
 methods.rb                  12      6     2      4       0     0     0      0   50.0%  
-module.rb                   65     29    29      7       0     0     0      0   44.6%  
-nameerror.rb                 3      1     0      2       0     0     0      0   33.3%  
+module.rb                   65     41    19      5       0     0     0      0   63.1%  
+nameerror.rb                 3      3     0      0       0     0     0      0  100.0%  
 nil.rb                       9      5     0      4       0     0     0      0   55.6%  
-nomethoderror.rb             2      1     0      1       0     0     0      0   50.0%  
+nomethoderror.rb             2      2     0      0       0     0     0      0  100.0%  
 numeric.rb                  11      9     1      1       0     0     0      0   81.8%  
 object.rb                    2      2     0      0       0     0     0      0  100.0%  
 platform.rb                  2      0     0      2       0     0     0      0    0.0%  
-proc.rb                     15     13     1      1       0     0     0      0   86.7%  
-range.rb                    22     12     4      6       0     0     0      0   54.5%  
+proc.rb                     15     13     2      0       0     0     0      0   86.7%  
+range.rb                    22     15     5      2       0     0     0      0   68.2%  
 rangeerror.rb                1      1     0      0       0     0     0      0  100.0%  
 refinement.rb               42      0     0      0       0     1     0      0    0.0%  
 regexperror.rb               0      0     0      0       0     0     0      0    0.0%  
 runtimeerror.rb              1      1     0      0       0     0     0      0  100.0%  
 standarderror.rb             1      1     0      0       0     0     0      0  100.0%  
-string.rb                  104     38    24     41       0     0     0      0   36.5%  
+string.rb                  104     76    24      3       0     0     0      0   73.1%  
 superclass.rb               28     27     0      0       0     1     0      0   96.4%  
 symbol.rb                   10      8     1      1       0     0     0      0   80.0%  
-syntax.rb                  120    102    15      3       0     0     0      1   85.0%  
+syntax.rb                  120    104    13      3       0     0     0      1   86.7%  
 sysfail.rb                   1      0     0      1       0     0     0      0    0.0%  
 true.rb                      6      6     0      0       0     0     0      0  100.0%  
 typeerror.rb                 1      1     0      0       0     0     0      0  100.0%  
@@ -48,35 +48,4 @@ unicode.rb                   3      3     0      0       0     0     0      0  1
 version.rb                   1      0     0      1       0     0     0      0    0.0%  
 vformat.rb                   1      0     0      1       0     0     0      0    0.0%  
 ----------------------------------------------------------------------------------------------------
-TOTAL                      970    595   144    184       2     3     0      8   61.3%
-
-Most common syntax errors (asserts affected):
-      2  a heredoc can't start inside string interpolation
-      0  unexpected token (found RBracket)
-
-Most common exceptions inside asserts:
-     32  ArgumentError: wrong number of arguments (given 7, expected 1)
-     17  NoMethodError: undefined method 'stress' for main:Object
-      5  NameError: uninitialized constant TestNotImplement
-      5  NoMethodError: undefined method '[]=' for an instance of String
-      4  NoMethodError: undefined method 'malloc_threshold' for module GC
-      4  NoMethodError: undefined method 'rindex' for an instance of String
-      3  NoMethodError: undefined method 'downcase!' for an instance of String
-      3  NoMethodError: undefined method 'message' for nil
-      3  NoMethodError: undefined method 'name' for an instance of NameError
-      3  NoMethodError: undefined method 'new' for class Range
-      3  NoMethodError: undefined method 'rindex' for an instance of Array
-      2  ArgumentError: comparison failed
-      2  NameError: uninitialized constant MRUBY_PLATFORM
-      2  NoMethodError: undefined method '__env_svar?' for main:Object
-      2  NoMethodError: undefined method 'byteslice' for an instance of String
-
-Most common top-level errors:
-      1  undefined method 'foo' for main:Object (NoMethodError)
-      1  undefined method 'has_value?' for an instance of Hash (NoMethodError)
-      1  undefined method 'mm2' for main:Object (NoMethodError)
-      1  undefined method 'nn1' for main:Object (NoMethodError)
-      1  undefined method 'qq' for main:Object (NoMethodError)
-      1  uninitialized constant TestNotImplement (NameError)
-      1  uninitialized constant XXX2 (NameError)
-      1  uninitialized constant XXX3 (NameError)
+TOTAL                      971    712   122     90       2     3     0      7   73.3%
