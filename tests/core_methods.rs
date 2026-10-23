@@ -108,3 +108,23 @@ fn array_methods() {
          2\n1\n[1, 2]\n[:a]\n[2, 4, 6]\n[10, 20]\n[7, 8]\n:range\n"
     );
 }
+
+#[test]
+fn errors_ranges_and_numbers() {
+    let out = run(r##"
+        e = NameError.new("a", :foo)
+        p e.message, e.name
+        begin; class X; alias foo bar; end; rescue NameError => e; p e.name; end
+        begin; NoSuchConst; rescue NameError => e; p e.name; end
+        begin; nosuch(3, 1, 4); rescue NoMethodError => e; p e.name, e.args, e.instance_variables; end
+        p NoMethodError.new("t", :t, [1, 2]).args
+        p Range.new(1, 10, true), Range.new(1, nil), Range.new(1, 3) == (1..3)
+        p (begin; Range.new(1, "a"); rescue ArgumentError => e; e.message; end)
+        p ~0, ~2, 7.quo(2), 5.75.quo(-2), nil.__id__ == nil.object_id
+    "##);
+    assert_eq!(
+        out,
+        "\"a\"\n:foo\n:bar\n:NoSuchConst\n:nosuch\n[3, 1, 4]\n[:@message]\n[1, 2]\n1...10\n1..\ntrue\n\
+         \"bad value for range\"\n-1\n-3\n3.5\n-2.875\ntrue\n"
+    );
+}

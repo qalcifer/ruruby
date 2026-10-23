@@ -185,6 +185,10 @@ pub fn init(vm: &mut Vm) {
         }
         Ok(vm.array(v))
     });
+    vm.def(&i, "~", |vm, s, _, _| {
+        let n = int_of(vm, s)?;
+        Ok(vm.int(!n))
+    });
     vm.def(&i, "&", |vm, s, a, _| {
         Ok(vm.int(int_of(vm, s)? & int_of(vm, &arg(a, 0))?))
     });
@@ -205,6 +209,11 @@ pub fn init(vm: &mut Vm) {
         ))
     });
 
+    // quo: division as Floats (no Rational yet)
+    vm.def(&n, "quo", |vm, s, a, _| {
+        let (x, y) = (float_of(vm, s)?, float_of(vm, &arg(a, 0))?);
+        Ok(Value::float(x / y))
+    });
     let f = vm.c.float;
     vm.def(&f, "nan?", |vm, s, _, _| {
         Ok(Value::bool(float_of(vm, s)?.is_nan()))

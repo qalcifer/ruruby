@@ -44,6 +44,16 @@ fn this(vm: &Vm, s: &Value) -> Result<(Value, Value, bool), Unwind> {
 pub fn init(vm: &mut Vm) {
     let c = vm.c.range;
     vm.heap[c].includes.push(vm.c.enumerable);
+    // Range.new(first, last, exclude_end = false): ends that compare
+    vm.def_singleton(&c, "new", |vm, _, a, _| {
+        check_argc(vm, a, 2, 3)?;
+        let (lo, hi) = (a[0], a[1]);
+        if !lo.is_nil() && !hi.is_nil() && vm.send(&lo, "<=>", vec![hi])?.is_nil() {
+            return Err(vm.arg_err("bad value for range"));
+        }
+        let excl = a.get(2).is_some_and(|x| x.truthy());
+        Ok(vm.range(lo, hi, excl))
+    });
     vm.def(&c, "first", |vm, s, a, _| {
         let r = this(vm, s)?;
         if a.is_empty() {

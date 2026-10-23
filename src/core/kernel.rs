@@ -125,6 +125,10 @@ fn init_object(vm: &mut Vm) {
     });
     vm.def(&o, "send", send);
     vm.def(&o, "__send__", send);
+    vm.def(&o, "__id__", |vm, s, a, _| {
+        check_argc(vm, a, 0, 0)?;
+        vm.send(s, "object_id", vec![])
+    });
     vm.def(&o, "object_id", |vm, s, _, _| {
         let id = match vm.kind(*s) {
             V::Nil => 8,
@@ -470,6 +474,39 @@ fn init_exception(vm: &mut Vm) {
         };
         vm.ivar_set(s, vm.s.message, msg)?;
         Ok(Value::NIL)
+    });
+    // NameError.new(msg = nil, name = nil), NoMethodError.new(msg, name, args = [])
+    let ne = vm.c.name_error;
+    vm.def(&ne, "initialize", |vm, s, a, _| {
+        let msg = match vm.kind(arg(a, 0)) {
+            V::Nil => vm.str(vm.class_name(s)),
+            _ => arg(a, 0),
+        };
+        vm.ivar_set(s, vm.s.message, msg)?;
+        vm.ivar_set(s, vm.s.e_name, arg(a, 1))?;
+        if a.len() > 2 {
+            vm.ivar_set(s, vm.s.e_args, a[2])?;
+        }
+        Ok(*s)
+    });
+    // the name given, or the one the VM's message names
+    vm.def(&ne, "name", |vm, s, _, _| {
+        if let Some(n) = vm.ivar_lookup(s, vm.s.e_name) {
+            return Ok(n);
+        }
+        let m = vm.ivar_get(s, vm.s.message);
+        let msg = vm.to_s(&m)?;
+        let quoted = msg.split('\'').nth(1).filter(|_| msg.matches('\'').count() >= 2);
+        let name = quoted.or_else(|| msg.strip_prefix("uninitialized constant ").map(|c| c.rsplit("::").next().unwrap_or(c)));
+        Ok(match name {
+            Some(n) => Value::sym(vm.intern(n)),
+            None => Value::NIL,
+        })
+    });
+    let nme = vm.c.no_method_error;
+    vm.def(&nme, "args", |vm, s, _, _| match vm.ivar_lookup(s, vm.s.e_args) {
+        Some(a) => Ok(a),
+        None => Ok(vm.array(vec![])),
     });
     let message: NativeFn = |vm, s, _, _| {
         let m = vm.ivar_get(s, vm.s.message);

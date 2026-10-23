@@ -189,6 +189,9 @@ pub struct CommonSyms {
     pub m_recv: Sym,
     pub m_owner: Sym,
     pub m_name: Sym,
+    /// Hidden ivars of NameError/NoMethodError: the name and the call's arguments.
+    pub e_name: Sym,
+    pub e_args: Sym,
 }
 
 pub struct Vm {
@@ -502,6 +505,8 @@ impl Vm {
             m_recv: syms.intern("__recv"),
             m_owner: syms.intern("__owner"),
             m_name: syms.intern("__name"),
+            e_name: syms.intern("__err_name"),
+            e_args: syms.intern("__err_args"),
             to_proc: syms.intern("to_proc"),
         };
         let main_obj = Value::from(heap.alloc(RObject::new(c.object)));
@@ -1273,7 +1278,14 @@ impl Vm {
                     let mm = self.s.method_missing;
                     return self.start_invoke(m, owner, recv, mm, Args::Owned(margs), block);
                 }
-                Err(self.no_method(&recv, mid))
+                // with the name and the arguments (NoMethodError#name, #args)
+                let Unwind::Raise(cls, msg) = self.no_method(&recv, mid) else { unreachable!() };
+                let args = args.into_vec(self);
+                let exc = self.make_exception(&cls, msg);
+                let args = self.array(args);
+                self.ivar_set(&exc, self.s.e_name, Value::sym(mid))?;
+                self.ivar_set(&exc, self.s.e_args, args)?;
+                Err(Unwind::Error(exc))
             }
         }
     }
