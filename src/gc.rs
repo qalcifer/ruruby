@@ -117,7 +117,17 @@ pub struct Arena<T> {
 #[derive(Default)]
 pub struct Extra {
     pub class: Option<ClassRef>,
+    /// `def s.m`, `s.extend(M)`: where method lookup starts.
+    pub singleton: Option<ClassRef>,
     pub ivars: IvTable,
+}
+
+impl Extra {
+    /// Where method lookup starts for the value; `builtin` is its type's class.
+    #[inline]
+    pub fn dispatch(&self, builtin: ClassRef) -> ClassRef {
+        self.singleton.or(self.class).unwrap_or(builtin)
+    }
 }
 
 impl<T> Default for Arena<T> {
@@ -440,8 +450,8 @@ impl<'h> Marker<'h> {
 
     fn extra(&mut self, x: Option<&Extra>) {
         if let Some(x) = x {
-            if let Some(c) = x.class {
-                self.class(c);
+            for c in x.class.iter().chain(&x.singleton) {
+                self.class(*c);
             }
             for (_, v) in &x.ivars.items {
                 self.value(v);

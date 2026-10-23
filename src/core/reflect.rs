@@ -673,7 +673,7 @@ fn init_introspection(vm: &mut Vm) {
         let sc = match vm.kind(*s) {
             V::Class(c) => vm.heap[c].meta.get(),
             V::Object(o) => vm.heap[o].singleton.get(),
-            _ => None,
+            _ => vm.heap.extra_of(s).and_then(|x| x.singleton),
         };
         match sc {
             Some(sc) => Ok(listed(vm, sc, false, Shown::Callable)),

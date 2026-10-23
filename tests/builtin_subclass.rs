@@ -99,3 +99,27 @@ fn copies_keep_class_and_ivars() {
          true\nArray\nString\n"
     );
 }
+
+#[test]
+fn singleton_methods_on_builtin_values() {
+    let out = run(r##"
+        GC.stress = true
+        s = "abc"
+        def s.shout = upcase
+        a = [1, 2]
+        module Sum; def total = sum; end
+        a.extend(Sum)
+        h = {k: 1}
+        class << h; def keyz = keys; end
+        GC.start
+        p s.shout, a.total, h.keyz, s.singleton_methods, s.class, a.is_a?(Sum)
+        p "x".respond_to?(:shout), s.dup.respond_to?(:shout)
+        p (begin; 1.singleton_class; rescue TypeError => e; e.message; end)
+        p [0, 1, 2].map { |i| t = "t#{i}"; def t.m = self * 2; t.m }
+    "##);
+    assert_eq!(
+        out,
+        "\"ABC\"\n3\n[:k]\n[:shout]\nString\ntrue\nfalse\nfalse\n\
+         \"can't define singleton for Integer\"\n[\"t0t0\", \"t1t1\", \"t2t2\"]\n"
+    );
+}

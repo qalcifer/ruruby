@@ -949,6 +949,18 @@ impl Vm {
             V::Nil => Ok(self.c.nil),
             V::Bool(true) => Ok(self.c.true_),
             V::Bool(false) => Ok(self.c.false_),
+            V::Str(_) | V::Array(_) | V::Hash(_) => {
+                if let Some(s) = self.heap.extra_of(v).and_then(|x| x.singleton) {
+                    return Ok(s);
+                }
+                let class = self.class_of(v);
+                let name = format!("#<Class:#<{}>>", self.heap[class].name());
+                let s = self.heap.alloc(RClass::new_singleton(name, class));
+                if let Some(x) = self.heap.extra_of_mut(v) {
+                    x.singleton = Some(s);
+                }
+                Ok(s)
+            }
             _ => Err(self.type_err(format!("can't define singleton for {}", self.class_name(v)))),
         }
     }
@@ -961,6 +973,10 @@ impl Vm {
                 let o = &self.heap[o];
                 o.singleton.get().unwrap_or(o.class)
             }
+            // a singleton, else a subclass, else the built-in class
+            V::Str(h) => self.heap.strings.extra(h).map_or(self.c.string, |x| x.dispatch(self.c.string)),
+            V::Array(h) => self.heap.arrays.extra(h).map_or(self.c.array, |x| x.dispatch(self.c.array)),
+            V::Hash(h) => self.heap.hashes.extra(h).map_or(self.c.hash, |x| x.dispatch(self.c.hash)),
             _ => self.class_of(v),
         }
     }
