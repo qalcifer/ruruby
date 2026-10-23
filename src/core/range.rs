@@ -4,11 +4,11 @@ use super::*;
 
 pub fn range_vec(vm: &mut Vm, r: &(Value, Value, bool)) -> Result<Vec<Value>, Unwind> {
     match (&r.0, &r.1) {
-        (Value::Int(lo), Value::Int(hi)) => {
+        (V::Int(lo), V::Int(hi)) => {
             let hi = if r.2 { *hi - 1 } else { *hi };
-            Ok((*lo..=hi).map(Value::Int).collect())
+            Ok((*lo..=hi).map(V::Int).collect())
         }
-        (Value::Str(lo), Value::Str(hi)) => {
+        (V::Str(lo), V::Str(hi)) => {
             let (lo, hi) = (vm.heap[lo].borrow().clone(), vm.heap[hi].borrow().clone());
             let mut out = Vec::new();
             let mut cur = vm.str(lo);
@@ -36,7 +36,7 @@ pub fn range_vec(vm: &mut Vm, r: &(Value, Value, bool)) -> Result<Vec<Value>, Un
 /// The receiver's (begin, end, exclusive?).
 fn this(vm: &Vm, s: &Value) -> Result<(Value, Value, bool), Unwind> {
     match s {
-        Value::Range(r) => Ok(vm.heap[r]),
+        V::Range(r) => Ok(vm.heap[r]),
         _ => Err(vm.type_err("expected a Range")),
     }
 }
@@ -65,16 +65,16 @@ pub fn init(vm: &mut Vm) {
     });
     vm.def(&c, "end", |vm, s, _, _| Ok(this(vm, s)?.1));
     vm.def(&c, "exclude_end?", |vm, s, _, _| {
-        Ok(Value::Bool(this(vm, s)?.2))
+        Ok(V::Bool(this(vm, s)?.2))
     });
     vm.def(&c, "each", |vm, s, _, b| {
         let b = need_block(vm, b)?;
         let r = this(vm, s)?;
-        if let (Value::Int(lo), Value::Int(hi)) = (&r.0, &r.1) {
+        if let (V::Int(lo), V::Int(hi)) = (&r.0, &r.1) {
             // no materialization for the common integer case
             let hi = if r.2 { *hi - 1 } else { *hi };
             for i in *lo..=hi {
-                vm.call_block(&b, vec![Value::Int(i)])?;
+                vm.call_block(&b, vec![V::Int(i)])?;
             }
         } else {
             for x in range_vec(vm, &r)? {
@@ -101,7 +101,7 @@ pub fn init(vm: &mut Vm) {
         let (lo, hi) = (int_of(vm, &r.0)?, int_of(vm, &r.1)?);
         let mut i = lo;
         while i < hi || (!r.2 && i == hi) {
-            vm.call_block(&b, vec![Value::Int(i)])?;
+            vm.call_block(&b, vec![V::Int(i)])?;
             i += step;
         }
         Ok(*s)
@@ -122,7 +122,7 @@ pub fn init(vm: &mut Vm) {
             || compare(vm, &x, &r.1)
                 .map(|o| if r.2 { o.is_lt() } else { o.is_le() })
                 .unwrap_or(false);
-        Ok(Value::Bool(above && below))
+        Ok(V::Bool(above && below))
     };
     for name in ["include?", "member?", "cover?", "==="] {
         vm.def(&c, name, cover);
@@ -136,13 +136,13 @@ pub fn init(vm: &mut Vm) {
     vm.def(&c, "sum", |vm, s, a, b| {
         let r = this(vm, s)?;
         match (&r.0, &r.1, b) {
-            (Value::Int(lo), Value::Int(hi), None) if a.is_empty() => {
+            (V::Int(lo), V::Int(hi), None) if a.is_empty() => {
                 let hi = if r.2 { hi - 1 } else { *hi };
                 if hi < *lo {
-                    return Ok(Value::Int(0));
+                    return Ok(V::Int(0));
                 }
                 let n = (hi - lo + 1) as i128;
-                Ok(Value::Int(((*lo as i128 + hi as i128) * n / 2) as i64))
+                Ok(V::Int(((*lo as i128 + hi as i128) * n / 2) as i64))
             }
             _ => enumerable::sum(vm, s, a, b),
         }
@@ -152,10 +152,10 @@ pub fn init(vm: &mut Vm) {
 fn size(vm: &mut Vm, s: &Value, _: &[Value], _: Option<&Value>) -> crate::vm::VmResult {
     let r = this(vm, s)?;
     match (&r.0, &r.1) {
-        (Value::Int(lo), Value::Int(hi)) => {
+        (V::Int(lo), V::Int(hi)) => {
             let hi = if r.2 { hi - 1 } else { *hi };
-            Ok(Value::Int((hi - lo + 1).max(0)))
+            Ok(V::Int((hi - lo + 1).max(0)))
         }
-        _ => Ok(Value::Int(range_vec(vm, &r)?.len() as i64)),
+        _ => Ok(V::Int(range_vec(vm, &r)?.len() as i64)),
     }
 }

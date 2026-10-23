@@ -14,7 +14,7 @@ fn pair(vm: &mut Vm, k: &Value, v: &Value) -> Value {
 /// A new empty Hash: the value and its handle.
 fn new_hash(vm: &mut Vm) -> (Value, HashRef) {
     let v = vm.hash(RHash::new());
-    let Value::Hash(h) = v else { unreachable!() };
+    let V::Hash(h) = v else { unreachable!() };
     (v, h)
 }
 
@@ -60,14 +60,14 @@ pub fn init(vm: &mut Vm) {
         let mut cur = *s;
         for k in a {
             cur = match &cur {
-                Value::Nil => return Ok(Value::Nil),
+                V::Nil => return Ok(V::Nil),
                 _ => vm.send(&cur, "[]", vec![*k])?,
             };
         }
         Ok(cur)
     });
     let has_key: NativeFn = |vm, s, a, _| {
-        Ok(Value::Bool(
+        Ok(V::Bool(
             vm.heap[this_hash(vm, s)?].borrow().get(&vm.heap, &arg(a, 0)).is_some(),
         ))
     };
@@ -75,7 +75,7 @@ pub fn init(vm: &mut Vm) {
         vm.def(&c, name, has_key);
     }
     vm.def(&c, "value?", |vm, s, a, _| {
-        Ok(Value::Bool(
+        Ok(V::Bool(
             pairs(vm, s)?.iter().any(|(_, v)| values_eq(&vm.heap, v, &arg(a, 0))),
         ))
     });
@@ -84,7 +84,7 @@ pub fn init(vm: &mut Vm) {
             .into_iter()
             .find(|(_, v)| values_eq(&vm.heap, v, &arg(a, 0)))
             .map(|(k, _)| k)
-            .unwrap_or(Value::Nil))
+            .unwrap_or(V::Nil))
     });
     vm.def(&c, "keys", |vm, s, _, _| {
         Ok(vm.array(
@@ -97,23 +97,23 @@ pub fn init(vm: &mut Vm) {
         ))
     });
     vm.def(&c, "length", |vm, s, _, _| {
-        Ok(Value::Int(vm.heap[this_hash(vm, s)?].borrow().pairs.len() as i64))
+        Ok(V::Int(vm.heap[this_hash(vm, s)?].borrow().pairs.len() as i64))
     });
     vm.def(&c, "size", |vm, s, _, _| {
-        Ok(Value::Int(vm.heap[this_hash(vm, s)?].borrow().pairs.len() as i64))
+        Ok(V::Int(vm.heap[this_hash(vm, s)?].borrow().pairs.len() as i64))
     });
     vm.def(&c, "count", |vm, s, a, b| match b {
-        None if a.is_empty() => Ok(Value::Int(vm.heap[this_hash(vm, s)?].borrow().pairs.len() as i64)),
+        None if a.is_empty() => Ok(V::Int(vm.heap[this_hash(vm, s)?].borrow().pairs.len() as i64)),
         _ => enumerable::count(vm, s, a, b),
     });
     vm.def(&c, "empty?", |vm, s, _, _| {
-        Ok(Value::Bool(vm.heap[this_hash(vm, s)?].borrow().pairs.is_empty()))
+        Ok(V::Bool(vm.heap[this_hash(vm, s)?].borrow().pairs.is_empty()))
     });
     vm.def(&c, "to_h", |_, s, _, _| Ok(*s));
     vm.def(&c, "to_s", |vm, s, _, _| Ok({ let v = vm.inspect(s)?; vm.str(v) }));
     vm.def(&c, "inspect", |vm, s, _, _| Ok({ let v = vm.inspect(s)?; vm.str(v) }));
     vm.def(&c, "==", |vm, s, a, _| {
-        Ok(Value::Bool(values_eq(&vm.heap, s, &arg(a, 0))))
+        Ok(V::Bool(values_eq(&vm.heap, s, &arg(a, 0))))
     });
     vm.def(&c, "default", |vm, s, _, _| {
         Ok(vm.heap[this_hash(vm, s)?].borrow().default)
@@ -149,7 +149,7 @@ pub fn init(vm: &mut Vm) {
     vm.def(&c, "delete", |vm, s, a, _| {
         Ok(vm.heap[this_hash(vm, s)?].borrow_mut()
             .remove(&vm.heap, &arg(a, 0))
-            .unwrap_or(Value::Nil))
+            .unwrap_or(V::Nil))
     });
     vm.def(&c, "clear", |vm, s, _, _| {
         vm.heap[this_hash(vm, s)?].borrow_mut().pairs.clear();
@@ -219,12 +219,12 @@ pub fn init(vm: &mut Vm) {
                 Some(b) => vm.call_block(b, vec![x])?,
                 None => x,
             };
-            let Value::Array(p) = &x else {
+            let V::Array(p) = &x else {
                 return Err(vm.type_err("wrong element type (expected array)"));
             };
             let (k, v) = {
                 let p = vm.heap[p].borrow();
-                (p.first().cloned().unwrap_or(Value::Nil), p.get(1).cloned().unwrap_or(Value::Nil))
+                (p.first().cloned().unwrap_or(V::Nil), p.get(1).cloned().unwrap_or(V::Nil))
             };
             vm.hash_set(h, k, v);
         }

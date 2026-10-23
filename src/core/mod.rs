@@ -44,7 +44,7 @@ pub fn load_prelude(vm: &mut Vm) {
 
 /// Argument `i`, or nil when missing.
 pub fn arg(a: &[Value], i: usize) -> Value {
-    a.get(i).cloned().unwrap_or(Value::Nil)
+    a.get(i).cloned().unwrap_or(V::Nil)
 }
 
 pub fn check_argc(vm: &Vm, a: &[Value], min: usize, max: usize) -> Result<(), Unwind> {
@@ -70,8 +70,8 @@ pub fn need_block(vm: &Vm, b: Option<&Value>) -> Result<Value, Unwind> {
 
 pub fn int_of(vm: &Vm, v: &Value) -> Result<i64, Unwind> {
     match v {
-        Value::Int(i) => Ok(*i),
-        Value::Float(f) => Ok(*f as i64),
+        V::Int(i) => Ok(*i),
+        V::Float(f) => Ok(*f as i64),
         _ => Err(vm.type_err(format!(
             "no implicit conversion of {} into Integer",
             describe(vm, v)
@@ -81,15 +81,15 @@ pub fn int_of(vm: &Vm, v: &Value) -> Result<i64, Unwind> {
 
 pub fn float_of(vm: &Vm, v: &Value) -> Result<f64, Unwind> {
     match v {
-        Value::Int(i) => Ok(*i as f64),
-        Value::Float(f) => Ok(*f),
+        V::Int(i) => Ok(*i as f64),
+        V::Float(f) => Ok(*f),
         _ => Err(vm.type_err(format!("can't convert {} into Float", describe(vm, v)))),
     }
 }
 
 pub fn str_of(vm: &Vm, v: &Value) -> Result<String, Unwind> {
     match v {
-        Value::Str(s) => Ok(vm.heap[s].borrow().clone()),
+        V::Str(s) => Ok(vm.heap[s].borrow().clone()),
         _ => Err(vm.type_err(format!(
             "no implicit conversion of {} into String",
             describe(vm, v)
@@ -99,8 +99,8 @@ pub fn str_of(vm: &Vm, v: &Value) -> Result<String, Unwind> {
 
 pub fn sym_of(vm: &mut Vm, v: &Value) -> Result<Sym, Unwind> {
     match v {
-        Value::Sym(s) => Ok(*s),
-        Value::Str(s) => {
+        V::Sym(s) => Ok(*s),
+        V::Str(s) => {
             let s = vm.heap[s].borrow().clone();
             Ok(vm.intern(&s))
         }
@@ -118,21 +118,21 @@ fn describe(vm: &Vm, v: &Value) -> String {
 
 pub fn this_str(vm: &Vm, v: &Value) -> Result<StrRef, Unwind> {
     match v {
-        Value::Str(s) => Ok(*s),
+        V::Str(s) => Ok(*s),
         _ => Err(vm.type_err("expected a String receiver")),
     }
 }
 
 pub fn this_ary(vm: &Vm, v: &Value) -> Result<ArrayRef, Unwind> {
     match v {
-        Value::Array(a) => Ok(*a),
+        V::Array(a) => Ok(*a),
         _ => Err(vm.type_err("expected an Array receiver")),
     }
 }
 
 pub fn this_hash(vm: &Vm, v: &Value) -> Result<HashRef, Unwind> {
     match v {
-        Value::Hash(h) => Ok(*h),
+        V::Hash(h) => Ok(*h),
         _ => Err(vm.type_err("expected a Hash receiver")),
     }
 }
@@ -142,10 +142,10 @@ pub fn compare(vm: &mut Vm, a: &Value, b: &Value) -> Result<Ordering, Unwind> {
     if let Some(o) = num_cmp(a, b) {
         return Ok(o);
     }
-    if let (Value::Str(x), Value::Str(y)) = (a, b) {
+    if let (V::Str(x), V::Str(y)) = (a, b) {
         return Ok(vm.heap[x].borrow().as_str().cmp(vm.heap[y].borrow().as_str()));
     }
-    if let (Value::Array(x), Value::Array(y)) = (a, b) {
+    if let (V::Array(x), V::Array(y)) = (a, b) {
         let (x, y) = (vm.heap[x].borrow().clone(), vm.heap[y].borrow().clone());
         for (p, q) in x.iter().zip(&y) {
             let o = compare(vm, p, q)?;
@@ -155,13 +155,13 @@ pub fn compare(vm: &mut Vm, a: &Value, b: &Value) -> Result<Ordering, Unwind> {
         }
         return Ok(x.len().cmp(&y.len()));
     }
-    let r = if a.is_numeric() || matches!(a, Value::Str(_)) {
-        Value::Nil
+    let r = if a.is_numeric() || matches!(a, V::Str(_)) {
+        V::Nil
     } else {
         vm.call_method(a, vm.s.cmp, vec![*b], None)?
     };
     match r {
-        Value::Int(i) => Ok(i.cmp(&0)),
+        V::Int(i) => Ok(i.cmp(&0)),
         _ => Err(vm.arg_err(format!(
             "comparison of {} with {} failed",
             vm.class_name(a),
@@ -204,7 +204,7 @@ pub fn sort_values(vm: &mut Vm, v: Vec<Value>, blk: Option<&Value>) -> Result<Ve
                 vm,
                 v,
                 &mut |vm, x, y| match vm.call_block(&b, vec![*x, *y])? {
-                    Value::Int(i) => Ok(i.cmp(&0)),
+                    V::Int(i) => Ok(i.cmp(&0)),
                     _ => Err(vm.arg_err("comparison failed")),
                 },
             )
@@ -217,12 +217,12 @@ pub fn sort_values(vm: &mut Vm, v: Vec<Value>, blk: Option<&Value>) -> Result<Ve
 /// or any object with an `each` method.
 pub fn to_vec(vm: &mut Vm, v: &Value) -> Result<Vec<Value>, Unwind> {
     match v {
-        Value::Array(a) => Ok(vm.heap[a].borrow().clone()),
-        Value::Hash(h) => {
+        V::Array(a) => Ok(vm.heap[a].borrow().clone()),
+        V::Hash(h) => {
             let pairs = vm.heap[h].borrow().pairs.clone();
             Ok(pairs.into_iter().map(|(k, v)| vm.array(vec![k, v])).collect())
         }
-        Value::Range(r) => {
+        V::Range(r) => {
             let r = vm.heap[r];
             range::range_vec(vm, &r)
         }

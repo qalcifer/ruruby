@@ -9,14 +9,14 @@ use crate::vm::{ProcCall, VmResult};
 
 fn this_class(vm: &Vm, s: &Value) -> Result<ClassRef, Unwind> {
     match s {
-        Value::Class(c) => Ok(*c),
+        V::Class(c) => Ok(*c),
         _ => Err(vm.type_err("expected a class or module")),
     }
 }
 
 fn module_arg(vm: &Vm, v: &Value) -> Result<ClassRef, Unwind> {
     match v {
-        Value::Class(m) if vm.heap[m].is_module => Ok(*m),
+        V::Class(m) if vm.heap[m].is_module => Ok(*m),
         _ => Err(vm.type_err(format!(
             "wrong argument type {} (expected Module)",
             vm.class_name(v)
@@ -64,7 +64,7 @@ pub fn init(vm: &mut Vm) {
 fn init_kernel(vm: &mut Vm) {
     let k = vm.c.kernel;
     vm.def(&k, "singleton_class", |vm, s, _, _| {
-        Ok(Value::Class(vm.singleton_class(s)?))
+        Ok(V::Class(vm.singleton_class(s)?))
     });
     vm.def(&k, "extend", |vm, s, a, _| {
         let sc = vm.singleton_class(s)?;
@@ -73,7 +73,7 @@ fn init_kernel(vm: &mut Vm) {
             if !vm.heap[sc].includes.borrow().contains(&m) {
                 vm.heap[sc].includes.push(m);
             }
-            hook(vm, &Value::Class(m), "extended", *s)?;
+            hook(vm, &V::Class(m), "extended", *s)?;
         }
         Ok(*s)
     });
@@ -95,16 +95,16 @@ fn init_kernel(vm: &mut Vm) {
         };
         let sc = vm.singleton_class(s)?;
         vm.heap[sc].methods.insert(name, Method::Proc(body));
-        Ok(Value::Sym(name))
+        Ok(V::Sym(name))
     });
     vm.def(&k, "singleton_methods", |vm, s, _, _| {
         let names: Vec<Sym> = match s {
-            Value::Class(c) => vm.heap[c]
+            V::Class(c) => vm.heap[c]
                 .meta
                 .get()
                 .map(|m| vm.heap[m].methods.borrow().keys().copied().collect())
                 .unwrap_or_default(),
-            Value::Object(o) => vm.heap[o]
+            V::Object(o) => vm.heap[o]
                 .singleton
                 .get()
                 .map(|m| vm.heap[m].methods.borrow().keys().copied().collect())
@@ -120,13 +120,13 @@ fn init_kernel(vm: &mut Vm) {
     });
     vm.def(&k, "instance_variable_defined?", |vm, s, a, _| {
         let iv = sym_of(vm, &arg(a, 0))?;
-        Ok(Value::Bool(vm.ivar_lookup(s, iv).is_some()))
+        Ok(V::Bool(vm.ivar_lookup(s, iv).is_some()))
     });
     vm.def(&k, "remove_instance_variable", |vm, s, a, _| {
         let iv = sym_of(vm, &arg(a, 0))?;
         let table = match s {
-            Value::Object(o) => &vm.heap[o].ivars,
-            Value::Class(c) => &vm.heap[c].ivars,
+            V::Object(o) => &vm.heap[o].ivars,
+            V::Class(c) => &vm.heap[c].ivars,
             _ => return Err(vm.name_err("instance variable not defined")),
         };
         let mut t = table.borrow_mut();
@@ -136,7 +136,7 @@ fn init_kernel(vm: &mut Vm) {
         }
     });
     vm.def(&k, "respond_to_missing?", |_, _, _, _| {
-        Ok(Value::Bool(false))
+        Ok(V::Bool(false))
     });
     vm.def(&k, "caller", |vm, _, _, _| Ok(vm.array(vec![])));
     vm.def(&k, "at_exit", |vm, _, _, b| {
@@ -156,7 +156,7 @@ fn init_kernel(vm: &mut Vm) {
 fn sorted_syms(vm: &mut Vm, syms: Vec<Sym>) -> Value {
     let mut names: Vec<String> = syms.iter().map(|s| vm.sym_name(*s).to_string()).collect();
     names.sort();
-    let syms = names.iter().map(|n| Value::Sym(vm.intern(n))).collect();
+    let syms = names.iter().map(|n| V::Sym(vm.intern(n))).collect();
     vm.array(syms)
 }
 
@@ -165,7 +165,7 @@ fn init_module(vm: &mut Vm) {
     vm.def(&m, "name", |vm, s, _, _| {
         let c = this_class(vm, s)?;
         Ok(if vm.heap[c].is_anonymous() {
-            Value::Nil
+            V::Nil
         } else {
             vm.str(vm.heap[c].name())
         })
@@ -184,7 +184,7 @@ fn init_module(vm: &mut Vm) {
         "method_added",
         "const_added",
     ] {
-        vm.def(&m, name, |_, _, _, _| Ok(Value::Nil));
+        vm.def(&m, name, |_, _, _, _| Ok(V::Nil));
     }
     vm.def(&m, "include", |vm, s, a, _| {
         let cls = this_class(vm, s)?;
@@ -213,7 +213,7 @@ fn init_module(vm: &mut Vm) {
     vm.def(&m, "include?", |vm, s, a, _| {
         let cls = this_class(vm, s)?;
         let module = module_arg(vm, &arg(a, 0))?;
-        Ok(Value::Bool(
+        Ok(V::Bool(
             !(cls == module)
                 && vm.ancestors(&cls).contains(&module),
         ))
@@ -224,7 +224,7 @@ fn init_module(vm: &mut Vm) {
             vm.ancestors(&cls)
                 .into_iter()
                 .filter(|c| vm.heap[c].is_module)
-                .map(Value::Class)
+                .map(V::Class)
                 .collect(),
         ))
     });
@@ -233,17 +233,17 @@ fn init_module(vm: &mut Vm) {
         let name = sym_of(vm, &arg(a, 0))?;
         let body = match (b, a.get(1)) {
             (Some(b), _) => vm.to_lambda(b),
-            (None, Some(p @ Value::Proc(_))) => *p,
+            (None, Some(p @ V::Proc(_))) => *p,
             _ => return Err(vm.arg_err("tried to create Proc object without a block")),
         };
         vm.heap[cls].methods.insert(name, Method::Proc(body));
-        Ok(Value::Sym(name))
+        Ok(V::Sym(name))
     });
     vm.def(&m, "alias_method", |vm, s, a, _| {
         let cls = this_class(vm, s)?;
         let (new, old) = (sym_of(vm, &arg(a, 0))?, sym_of(vm, &arg(a, 1))?);
         vm.alias_method(&cls, new, old)?;
-        Ok(Value::Sym(new))
+        Ok(V::Sym(new))
     });
     vm.def(&m, "remove_method", |vm, s, a, _| {
         let cls = this_class(vm, s)?;
@@ -303,15 +303,15 @@ fn init_module(vm: &mut Vm) {
     let method_defined: NativeFn = |vm, s, a, _| {
         let cls = this_class(vm, s)?;
         let mid = sym_of(vm, &arg(a, 0))?;
-        Ok(Value::Bool(vm.find_method(&cls, mid).is_some()))
+        Ok(V::Bool(vm.find_method(&cls, mid).is_some()))
     };
     vm.def(&m, "method_defined?", method_defined);
     vm.def(&m, "public_method_defined?", method_defined);
     vm.def(&m, "private_method_defined?", |_, _, _, _| {
-        Ok(Value::Bool(false))
+        Ok(V::Bool(false))
     });
     vm.def(&m, "protected_method_defined?", |_, _, _, _| {
-        Ok(Value::Bool(false))
+        Ok(V::Bool(false))
     });
     vm.def(&m, "instance_method", |vm, s, a, _| {
         let cls = this_class(vm, s)?;
@@ -324,7 +324,7 @@ fn init_module(vm: &mut Vm) {
             );
             return Err(vm.name_err(msg));
         }
-        Ok(Value::Sym(mid))
+        Ok(V::Sym(mid))
     });
     // visibility is not enforced yet; these return their arguments so `private def x` works
     for name in [
@@ -337,7 +337,7 @@ fn init_module(vm: &mut Vm) {
     ] {
         vm.def(&m, name, |vm, _, a, _| {
             Ok(match a.len() {
-                0 => Value::Nil,
+                0 => V::Nil,
                 1 => a[0],
                 _ => vm.array(a.to_vec()),
             })
@@ -352,7 +352,7 @@ fn init_module(vm: &mut Vm) {
                 vm.heap[sc].methods.insert(mid, meth);
             }
         }
-        Ok(Value::Nil)
+        Ok(V::Nil)
     });
     vm.def(&m, "attr", |vm, s, a, _| {
         let attr_reader = vm.intern("attr_reader");
@@ -385,7 +385,7 @@ fn init_module(vm: &mut Vm) {
     vm.def(&m, "class_variable_defined?", |vm, s, a, _| {
         let cls = this_class(vm, s)?;
         let n = sym_of(vm, &arg(a, 0))?;
-        Ok(Value::Bool(
+        Ok(V::Bool(
             vm.ancestors(&cls)
                 .iter()
                 .any(|k| vm.heap[k].cvars.borrow().get(n).is_some()),
@@ -397,18 +397,18 @@ fn init_module(vm: &mut Vm) {
         for k in vm.ancestors(&cls) {
             syms.extend(vm.heap[k].cvars.borrow().items.iter().map(|(s, _)| *s));
         }
-        Ok(vm.array(syms.into_iter().map(Value::Sym).collect()))
+        Ok(vm.array(syms.into_iter().map(V::Sym).collect()))
     });
     vm.def(&m, "const_get", |vm, s, a, _| {
         let mut cls = this_class(vm, s)?;
         let path = match arg(a, 0) {
-            Value::Str(p) => vm.heap[p].borrow().clone(),
+            V::Str(p) => vm.heap[p].borrow().clone(),
             v => {
                 let sym = sym_of(vm, &v)?;
                 vm.sym_name(sym).to_string()
             }
         };
-        let mut v = Value::Nil;
+        let mut v = V::Nil;
         for part in path.split("::") {
             if part.is_empty() {
                 cls = vm.c.object;
@@ -418,7 +418,7 @@ fn init_module(vm: &mut Vm) {
             v = vm.get_const_in(&cls, n).ok_or_else(|| {
                 vm.name_err(format!("uninitialized constant {}::{}", vm.heap[cls].name(), part))
             })?;
-            if let Value::Class(c) = &v {
+            if let V::Class(c) = &v {
                 cls = *c;
             }
         }
@@ -437,24 +437,24 @@ fn init_module(vm: &mut Vm) {
     vm.def(&m, "const_defined?", |vm, s, a, _| {
         let cls = this_class(vm, s)?;
         let n = sym_of(vm, &arg(a, 0))?;
-        Ok(Value::Bool(vm.get_const_in(&cls, n).is_some()))
+        Ok(V::Bool(vm.get_const_in(&cls, n).is_some()))
     });
     vm.def(&m, "constants", |vm, s, _, _| {
         let cls = this_class(vm, s)?;
-        let syms: Vec<Value> = vm.heap[cls].consts.borrow().keys().map(|k| Value::Sym(*k)).collect();
+        let syms: Vec<Value> = vm.heap[cls].consts.borrow().keys().map(|k| V::Sym(*k)).collect();
         let _ = vm;
         Ok(vm.array(syms))
     });
     vm.def(&m, "freeze", |_, s, _, _| Ok(*s));
     vm.def(&m, "==", |_, s, a, _| {
-        Ok(Value::Bool(s.identical(&arg(a, 0))))
+        Ok(V::Bool(s.identical(&arg(a, 0))))
     });
     vm.def(&m, "<", |vm, s, a, _| module_cmp(vm, s, &arg(a, 0), true));
     vm.def(&m, "<=", |vm, s, a, _| module_cmp(vm, s, &arg(a, 0), false));
     vm.def(&m, ">", |vm, s, a, _| module_cmp(vm, &arg(a, 0), s, true));
     vm.def(&m, ">=", |vm, s, a, _| module_cmp(vm, &arg(a, 0), s, false));
     vm.def(&m, "singleton_class?", |vm, s, _, _| {
-        Ok(Value::Bool(vm.heap[this_class(vm, s)?].is_singleton))
+        Ok(V::Bool(vm.heap[this_class(vm, s)?].is_singleton))
     });
 
     let c = vm.c.class;
@@ -468,15 +468,15 @@ fn init_module(vm: &mut Vm) {
 fn module_cmp(vm: &mut Vm, a: &Value, b: &Value, strict: bool) -> VmResult {
     let (a, b) = (this_class(vm, a)?, this_class(vm, b)?);
     if a == b {
-        return Ok(Value::Bool(!strict));
+        return Ok(V::Bool(!strict));
     }
     if vm.ancestors(&a).contains(&b) {
-        return Ok(Value::Bool(true));
+        return Ok(V::Bool(true));
     }
     if vm.ancestors(&b).contains(&a) {
-        return Ok(Value::Bool(false));
+        return Ok(V::Bool(false));
     }
-    Ok(Value::Nil)
+    Ok(V::Nil)
 }
 
 /// `Class.new(super) { body }` / `Module.new { body }`
@@ -491,15 +491,15 @@ pub fn new_class_or_module(
         None
     } else {
         match arg(a, 0) {
-            Value::Nil => Some(vm.c.object),
-            Value::Class(s) if !vm.heap[s].is_module && !vm.heap[s].is_singleton => Some(s),
+            V::Nil => Some(vm.c.object),
+            V::Class(s) if !vm.heap[s].is_module && !vm.heap[s].is_singleton => Some(s),
             _ => return Err(vm.type_err("superclass must be a Class")),
         }
     };
     let new = anonymous(vm, superclass, is_module);
-    let v = Value::Class(new);
+    let v = V::Class(new);
     if let Some(sup) = superclass {
-        hook(vm, &Value::Class(sup), "inherited", v)?;
+        hook(vm, &V::Class(sup), "inherited", v)?;
     }
     if let Some(b) = b {
         eval_with(vm, b, &v, new, vec![v])?;
@@ -514,16 +514,16 @@ fn init_proc(vm: &mut Vm) {
             .ok_or_else(|| vm.arg_err("tried to create Proc object without a block"))
     });
     vm.def(&p, "lambda?", |vm, s, _, _| {
-        Ok(Value::Bool(matches!(s, Value::Proc(p) if vm.heap[p].lambda)))
+        Ok(V::Bool(matches!(s, V::Proc(p) if vm.heap[p].lambda)))
     });
     vm.def(&p, "inspect", |vm, s, _, _| {
-        let Value::Proc(p) = s else { unreachable!() };
+        let V::Proc(p) = s else { unreachable!() };
         let lambda = if vm.heap[p].lambda { " (lambda)" } else { "" };
         Ok(vm.str(format!("#<Proc:0x{:016x}{lambda}>", p.id())))
     });
     vm.def(&p, "to_s", |vm, s, _, _| vm.send(s, "inspect", vec![]));
     vm.def(&p, "==", |_, s, a, _| {
-        Ok(Value::Bool(s.identical(&arg(a, 0))))
+        Ok(V::Bool(s.identical(&arg(a, 0))))
     });
 }
 
@@ -535,22 +535,22 @@ fn init_pattern_support(vm: &mut Vm) {
         let v = arg(a, 0);
         let hook = vm.intern("deconstruct");
         // through Ruby's respond_to?, which a class may override
-        if !vm.send(&v, "respond_to?", vec![Value::Sym(hook)])?.truthy() {
-            return Ok(Value::Nil);
+        if !vm.send(&v, "respond_to?", vec![V::Sym(hook)])?.truthy() {
+            return Ok(V::Nil);
         }
         match vm.call_method(&v, hook, vec![], None)? {
-            r @ Value::Array(_) => Ok(r),
+            r @ V::Array(_) => Ok(r),
             _ => Err(vm.type_err("deconstruct must return Array")),
         }
     });
     vm.def(&k, "__pm_deconstruct_keys", |vm, _, a, _| {
         let v = arg(a, 0);
         let hook = vm.intern("deconstruct_keys");
-        if !vm.send(&v, "respond_to?", vec![Value::Sym(hook)])?.truthy() {
-            return Ok(Value::Nil);
+        if !vm.send(&v, "respond_to?", vec![V::Sym(hook)])?.truthy() {
+            return Ok(V::Nil);
         }
         match vm.call_method(&v, hook, vec![arg(a, 1)], None)? {
-            r @ Value::Hash(_) => Ok(r),
+            r @ V::Hash(_) => Ok(r),
             _ => Err(vm.type_err("deconstruct_keys must return Hash")),
         }
     });

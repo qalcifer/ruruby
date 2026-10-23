@@ -15,7 +15,7 @@
 //! the VM's own state (frames, globals, classes), and native code never
 //! needs to protect the values it holds (mruby's "GC arena").
 
-use crate::value::{Env, EnvRegs, Method, ProcBody, RClass, RHash, RObject, RProc, Value};
+use crate::value::{Env, EnvRegs, Method, ProcBody, RClass, RHash, RObject, RProc, V, Value};
 use std::cell::RefCell;
 use std::fmt;
 use std::marker::PhantomData;
@@ -323,8 +323,8 @@ impl<'h> Marker<'h> {
 
     pub fn value(&mut self, v: &Value) {
         match v {
-            Value::Nil | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Sym(_) => {}
-            Value::Class(c) => self.class(*c),
+            V::Nil | V::Bool(_) | V::Int(_) | V::Float(_) | V::Sym(_) => {}
+            V::Class(c) => self.class(*c),
             v => self.gray.push(Gray::Val(*v)),
         }
     }
@@ -355,17 +355,17 @@ impl<'h> Marker<'h> {
         let heap = self.heap;
         match g {
             Gray::Val(v) => match v {
-                Value::Str(h) => {
+                V::Str(h) => {
                     self.visit(h);
                 }
-                Value::Array(h) => {
+                V::Array(h) => {
                     if self.visit(h) {
                         for x in heap[h].borrow().iter() {
                             self.value(x);
                         }
                     }
                 }
-                Value::Hash(h) => {
+                V::Hash(h) => {
                     if self.visit(h) {
                         let h = heap[h].borrow();
                         for (k, v) in &h.pairs {
@@ -378,19 +378,19 @@ impl<'h> Marker<'h> {
                         }
                     }
                 }
-                Value::Range(h) => {
+                V::Range(h) => {
                     if self.visit(h) {
                         let (lo, hi, _) = &heap[h];
                         self.value(lo);
                         self.value(hi);
                     }
                 }
-                Value::Proc(h) => {
+                V::Proc(h) => {
                     if self.visit(h) {
                         self.proc(&heap[h]);
                     }
                 }
-                Value::Object(h) => {
+                V::Object(h) => {
                     if self.visit(h) {
                         let o = &heap[h];
                         self.class(o.class);
@@ -402,12 +402,12 @@ impl<'h> Marker<'h> {
                         }
                     }
                 }
-                Value::Nil
-                | Value::Bool(_)
-                | Value::Int(_)
-                | Value::Float(_)
-                | Value::Sym(_)
-                | Value::Class(_) => unreachable!("not queued"),
+                V::Nil
+                | V::Bool(_)
+                | V::Int(_)
+                | V::Float(_)
+                | V::Sym(_)
+                | V::Class(_) => unreachable!("not queued"),
             },
             Gray::Env(e) => {
                 if self.visit(e) {
@@ -463,7 +463,7 @@ impl<'h> Marker<'h> {
         self.class(p.target);
         match &p.body {
             ProcBody::Ruby { env, .. } => self.env(*env),
-            ProcBody::Collect(buf) => self.value(&Value::Array(*buf)),
+            ProcBody::Collect(buf) => self.value(&V::Array(*buf)),
             ProcBody::SymCall(_) => {}
         }
     }

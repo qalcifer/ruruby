@@ -256,7 +256,7 @@ impl RHash {
     pub fn new() -> Self {
         RHash {
             pairs: Vec::new(),
-            default: Value::Nil,
+            default: V::Nil,
             default_proc: None,
             kw: false,
         }
@@ -294,8 +294,9 @@ impl Default for RHash {
     }
 }
 
+/// A value as code inspects it: what `match heap.kind(v)` gives.
 #[derive(Clone, Copy, Default)]
-pub enum Value {
+pub enum V {
     #[default]
     Nil,
     Bool(bool),
@@ -311,22 +312,25 @@ pub enum Value {
     Object(ObjRef),
 }
 
-impl Value {
+/// For now the stored form is the view itself.
+pub type Value = V;
+
+impl V {
     pub fn truthy(&self) -> bool {
-        !matches!(self, Value::Nil | Value::Bool(false))
+        !matches!(self, V::Nil | V::Bool(false))
     }
 
     pub fn is_numeric(&self) -> bool {
-        matches!(self, Value::Int(_) | Value::Float(_))
+        matches!(self, V::Int(_) | V::Float(_))
     }
 
     pub fn is_nil(&self) -> bool {
-        matches!(self, Value::Nil)
+        matches!(self, V::Nil)
     }
 
     /// Identity (`equal?`).
     pub fn identical(&self, other: &Value) -> bool {
-        use Value::*;
+        use V::*;
         match (self, other) {
             (Nil, Nil) => true,
             (Bool(a), Bool(b)) => a == b,
@@ -347,13 +351,13 @@ impl Value {
     /// Identity as a number (`object_id`, recursion guards); 0 for immediates.
     pub fn heap_id(&self) -> u64 {
         match self {
-            Value::Str(h) => h.id(),
-            Value::Array(h) => h.id(),
-            Value::Hash(h) => h.id(),
-            Value::Range(h) => h.id(),
-            Value::Proc(h) => h.id(),
-            Value::Object(h) => h.id(),
-            Value::Class(h) => h.id(),
+            V::Str(h) => h.id(),
+            V::Array(h) => h.id(),
+            V::Hash(h) => h.id(),
+            V::Range(h) => h.id(),
+            V::Proc(h) => h.id(),
+            V::Object(h) => h.id(),
+            V::Class(h) => h.id(),
             _ => 0,
         }
     }
@@ -386,7 +390,7 @@ fn guarded(
 }
 
 fn eq_rec(heap: &Heap, a: &Value, b: &Value, in_progress: &mut InProgress) -> bool {
-    use Value::*;
+    use V::*;
     match (a, b) {
         (Int(x), Float(y)) | (Float(y), Int(x)) => (*x as f64) == *y,
         (Str(x), Str(y)) => x == y || *heap[*x].borrow() == *heap[*y].borrow(),
@@ -417,17 +421,17 @@ fn eq_rec(heap: &Heap, a: &Value, b: &Value, in_progress: &mut InProgress) -> bo
 /// `eql?` — hash-key equality (`1.eql?(1.0)` is false).
 pub fn eql(heap: &Heap, a: &Value, b: &Value) -> bool {
     match (a, b) {
-        (Value::Int(_), Value::Float(_)) | (Value::Float(_), Value::Int(_)) => false,
+        (V::Int(_), V::Float(_)) | (V::Float(_), V::Int(_)) => false,
         _ => values_eq(heap, a, b),
     }
 }
 
 pub fn num_cmp(x: &Value, y: &Value) -> Option<Ordering> {
     match (x, y) {
-        (Value::Int(a), Value::Int(b)) => Some(a.cmp(b)),
-        (Value::Int(a), Value::Float(b)) => (*a as f64).partial_cmp(b),
-        (Value::Float(a), Value::Int(b)) => a.partial_cmp(&(*b as f64)),
-        (Value::Float(a), Value::Float(b)) => a.partial_cmp(b),
+        (V::Int(a), V::Int(b)) => Some(a.cmp(b)),
+        (V::Int(a), V::Float(b)) => (*a as f64).partial_cmp(b),
+        (V::Float(a), V::Int(b)) => a.partial_cmp(&(*b as f64)),
+        (V::Float(a), V::Float(b)) => a.partial_cmp(b),
         _ => None,
     }
 }

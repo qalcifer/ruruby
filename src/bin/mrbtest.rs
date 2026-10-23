@@ -12,7 +12,7 @@
 //! ```
 
 use ruruby::Interpreter;
-use ruruby::value::Value;
+use ruruby::value::{V, Value};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -91,12 +91,12 @@ fn emit(kind: &str, msg: &str) {
 
 fn global(interp: &mut Interpreter, name: &str) -> Value {
     let s = interp.vm.intern(name);
-    interp.vm.globals.get(&s).cloned().unwrap_or(Value::Nil)
+    interp.vm.globals.get(&s).cloned().unwrap_or(V::Nil)
 }
 
 fn global_int(interp: &mut Interpreter, name: &str) -> i64 {
     match global(interp, name) {
-        Value::Int(i) => i,
+        V::Int(i) => i,
         _ => 0,
     }
 }
@@ -228,12 +228,12 @@ fn child(file: &Path, gc_stress: bool) -> ExitCode {
             }
         }
         // stream new failure messages and the running totals
-        if let Value::Array(a) = global(&mut interp, "$asserts") {
+        if let V::Array(a) = global(&mut interp, "$asserts") {
             let heap = &interp.vm.heap;
             let msgs: Vec<String> = heap[a].borrow()[reported..]
                 .iter()
                 .map(|m| match m {
-                    Value::Str(s) => heap[s].borrow().clone(),
+                    V::Str(s) => heap[s].borrow().clone(),
                     _ => String::new(),
                 })
                 .collect();

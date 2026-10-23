@@ -1,6 +1,6 @@
 //! Command-line front end: the counterpart of mruby's `mruby` and `mirb` binaries.
 
-use ruruby::{Error, Interpreter, value::Value};
+use ruruby::{Error, Interpreter, value::V};
 use std::io::{BufRead, IsTerminal, Read, Write};
 use std::process::ExitCode;
 
@@ -100,7 +100,7 @@ fn run(args: Vec<String>) -> ExitCode {
         }
         if check {
             println!("Syntax OK");
-            return Ok(Value::Nil);
+            return Ok(V::Nil);
         }
         let r = interp.run(irep);
         let at_exit = interp.run_at_exit();

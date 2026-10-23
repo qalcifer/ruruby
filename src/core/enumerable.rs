@@ -33,7 +33,7 @@ pub fn init(vm: &mut Vm) {
         let mut out = Vec::new();
         for x in to_vec(vm, s)? {
             match yield1(vm, &b, &x)? {
-                Value::Array(a) => out.extend(vm.heap[a].borrow().iter().cloned()),
+                V::Array(a) => out.extend(vm.heap[a].borrow().iter().cloned()),
                 v => out.push(v),
             }
         }
@@ -72,7 +72,7 @@ pub fn init(vm: &mut Vm) {
                 return Ok(x);
             }
         }
-        Ok(Value::Nil)
+        Ok(V::Nil)
     };
     vm.def(&e, "find", find);
     vm.def(&e, "detect", find);
@@ -83,15 +83,15 @@ pub fn init(vm: &mut Vm) {
                 None => vm.equal(&x, &arg(a, 0))?,
             };
             if hit {
-                return Ok(Value::Int(i as i64));
+                return Ok(V::Int(i as i64));
             }
         }
-        Ok(Value::Nil)
+        Ok(V::Nil)
     });
     vm.def(&e, "each_with_index", |vm, s, _, b| {
         let b = need_block(vm, b)?;
         for (i, x) in to_vec(vm, s)?.into_iter().enumerate() {
-            vm.call_block(&b, vec![x, Value::Int(i as i64)])?;
+            vm.call_block(&b, vec![x, V::Int(i as i64)])?;
         }
         Ok(*s)
     });
@@ -113,7 +113,7 @@ pub fn init(vm: &mut Vm) {
             let chunk = vm.array(chunk.to_vec());
             vm.call_block(&b, vec![chunk])?;
         }
-        Ok(Value::Nil)
+        Ok(V::Nil)
     });
     vm.def(&e, "each_cons", |vm, s, a, b| {
         let b = need_block(vm, b)?;
@@ -130,10 +130,10 @@ pub fn init(vm: &mut Vm) {
     let inject: NativeFn = |vm, s, a, b| {
         let mut items = to_vec(vm, s)?.into_iter();
         let (mut acc, op) = match (a, b) {
-            ([Value::Sym(op)], None) => (items.next().unwrap_or(Value::Nil), Some(*op)),
-            ([init, Value::Sym(op)], None) => (*init, Some(*op)),
+            ([V::Sym(op)], None) => (items.next().unwrap_or(V::Nil), Some(*op)),
+            ([init, V::Sym(op)], None) => (*init, Some(*op)),
             ([init], Some(_)) => (*init, None),
-            ([], Some(_)) => (items.next().unwrap_or(Value::Nil), None),
+            ([], Some(_)) => (items.next().unwrap_or(V::Nil), None),
             _ => return Err(vm.arg_err("wrong arguments for inject")),
         };
         for x in items {
@@ -178,7 +178,7 @@ pub fn init(vm: &mut Vm) {
             keyed.push(vm.array(vec![k, x]));
         }
         let first = |vm: &Vm, p: &Value| match p {
-            Value::Array(p) => vm.heap[p].borrow()[0],
+            V::Array(p) => vm.heap[p].borrow()[0],
             _ => unreachable!(),
         };
         let sorted = merge_sort(vm, keyed, &mut |vm, x, y| {
@@ -189,7 +189,7 @@ pub fn init(vm: &mut Vm) {
             sorted
                 .into_iter()
                 .map(|p| {
-                    if let Value::Array(p) = p {
+                    if let V::Array(p) = p {
                         vm.heap[p].borrow()[1]
                     } else {
                         p
@@ -201,18 +201,18 @@ pub fn init(vm: &mut Vm) {
     vm.def(&e, "include?", |vm, s, a, _| {
         for x in to_vec(vm, s)? {
             if vm.equal(&x, &arg(a, 0))? {
-                return Ok(Value::Bool(true));
+                return Ok(V::Bool(true));
             }
         }
-        Ok(Value::Bool(false))
+        Ok(V::Bool(false))
     });
     vm.def(&e, "member?", |vm, s, a, _| {
         for x in to_vec(vm, s)? {
             if vm.equal(&x, &arg(a, 0))? {
-                return Ok(Value::Bool(true));
+                return Ok(V::Bool(true));
             }
         }
-        Ok(Value::Bool(false))
+        Ok(V::Bool(false))
     });
     vm.def(&e, "all?", |vm, s, a, b| {
         quantifier(vm, s, a, b, |hits, n| hits == n)
@@ -265,7 +265,7 @@ pub fn init(vm: &mut Vm) {
             let k = yield1(vm, &b, &x)?;
             let found = vm.heap[h].borrow().get(&vm.heap, &k);
             match found {
-                Some(Value::Array(v)) => vm.heap[v].borrow_mut().push(x),
+                Some(V::Array(v)) => vm.heap[v].borrow_mut().push(x),
                 _ => {
                     let group = vm.array(vec![x]);
                     vm.hash_set(h, k, group);
@@ -279,10 +279,10 @@ pub fn init(vm: &mut Vm) {
         let h = this_hash(vm, &hv)?;
         for x in to_vec(vm, s)? {
             let n = match vm.heap[h].borrow().get(&vm.heap, &x) {
-                Some(Value::Int(n)) => n + 1,
+                Some(V::Int(n)) => n + 1,
                 _ => 1,
             };
-            vm.hash_set(h, x, Value::Int(n));
+            vm.hash_set(h, x, V::Int(n));
         }
         Ok(hv)
     });
@@ -313,7 +313,7 @@ pub fn init(vm: &mut Vm) {
             .enumerate()
             .map(|(i, x)| {
                 let mut row = vec![x];
-                row.extend(others.iter().map(|o| o.get(i).cloned().unwrap_or(Value::Nil)));
+                row.extend(others.iter().map(|o| o.get(i).cloned().unwrap_or(V::Nil)));
                 vm.array(row)
             })
             .collect();
@@ -349,12 +349,12 @@ pub fn count(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>) -> VmResult
         };
         n += hit as i64;
     }
-    Ok(Value::Int(n))
+    Ok(V::Int(n))
 }
 
 pub fn sum(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>) -> VmResult {
     let mut acc = if a.is_empty() {
-        Value::Int(0)
+        V::Int(0)
     } else {
         a[0]
     };
@@ -390,7 +390,7 @@ fn extreme(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>, want: Orderin
             Some(cur) => {
                 let o = match b {
                     Some(b) => match vm.call_block(b, vec![x, cur])? {
-                        Value::Int(i) => i.cmp(&0),
+                        V::Int(i) => i.cmp(&0),
                         _ => return Err(vm.arg_err("comparison failed")),
                     },
                     None => compare(vm, &x, &cur)?,
@@ -399,7 +399,7 @@ fn extreme(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>, want: Orderin
             }
         });
     }
-    Ok(best.unwrap_or(Value::Nil))
+    Ok(best.unwrap_or(V::Nil))
 }
 
 fn extreme_by(vm: &mut Vm, s: &Value, b: Option<&Value>, want: Ordering) -> VmResult {
@@ -412,7 +412,7 @@ fn extreme_by(vm: &mut Vm, s: &Value, b: Option<&Value>, want: Ordering) -> VmRe
             _ => (k, x),
         });
     }
-    Ok(best.map(|(_, x)| x).unwrap_or(Value::Nil))
+    Ok(best.map(|(_, x)| x).unwrap_or(V::Nil))
 }
 
 fn quantifier(
@@ -432,5 +432,5 @@ fn quantifier(
         };
         hits += hit as usize;
     }
-    Ok(Value::Bool(pred(hits, items.len())))
+    Ok(V::Bool(pred(hits, items.len())))
 }
