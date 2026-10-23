@@ -68,6 +68,7 @@ fn init_kernel(vm: &mut Vm) {
         Ok(Value::from(vm.singleton_class(s)?))
     });
     vm.def(&k, "extend", |vm, s, a, _| {
+        vm.check_frozen(s)?;
         let sc = vm.singleton_class(s)?;
         for m in a.iter().rev() {
             let m = module_arg(vm, m)?;
@@ -109,7 +110,7 @@ fn init_kernel(vm: &mut Vm) {
     });
     vm.def(&k, "remove_instance_variable", |vm, s, a, _| {
         let iv = sym_of(vm, &arg(a, 0))?;
-        match vm.ivar_remove(s, iv) {
+        match vm.ivar_remove(s, iv)? {
             Some(v) => Ok(v),
             None => Err(vm.name_err(format!("instance variable {} not defined", vm.sym_name(iv)))),
         }
@@ -163,6 +164,7 @@ fn init_module(vm: &mut Vm) {
         vm.def(&m, name, |_, _, _, _| Ok(Value::NIL));
     }
     vm.def(&m, "include", |vm, s, a, _| {
+        vm.check_frozen(s)?;
         let cls = this_class(vm, s)?;
         for v in a.iter().rev() {
             let module = module_arg(vm, v)?;
@@ -175,6 +177,7 @@ fn init_module(vm: &mut Vm) {
         Ok(*s)
     });
     vm.def(&m, "prepend", |vm, s, a, _| {
+        vm.check_frozen(s)?;
         let cls = this_class(vm, s)?;
         for v in a.iter().rev() {
             let module = module_arg(vm, v)?;
@@ -205,6 +208,7 @@ fn init_module(vm: &mut Vm) {
         ))
     });
     vm.def(&m, "define_method", |vm, s, a, b| {
+        vm.check_frozen(s)?;
         let cls = this_class(vm, s)?;
         let name = sym_of(vm, &arg(a, 0))?;
         let body = match (b, a.get(1)) {
@@ -221,12 +225,14 @@ fn init_module(vm: &mut Vm) {
         Ok(Value::sym(name))
     });
     vm.def(&m, "alias_method", |vm, s, a, _| {
+        vm.check_frozen(s)?;
         let cls = this_class(vm, s)?;
         let (new, old) = (sym_of(vm, &arg(a, 0))?, sym_of(vm, &arg(a, 1))?);
         vm.alias_method(&cls, new, old)?;
         Ok(Value::sym(new))
     });
     vm.def(&m, "remove_method", |vm, s, a, _| {
+        vm.check_frozen(s)?;
         let cls = this_class(vm, s)?;
         for n in a {
             let mid = sym_of(vm, n)?;
@@ -242,6 +248,7 @@ fn init_module(vm: &mut Vm) {
         Ok(*s)
     });
     vm.def(&m, "undef_method", |vm, s, a, _| {
+        vm.check_frozen(s)?;
         let cls = this_class(vm, s)?;
         for n in a {
             let mid = sym_of(vm, n)?;
@@ -282,6 +289,7 @@ fn init_module(vm: &mut Vm) {
     vm.def(&m, "public", |vm, s, a, _| set_vis(vm, s, a, Vis::Public));
     vm.def(&m, "protected", |vm, s, a, _| set_vis(vm, s, a, Vis::Protected));
     vm.def(&m, "module_function", |vm, s, a, _| {
+        vm.check_frozen(s)?;
         // a public copy on the module, the instance method made private
         let meta = vm.singleton_class(s)?;
         let cls = this_class(vm, s)?;
@@ -325,12 +333,14 @@ fn init_module(vm: &mut Vm) {
             })
     });
     vm.def(&m, "class_variable_set", |vm, s, a, _| {
+        vm.check_frozen(s)?;
         let cls = this_class(vm, s)?;
         let n = sym_of(vm, &arg(a, 0))?;
         let holder = vm.ancestors(&cls)
             .into_iter()
             .find(|k| vm.heap[k].cvars.borrow().get(n).is_some())
             .unwrap_or(cls);
+        vm.check_frozen(&Value::from(holder))?;
         vm.heap[holder].cvars.borrow_mut().set(n, arg(a, 1));
         Ok(arg(a, 1))
     });
@@ -377,6 +387,7 @@ fn init_module(vm: &mut Vm) {
         Ok(v)
     });
     vm.def(&m, "const_set", |vm, s, a, _| {
+        vm.check_frozen(s)?;
         let cls = this_class(vm, s)?;
         let n = sym_of(vm, &arg(a, 0))?;
         if !vm.sym_name(n).starts_with(char::is_uppercase) {
@@ -397,7 +408,6 @@ fn init_module(vm: &mut Vm) {
         let _ = vm;
         Ok(vm.array(syms))
     });
-    vm.def(&m, "freeze", |_, s, _, _| Ok(*s));
     vm.def(&m, "==", |vm, s, a, _| {
         Ok(Value::bool(vm.heap.identical(s, &arg(a, 0))))
     });
@@ -547,6 +557,7 @@ fn method_names(vm: &mut Vm, a: &[Value]) -> Result<Vec<Sym>, Unwind> {
 /// visibility in `s`. An inherited method is copied into `s` with the new
 /// visibility, as in mruby. Returns the arguments.
 fn set_vis(vm: &mut Vm, s: &Value, a: &[Value], vis: Vis) -> VmResult {
+    vm.check_frozen(s)?;
     let cls = this_class(vm, s)?;
     for name in method_names(vm, a)? {
         let own = matches!(

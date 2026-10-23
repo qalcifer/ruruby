@@ -23,6 +23,7 @@ pub fn init(vm: &mut Vm) {
     vm.heap[c].includes.push(vm.c.enumerable);
     // Hash.new(default) { |h, k| }, and a subclass's `super` in initialize
     vm.def(&c, "initialize", |vm, s, a, b| {
+        vm.check_frozen(s)?;
         check_argc(vm, a, 0, 1)?;
         if b.is_some() && !a.is_empty() {
             return Err(vm.arg_err("wrong number of arguments (given 1, expected 0)"));
@@ -169,6 +170,7 @@ pub fn init(vm: &mut Vm) {
         Ok(vm.heap[this_hash(vm, s)?].borrow().default)
     });
     vm.def(&c, "default=", |vm, s, a, _| {
+        vm.check_frozen(s)?;
         vm.heap[this_hash(vm, s)?].borrow_mut().default = arg(a, 0);
         Ok(arg(a, 0))
     });
@@ -201,6 +203,7 @@ pub fn init(vm: &mut Vm) {
         Ok(vm.hash_delete(h, &arg(a, 0))?.unwrap_or(Value::NIL))
     });
     vm.def(&c, "clear", |vm, s, _, _| {
+        vm.check_frozen(s)?;
         vm.heap[this_hash(vm, s)?].borrow_mut().clear();
         Ok(*s)
     });

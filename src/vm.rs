@@ -557,10 +557,14 @@ impl Vm {
         if self.custom_key(&k) {
             return self.hash_set_custom(h, k, v);
         }
+        self.check_frozen(&Value::from(h))?;
+        // a new String key is a frozen copy (a frozen one is used as it is)
         let k = match self.kind(k) {
-            V::Str(s) if !self.heap[h].borrow().contains(&self.heap, &k) => {
+            V::Str(s) if !self.is_frozen(&k) && !self.heap[h].borrow().contains(&self.heap, &k) => {
                 let copy = self.heap[s].borrow().clone();
-                self.str(copy)
+                let copy = self.str(copy);
+                self.freeze(&copy);
+                copy
             }
             _ => k,
         };
@@ -570,6 +574,7 @@ impl Vm {
 
     #[inline(never)]
     fn hash_set_custom(&mut self, h: HashRef, k: Value, v: Value) -> Result<(), Unwind> {
+        self.check_frozen(&Value::from(h))?;
         match self.hash_find_custom(h, &k)? {
             (Some(p), _) => self.heap[h].borrow_mut().set_value_at(p, v),
             (None, code) => self.heap[h].borrow_mut().push(&self.heap, k, v, code),
@@ -587,6 +592,7 @@ impl Vm {
     }
 
     pub fn hash_delete(&mut self, h: HashRef, k: &Value) -> Result<Option<Value>, Unwind> {
+        self.check_frozen(&Value::from(h))?;
         Ok(self.hash_find(h, k)?.map(|p| self.heap[h].borrow_mut().remove_at(&self.heap, p)))
     }
 
@@ -603,6 +609,7 @@ impl Vm {
 
     /// Ruby's `Hash#rehash`: hashes every key again (after keys mutated).
     pub fn hash_rehash(&mut self, h: HashRef) -> Result<(), Unwind> {
+        self.check_frozen(&Value::from(h))?;
         let pairs = self.heap[h].borrow().to_vec();
         self.heap[h].borrow_mut().clear();
         for (k, v) in pairs {
@@ -943,6 +950,7 @@ impl Vm {
                 let class = self.heap[o].class;
                 let name = format!("#<Class:#<{}>>", self.heap[class].name());
                 let s = self.heap.alloc(RClass::new_singleton(name, class));
+                self.heap[s].frozen.set(self.is_frozen(v));
                 self.heap[o].singleton.set(Some(s));
                 Ok(s)
             }
@@ -956,6 +964,7 @@ impl Vm {
                 let class = self.class_of(v);
                 let name = format!("#<Class:#<{}>>", self.heap[class].name());
                 let s = self.heap.alloc(RClass::new_singleton(name, class));
+                self.heap[s].frozen.set(self.is_frozen(v));
                 if let Some(x) = self.heap.extra_of_mut(v) {
                     x.singleton = Some(s);
                 }
@@ -1212,10 +1221,13 @@ impl Vm {
         }
     }
 
-    fn cvar_set(&self, target: &ClassRef, name: Sym, v: Value) {
+    /// `@@name = v`: in the class that has it, else the lexical class.
+    fn cvar_set(&mut self, target: &ClassRef, name: Sym, v: Value) -> Result<(), Unwind> {
         let base = self.lexical_class(target);
         let holder = self.cvar_holder(&base, name).unwrap_or(base);
+        self.check_frozen(&Value::from(holder))?;
         self.heap[holder].cvars.borrow_mut().set(name, v);
+        Ok(())
     }
 
     // ---- calling -------------------------------------------------------
@@ -1736,6 +1748,71 @@ impl Vm {
         }
     }
 
+    /// Whether `v` can't be changed: frozen with `freeze`, or a value that
+    /// never changes (numbers, symbols, nil, booleans, ranges).
+    pub fn is_frozen(&self, v: &Value) -> bool {
+        match self.kind(*v) {
+            V::Object(o) => self.heap[o].frozen.get(),
+            V::Class(c) => self.heap[c].frozen.get(),
+            V::Str(h) => self.heap.strings.is_frozen(h),
+            V::Array(h) => self.heap.arrays.is_frozen(h),
+            V::Hash(h) => self.heap.hashes.is_frozen(h),
+            V::Proc(_) => false,
+            _ => true,
+        }
+    }
+
+    /// `freeze`: also freezes the singleton class, if any.
+    pub fn freeze(&mut self, v: &Value) {
+        let singleton = match self.kind(*v) {
+            V::Object(o) => {
+                self.heap[o].frozen.set(true);
+                self.heap[o].singleton.get()
+            }
+            V::Class(c) => {
+                self.heap[c].frozen.set(true);
+                self.heap[c].meta.get()
+            }
+            V::Str(h) => {
+                self.heap.strings.freeze(h);
+                self.heap.strings.extra(h).and_then(|x| x.singleton)
+            }
+            V::Array(h) => {
+                self.heap.arrays.freeze(h);
+                self.heap.arrays.extra(h).and_then(|x| x.singleton)
+            }
+            V::Hash(h) => {
+                self.heap.hashes.freeze(h);
+                self.heap.hashes.extra(h).and_then(|x| x.singleton)
+            }
+            _ => None,
+        };
+        if let Some(s) = singleton {
+            self.heap[s].frozen.set(true);
+        }
+    }
+
+    /// FrozenError when `v` is frozen (before changing it).
+    #[inline]
+    pub fn check_frozen(&mut self, v: &Value) -> Result<(), Unwind> {
+        if self.is_frozen(v) { Err(self.frozen_error(v)) } else { Ok(()) }
+    }
+
+    #[cold]
+    fn frozen_error(&mut self, v: &Value) -> Unwind {
+        let what = match self.inspect(v) {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+        let kind = match self.kind(*v) {
+            V::Class(c) if self.heap[c].is_module => "module".to_string(),
+            V::Class(_) => "class".to_string(),
+            _ => self.class_name(v),
+        };
+        let msg = format!("can't modify frozen {kind}: {what}");
+        self.err(&self.c.frozen_error, msg)
+    }
+
     /// Array, Hash or String when `cls` is one of them or inherits from
     /// one: its instances are values of that built-in type.
     pub fn builtin_base(&self, cls: ClassRef) -> Option<ClassRef> {
@@ -1771,7 +1848,12 @@ impl Vm {
     }
 
     /// Removes an instance variable; its value if it was set.
-    pub fn ivar_remove(&mut self, obj: &Value, iv: Sym) -> Option<Value> {
+    pub fn ivar_remove(&mut self, obj: &Value, iv: Sym) -> Result<Option<Value>, Unwind> {
+        self.check_frozen(obj)?;
+        Ok(self.ivar_take(obj, iv))
+    }
+
+    fn ivar_take(&mut self, obj: &Value, iv: Sym) -> Option<Value> {
         let remove = |t: &mut IvTable| {
             let i = t.items.iter().position(|(k, _)| *k == iv)?;
             Some(t.items.remove(i).1)
@@ -1783,9 +1865,22 @@ impl Vm {
         }
     }
 
+    #[inline]
     pub fn ivar_set(&mut self, obj: &Value, iv: Sym, v: Value) -> Result<(), Unwind> {
+        if let V::Object(o) = self.kind(*obj) {
+            let o = &self.heap[o];
+            if !o.frozen.get() {
+                o.ivars.borrow_mut().set(iv, v);
+                return Ok(());
+            }
+        }
+        self.ivar_set_slow(obj, iv, v)
+    }
+
+    #[inline(never)]
+    fn ivar_set_slow(&mut self, obj: &Value, iv: Sym, v: Value) -> Result<(), Unwind> {
+        self.check_frozen(obj)?;
         match self.kind(*obj) {
-            V::Object(o) => self.heap[o].ivars.borrow_mut().set(iv, v),
             V::Class(c) => self.heap[c].ivars.borrow_mut().set(iv, v),
             _ if let Some(x) = self.heap.extra_of_mut(obj) => x.ivars.set(iv, v),
             _ => {
@@ -2231,7 +2326,7 @@ impl Vm {
                 let v = self.cvar_get(&f.target, s)?;
                 self.set_reg(f, a, v);
             }
-            Op::SetCV(a, s) => self.cvar_set(&f.target, s, self.reg(f, a)),
+            Op::SetCV(a, s) => self.cvar_set(&f.target, s, self.reg(f, a))?,
             Op::GetConst(a, s) => match self.get_const(&f.target, s) {
                 Some(v) => self.set_reg(f, a, v),
                 None => {
@@ -2242,6 +2337,7 @@ impl Vm {
             },
             Op::SetConst(a, s) => {
                 let owner = self.lexical_class(&f.target);
+                self.check_frozen(&Value::from(owner))?;
                 self.store_const(&owner, s, self.reg(f, a));
             }
             Op::GetMCnst(a, s) => {
@@ -2565,6 +2661,7 @@ impl Vm {
                 self.set_reg(f, a, p);
             }
             Op::TDef(s, idx) => {
+                self.check_frozen(&Value::from(f.target))?;
                 let irep = f.irep.reps[idx].clone();
                 let scope_vis = self.frame_vis(f);
                 let vis = if self.always_private(s) { Vis::Private } else { scope_vis };
@@ -2583,6 +2680,7 @@ impl Vm {
             },
             Op::SDef(a, s, idx) => {
                 let cls = self.singleton_class(&self.reg(f, a))?;
+                self.check_frozen(&Value::from(cls))?;
                 self.heap[cls].methods.insert(s, Method::Ruby(f.irep.reps[idx].clone()));
             }
             Op::Class(a, name, is_module) => {
@@ -2602,18 +2700,29 @@ impl Vm {
                 body.ret = a;
                 return Ok(Flow::Call(body));
             }
-            Op::Alias(new, old) => self.alias_method(&f.target, new, old)?,
+            Op::Alias(new, old) => {
+                self.check_frozen(&Value::from(f.target))?;
+                self.alias_method(&f.target, new, old)?;
+            }
             Op::GAlias(new, old) => {
                 let v = self.globals.get(&old).cloned().unwrap_or(Value::NIL);
                 self.globals.insert(new, v);
             }
-            Op::Undef(s) => self.undef_method(&f.target, s)?,
+            Op::Undef(s) => {
+                self.check_frozen(&Value::from(f.target))?;
+                self.undef_method(&f.target, s)?;
+            }
             Op::Defined(a, kind, s) => {
                 let v = match self.defined(f, kind, s) {
                     Some(d) => self.str(d),
                     None => Value::NIL,
                 };
+                self.freeze(&v);
                 self.set_reg(f, a, v);
+            }
+            Op::Freeze(a) => {
+                let v = self.reg(f, a);
+                self.freeze(&v);
             }
             Op::CurMethod(a) => {
                 let v = f

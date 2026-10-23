@@ -149,6 +149,8 @@ pub enum Op {
     /// this frame (`private`, `public`, `protected`, `module_function` with
     /// no arguments).
     DefaultVis(Vis),
+    /// R[a].freeze (what `defined?` answers is a frozen string)
+    Freeze(Reg),
     /// R[a].singleton_class.define_method(sym, Irep[b])
     SDef(Reg, Sym, usize),
     /// R[a] = class/module `sym` under R[a] (nil = current), superclass R[a+1]

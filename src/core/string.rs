@@ -31,6 +31,7 @@ pub fn init(vm: &mut Vm) {
     let c = vm.c.string;
     // String.new(str), and a subclass's `super` in initialize
     vm.def(&c, "initialize", |vm, s, a, _| {
+        vm.check_frozen(s)?;
         check_argc(vm, a, 0, 1)?;
         if let [x] = a {
             let text = str_of(vm, x)?;
@@ -194,6 +195,7 @@ pub fn init(vm: &mut Vm) {
         Ok(vm.str(out))
     });
     let append: NativeFn = |vm, s, a, _| {
+        vm.check_frozen(s)?;
         let piece = vm.to_s(&arg(a, 0))?;
         vm.heap[this_str(vm, s)?].borrow_mut().push_str(&piece);
         Ok(*s)
@@ -201,6 +203,7 @@ pub fn init(vm: &mut Vm) {
     vm.def(&c, "<<", append);
     vm.def(&c, "concat", append);
     vm.def(&c, "replace", |vm, s, a, _| {
+        vm.check_frozen(s)?;
         let new = str_of(vm, &arg(a, 0))?;
         *vm.heap[this_str(vm, s)?].borrow_mut() = new;
         Ok(*s)

@@ -17,6 +17,7 @@ pub fn init(vm: &mut Vm) {
     vm.heap[c].includes.push(vm.c.enumerable);
     // what Array.new and a subclass's `super` in initialize run
     vm.def(&c, "initialize", |vm, s, a, b| {
+        vm.check_frozen(s)?;
         let items = super::kernel::array_new_items(vm, a, b)?;
         *vm.heap[this_ary(vm, s)?].borrow_mut() = items;
         Ok(Value::NIL)
@@ -125,6 +126,7 @@ pub fn init(vm: &mut Vm) {
         Ok(vm.array(v[v.len() - n..].to_vec()))
     });
     let push: NativeFn = |vm, s, a, _| {
+        vm.check_frozen(s)?;
         vm.heap[this_ary(vm, s)?].borrow_mut().extend_from_slice(a);
         Ok(*s)
     };
@@ -132,9 +134,11 @@ pub fn init(vm: &mut Vm) {
     vm.def(&c, "append", push);
     vm.def(&c, "<<", push);
     vm.def(&c, "pop", |vm, s, _, _| {
+        vm.check_frozen(s)?;
         Ok(vm.heap[this_ary(vm, s)?].borrow_mut().pop().unwrap_or(Value::NIL))
     });
     vm.def(&c, "shift", |vm, s, _, _| {
+        vm.check_frozen(s)?;
         let arr = this_ary(vm, s)?;
         let mut v = vm.heap[arr].borrow_mut();
         Ok(if v.is_empty() {
@@ -144,6 +148,7 @@ pub fn init(vm: &mut Vm) {
         })
     });
     let unshift: NativeFn = |vm, s, a, _| {
+        vm.check_frozen(s)?;
         let arr = this_ary(vm, s)?;
         vm.heap[arr].borrow_mut().splice(0..0, a.iter().cloned());
         Ok(*s)
@@ -151,6 +156,7 @@ pub fn init(vm: &mut Vm) {
     vm.def(&c, "unshift", unshift);
     vm.def(&c, "prepend", unshift);
     vm.def(&c, "insert", |vm, s, a, _| {
+        vm.check_frozen(s)?;
         let arr = this_ary(vm, s)?;
         let len = vm.heap[arr].borrow().len();
         let i = int_of(vm, &arg(a, 0))?;
@@ -159,6 +165,7 @@ pub fn init(vm: &mut Vm) {
         Ok(*s)
     });
     vm.def(&c, "concat", |vm, s, a, _| {
+        vm.check_frozen(s)?;
         let mut extra = Vec::new();
         for x in a {
             extra.extend(vm.heap[this_ary(vm, x)?].borrow().iter().cloned());
@@ -167,15 +174,18 @@ pub fn init(vm: &mut Vm) {
         Ok(*s)
     });
     vm.def(&c, "clear", |vm, s, _, _| {
+        vm.check_frozen(s)?;
         vm.heap[this_ary(vm, s)?].borrow_mut().clear();
         Ok(*s)
     });
     vm.def(&c, "replace", |vm, s, a, _| {
+        vm.check_frozen(s)?;
         let new = vm.heap[this_ary(vm, &arg(a, 0))?].borrow().clone();
         *vm.heap[this_ary(vm, s)?].borrow_mut() = new;
         Ok(*s)
     });
     vm.def(&c, "delete", |vm, s, a, _| {
+        vm.check_frozen(s)?;
         let target = arg(a, 0);
         let mut found = Value::NIL;
         let mut kept = Vec::new();
@@ -190,6 +200,7 @@ pub fn init(vm: &mut Vm) {
         Ok(found)
     });
     vm.def(&c, "delete_at", |vm, s, a, _| {
+        vm.check_frozen(s)?;
         let arr = this_ary(vm, s)?;
         let len = vm.heap[arr].borrow().len();
         Ok(
@@ -200,6 +211,7 @@ pub fn init(vm: &mut Vm) {
         )
     });
     vm.def(&c, "delete_if", |vm, s, _, b| {
+        vm.check_frozen(s)?;
         let b = need_block(vm, b)?;
         let mut kept = Vec::new();
         for x in items(vm, s)? {
@@ -211,6 +223,7 @@ pub fn init(vm: &mut Vm) {
         Ok(*s)
     });
     vm.def(&c, "map!", |vm, s, _, b| {
+        vm.check_frozen(s)?;
         let b = need_block(vm, b)?;
         let mut out = Vec::new();
         for x in items(vm, s)? {
@@ -219,12 +232,17 @@ pub fn init(vm: &mut Vm) {
         *vm.heap[this_ary(vm, s)?].borrow_mut() = out;
         Ok(*s)
     });
+    let map_bang = vm.intern("map!");
+    let collect_bang = vm.intern("collect!");
+    let _ = vm.alias_method(&c, collect_bang, map_bang);
     vm.def(&c, "sort!", |vm, s, _, b| {
+        vm.check_frozen(s)?;
         let sorted = sort_values(vm, items(vm, s)?, b)?;
         *vm.heap[this_ary(vm, s)?].borrow_mut() = sorted;
         Ok(*s)
     });
     vm.def(&c, "reverse!", |vm, s, _, _| {
+        vm.check_frozen(s)?;
         vm.heap[this_ary(vm, s)?].borrow_mut().reverse();
         Ok(*s)
     });
@@ -334,6 +352,7 @@ pub fn init(vm: &mut Vm) {
         Ok(vm.int(n))
     });
     vm.def(&c, "fill", |vm, s, a, _| {
+        vm.check_frozen(s)?;
         let v = arg(a, 0);
         vm.heap[this_ary(vm, s)?].borrow_mut()
             .iter_mut()
@@ -381,6 +400,7 @@ pub fn init(vm: &mut Vm) {
 
 /// `a[i] = v`, `a[start, len] = v`, `a[range] = v` (the last two splice).
 fn aset(vm: &mut Vm, s: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
+    vm.check_frozen(s)?;
     check_argc(vm, a, 2, 3)?;
     let arr = this_ary(vm, s)?;
     let len = vm.heap[arr].borrow().len() as i64;

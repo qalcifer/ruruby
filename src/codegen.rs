@@ -247,6 +247,12 @@ impl Codegen<'_> {
         self.emit(Op::String(dst, i));
     }
 
+    /// What `defined?` answers: a frozen string.
+    fn defined_str(&mut self, dst: Reg, s: &str) {
+        self.load_str(dst, s);
+        self.emit(Op::Freeze(dst));
+    }
+
     /// Finds a local: (scope depth, register).
     fn lookup(&self, name: &str) -> Option<(usize, Reg)> {
         for (depth, s) in self.scopes.iter().rev().enumerate() {
@@ -1380,7 +1386,7 @@ impl Codegen<'_> {
     /// Like `defined`, but jumps recorded in `fails` mean "not defined".
     fn defined_into(&mut self, e: &Node, dst: Reg, fails: &mut Vec<usize>) -> CResult<()> {
         match e {
-            Node::LVar(_) => self.load_str(dst, "local-variable"),
+            Node::LVar(_) => self.defined_str(dst, "local-variable"),
             Node::IVar(n) | Node::GVar(n) | Node::CVar(n) | Node::Const(n) => {
                 let kind = match e {
                     Node::IVar(_) => DefinedKind::IVar,
@@ -1406,7 +1412,7 @@ impl Codegen<'_> {
                 self.emit(Op::Defined(dst, DefinedKind::ScopedConst(a), s));
                 self.free_to(a);
             }
-            Node::Call { block: Some(_), .. } => self.load_str(dst, "expression"),
+            Node::Call { block: Some(_), .. } => self.defined_str(dst, "expression"),
             Node::Call {
                 recv,
                 name,
@@ -1437,7 +1443,7 @@ impl Codegen<'_> {
                 for el in elems {
                     self.require_defined(el, dst, fails)?;
                 }
-                self.load_str(dst, "expression");
+                self.defined_str(dst, "expression");
             }
             Node::Hash(items, _) => {
                 for item in items {
@@ -1449,7 +1455,7 @@ impl Codegen<'_> {
                         HashItem::Splat(h) => self.require_defined(h, dst, fails)?,
                     }
                 }
-                self.load_str(dst, "expression");
+                self.defined_str(dst, "expression");
             }
             Node::Splat(inner) => self.defined_into(inner, dst, fails)?,
             // a bare `begin ... end` around one expression is transparent
@@ -1462,22 +1468,22 @@ impl Codegen<'_> {
             Node::Yield(_) => {
                 self.emit(Op::BlockGiven(dst));
                 fails.push(self.emit(Op::JmpNot(dst, 0)));
-                self.load_str(dst, "yield");
+                self.defined_str(dst, "yield");
             }
             Node::Super { .. } => {
                 let s = self.sym("super");
                 self.emit(Op::Defined(dst, DefinedKind::Super, s));
             }
-            Node::SelfRef => self.load_str(dst, "self"),
-            Node::Nil => self.load_str(dst, "nil"),
-            Node::True => self.load_str(dst, "true"),
-            Node::False => self.load_str(dst, "false"),
+            Node::SelfRef => self.defined_str(dst, "self"),
+            Node::Nil => self.defined_str(dst, "nil"),
+            Node::True => self.defined_str(dst, "true"),
+            Node::False => self.defined_str(dst, "false"),
             Node::LAsgn(..)
             | Node::IAsgn(..)
             | Node::GAsgn(..)
             | Node::CVAsgn(..)
             | Node::CAsgn(..)
-            | Node::MAsgn(..) => self.load_str(dst, "assignment"),
+            | Node::MAsgn(..) => self.defined_str(dst, "assignment"),
             // `a ||= v` / `a &&= v` desugar to Or/And around an assignment
             Node::Or(_, r) | Node::And(_, r)
                 if matches!(
@@ -1489,10 +1495,10 @@ impl Codegen<'_> {
                         | Node::CAsgn(..)
                 ) =>
             {
-                self.load_str(dst, "assignment")
+                self.defined_str(dst, "assignment")
             }
-            Node::BlockGiven | Node::CurrentMethod => self.load_str(dst, "method"),
-            _ => self.load_str(dst, "expression"),
+            Node::BlockGiven | Node::CurrentMethod => self.defined_str(dst, "method"),
+            _ => self.defined_str(dst, "expression"),
         }
         Ok(())
     }

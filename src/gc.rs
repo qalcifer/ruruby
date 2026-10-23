@@ -109,6 +109,10 @@ pub struct Arena<T> {
     /// Per slot, what a String/Array/Hash carries besides its contents;
     /// empty until some value of the arena has one.
     extra: Vec<Option<Box<Extra>>>,
+    /// Per slot, frozen (`freeze`), for Strings, Arrays and Hashes; empty
+    /// until one is (frozen String keys of hashes are common, so this
+    /// isn't in `extra`).
+    frozen: Vec<bool>,
 }
 
 /// A class other than the built-in one (an instance of a subclass of
@@ -136,6 +140,7 @@ impl<T> Default for Arena<T> {
             slots: Vec::new(),
             free: Vec::new(),
             extra: Vec::new(),
+            frozen: Vec::new(),
         }
     }
 }
@@ -188,6 +193,20 @@ impl<T> Arena<T> {
         self.extra[i].get_or_insert_with(Box::default)
     }
 
+    #[inline]
+    pub fn is_frozen(&self, h: Gc<T>) -> bool {
+        self.frozen.get(h.idx as usize).copied().unwrap_or(false)
+    }
+
+    pub fn freeze(&mut self, h: Gc<T>) {
+        self.get(h);
+        let i = h.idx as usize;
+        if self.frozen.len() <= i {
+            self.frozen.resize(self.slots.len().max(i + 1), false);
+        }
+        self.frozen[i] = true;
+    }
+
     /// Number of live objects.
     pub fn len(&self) -> usize {
         self.slots.len() - self.free.len()
@@ -202,6 +221,9 @@ impl<T> Arena<T> {
                 slot.generation = (slot.generation + 1) & GEN_MASK;
                 if let Some(x) = self.extra.get_mut(i) {
                     *x = None;
+                }
+                if let Some(x) = self.frozen.get_mut(i) {
+                    *x = false;
                 }
                 self.free.push(i as u32);
                 freed += 1;

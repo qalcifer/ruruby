@@ -137,15 +137,27 @@ fn init_object(vm: &mut Vm) {
         };
         Ok(vm.int(id))
     });
-    vm.def(&o, "freeze", |_, s, _, _| Ok(*s));
-    vm.def(&o, "frozen?", |vm, s, _, _| {
-        Ok(Value::bool(!matches!(
-            vm.kind(*s),
-            V::Str(_) | V::Array(_) | V::Hash(_) | V::Object(_)
-        )))
+    vm.def(&o, "freeze", |vm, s, _, _| {
+        vm.freeze(s);
+        Ok(*s)
     });
+    vm.def(&o, "frozen?", |vm, s, _, _| Ok(Value::bool(vm.is_frozen(s))));
     vm.def(&o, "dup", dup);
-    vm.def(&o, "clone", dup);
+    // like dup, and frozen when the original is (unless `freeze: false`)
+    vm.def(&o, "clone", |vm, s, a, b| {
+        let copy = dup(vm, s, &[], b)?;
+        let keep = match a.first().map(|h| vm.kind(*h)) {
+            Some(V::Hash(h)) => {
+                let k = Value::sym(vm.intern("freeze"));
+                vm.heap[h].borrow().get(&vm.heap, &k).is_none_or(|v| v.truthy())
+            }
+            _ => true,
+        };
+        if keep && vm.is_frozen(s) && !vm.heap.identical(s, &copy) {
+            vm.freeze(&copy);
+        }
+        Ok(copy)
+    });
     vm.def(&o, "itself", |_, s, _, _| Ok(*s));
     vm.def(&o, "tap", |vm, s, _, b| {
         let b = need_block(vm, b)?;
@@ -377,6 +389,7 @@ fn class_new(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>) -> VmResult
 /// `attr_reader` & co.; returns the names of the methods defined (so
 /// `private attr_accessor :a` works).
 fn attr(vm: &mut Vm, s: &Value, a: &[Value], reader: bool, writer: bool) -> VmResult {
+    vm.check_frozen(s)?;
     let V::Class(cls) = vm.kind(*s) else { unreachable!() };
     // under module_function: private, and no module method is made
     let vis = match vm.scope_vis(cls) {
@@ -416,18 +429,6 @@ fn init_module(vm: &mut Vm) {
     });
     vm.def(&m, "attr_reader", |vm, s, a, _| attr(vm, s, a, true, false));
     vm.def(&m, "attr_writer", |vm, s, a, _| attr(vm, s, a, false, true));
-    vm.def(&m, "include", |vm, s, a, _| {
-        let V::Class(cls) = vm.kind(*s) else { unreachable!() };
-        for m in a {
-            match vm.kind(*m) {
-                V::Class(module) if vm.heap[module].is_module => {
-                    vm.heap[cls].includes.push(module)
-                }
-                _ => return Err(vm.type_err("wrong argument type (expected Module)")),
-            }
-        }
-        Ok(*s)
-    });
     vm.def(&m, "ancestors", |vm, s, _, _| {
         let V::Class(cls) = vm.kind(*s) else { unreachable!() };
         Ok(vm.array(

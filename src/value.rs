@@ -177,6 +177,8 @@ pub struct RClass {
     pub attached: Cell<Option<ClassRef>>,
     /// The class/module this one was defined in (an approximation of mruby's lexical `cref`).
     pub outer: Cell<Option<ClassRef>>,
+    /// `freeze`: no more methods, constants, class variables, ivars, modules.
+    pub frozen: Cell<bool>,
 }
 
 impl RClass {
@@ -196,6 +198,7 @@ impl RClass {
             is_singleton: false,
             attached: Default::default(),
             outer: Default::default(),
+            frozen: Default::default(),
         }
     }
 
@@ -234,6 +237,7 @@ pub struct RObject {
     pub ivars: RefCell<IvTable>,
     /// Per-object singleton class (`def obj.m`, `obj.extend(M)`).
     pub singleton: Cell<Option<ClassRef>>,
+    pub frozen: Cell<bool>,
 }
 
 impl RObject {
@@ -242,6 +246,7 @@ impl RObject {
             class,
             ivars: Default::default(),
             singleton: Default::default(),
+            frozen: Default::default(),
         }
     }
 }
