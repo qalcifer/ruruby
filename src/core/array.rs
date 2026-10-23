@@ -15,6 +15,20 @@ fn items(vm: &Vm, s: &Value) -> Result<Vec<Value>, Unwind> {
 pub fn init(vm: &mut Vm) {
     let c = vm.c.array;
     vm.heap[c].includes.push(vm.c.enumerable);
+    // what Array.new and a subclass's `super` in initialize run
+    vm.def(&c, "initialize", |vm, s, a, b| {
+        let items = super::kernel::array_new_items(vm, a, b)?;
+        *vm.heap[this_ary(vm, s)?].borrow_mut() = items;
+        Ok(Value::NIL)
+    });
+    // Array[1, 2]: an instance of the receiver (a subclass too)
+    vm.def_singleton(&c, "[]", |vm, s, a, _| {
+        let v = vm.array(a.to_vec());
+        if let V::Class(cls) = vm.kind(*s) {
+            vm.set_builtin_class(&v, cls);
+        }
+        Ok(v)
+    });
     vm.def(&c, "each", |vm, s, _, b| {
         let b = need_block(vm, b)?;
         let arr = this_ary(vm, s)?;

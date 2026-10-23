@@ -271,22 +271,51 @@ fn raise(vm: &mut Vm, _: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
     Err(Unwind::Error(exc))
 }
 
+/// The contents `Array.new(size = 0, default = nil) { |i| }` or
+/// `Array.new(array)` makes.
+pub fn array_new_items(vm: &mut Vm, a: &[Value], b: Option<&Value>) -> Result<Vec<Value>, Unwind> {
+    check_argc(vm, a, 0, 2)?;
+    if let [x] = a
+        && let V::Array(src) = vm.kind(*x)
+    {
+        return Ok(vm.heap[src].borrow().clone());
+    }
+    let n = if a.is_empty() { 0 } else { int_of(vm, &a[0])? };
+    if n < 0 {
+        return Err(vm.arg_err("negative array size"));
+    }
+    let mut v = Vec::with_capacity(n as usize);
+    for i in 0..n {
+        v.push(match b {
+            Some(b) => vm.call_block(b, vec![Value::small_int(i)])?,
+            None => arg(a, 1),
+        });
+    }
+    Ok(v)
+}
+
 fn class_new(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>) -> VmResult {
     let V::Class(cls) = vm.kind(*s) else { unreachable!() };
     if cls == vm.c.array {
-        let n = if a.is_empty() {
-            0
-        } else {
-            int_of(vm, &a[0])?.max(0) as usize
-        };
-        let mut v = Vec::with_capacity(n);
-        for i in 0..n {
-            v.push(match b {
-                Some(b) => vm.call_block(b, vec![Value::small_int(i as i64)])?,
-                None => arg(a, 1),
-            });
-        }
+        let v = array_new_items(vm, a, b)?;
         return Ok(vm.array(v));
+    }
+    // a subclass of Array, Hash or String: a value of that type with the
+    // class, which `initialize` (a native one, or the class's calling
+    // `super`) fills in
+    if let Some(base) = vm.builtin_base(cls)
+        && base != cls
+    {
+        let v = if base == vm.c.array {
+            vm.array(vec![])
+        } else if base == vm.c.hash {
+            vm.hash(RHash::new())
+        } else {
+            vm.str(String::new())
+        };
+        vm.set_builtin_class(&v, cls);
+        vm.call_with_block(&v, vm.s.initialize, a.to_vec(), b.cloned())?;
+        return Ok(v);
     }
     if (cls == vm.c.class) || (cls == vm.c.module) {
         return super::reflect::new_class_or_module(vm, cls, a, b);

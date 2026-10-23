@@ -29,6 +29,15 @@ pub fn norm_index(i: i64, len: usize) -> Option<usize> {
 
 pub fn init(vm: &mut Vm) {
     let c = vm.c.string;
+    // String.new(str), and a subclass's `super` in initialize
+    vm.def(&c, "initialize", |vm, s, a, _| {
+        check_argc(vm, a, 0, 1)?;
+        if let [x] = a {
+            let text = str_of(vm, x)?;
+            *vm.heap[this_str(vm, s)?].borrow_mut() = text;
+        }
+        Ok(Value::NIL)
+    });
     vm.def(&c, "to_s", |_, s, _, _| Ok(*s));
     vm.def(&c, "to_str", |_, s, _, _| Ok(*s));
     vm.def(&c, "inspect", |vm, s, _, _| {

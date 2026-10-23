@@ -1720,6 +1720,30 @@ impl Vm {
         }
     }
 
+    /// Array, Hash or String when `cls` is one of them or inherits from
+    /// one: its instances are values of that built-in type.
+    pub fn builtin_base(&self, cls: ClassRef) -> Option<ClassRef> {
+        let bases = [self.c.array, self.c.hash, self.c.string];
+        let mut c = Some(cls);
+        while let Some(k) = c {
+            if bases.contains(&k) {
+                return Some(k);
+            }
+            c = self.heap[k].superclass;
+        }
+        None
+    }
+
+    /// Makes the String/Array/Hash value `v` an instance of `cls` (a
+    /// subclass of its type; its own type leaves it as it is).
+    pub fn set_builtin_class(&mut self, v: &Value, cls: ClassRef) {
+        if self.class_of(v) != cls
+            && let Some(x) = self.heap.extra_of_mut(v)
+        {
+            x.class = Some(cls);
+        }
+    }
+
     /// The names of `obj`'s instance variables, in order.
     pub fn ivar_names(&self, obj: &Value) -> Vec<Sym> {
         let names = |t: &IvTable| t.items.iter().map(|(k, _)| *k).collect();

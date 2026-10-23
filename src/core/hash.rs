@@ -21,6 +21,54 @@ fn new_hash(vm: &mut Vm) -> (Value, HashRef) {
 pub fn init(vm: &mut Vm) {
     let c = vm.c.hash;
     vm.heap[c].includes.push(vm.c.enumerable);
+    // Hash.new(default) { |h, k| }, and a subclass's `super` in initialize
+    vm.def(&c, "initialize", |vm, s, a, b| {
+        check_argc(vm, a, 0, 1)?;
+        if b.is_some() && !a.is_empty() {
+            return Err(vm.arg_err("wrong number of arguments (given 1, expected 0)"));
+        }
+        let mut h = vm.heap[this_hash(vm, s)?].borrow_mut();
+        h.default = arg(a, 0);
+        h.default_proc = b.cloned();
+        Ok(Value::NIL)
+    });
+    // Hash[hash], Hash[[[k, v], ...]], Hash[k, v, ...]: an instance of the
+    // receiver (a subclass too)
+    vm.def_singleton(&c, "[]", |vm, s, a, _| {
+        let pairs: Vec<(Value, Value)> = match a {
+            [x] if matches!(vm.kind(*x), V::Hash(_)) => pairs(vm, x)?,
+            [x] if let V::Array(items) = vm.kind(*x) => {
+                let items = vm.heap[items].borrow().clone();
+                let mut out = Vec::new();
+                for item in items {
+                    let V::Array(p) = vm.kind(item) else {
+                        return Err(vm.arg_err("wrong element type (expected array)"));
+                    };
+                    let p = vm.heap[p].borrow();
+                    match p.len() {
+                        1 | 2 => out.push((p[0], p.get(1).copied().unwrap_or(Value::NIL))),
+                        n => {
+                            drop(p);
+                            return Err(vm.arg_err(format!(
+                                "invalid number of elements ({n} for 1..2)"
+                            )));
+                        }
+                    }
+                }
+                out
+            }
+            _ if a.len() % 2 == 1 => return Err(vm.arg_err("odd number of arguments for Hash")),
+            _ => a.chunks(2).map(|kv| (kv[0], kv[1])).collect(),
+        };
+        let (hv, h) = new_hash(vm);
+        for (k, v) in pairs {
+            vm.hash_set(h, k, v)?;
+        }
+        if let V::Class(cls) = vm.kind(*s) {
+            vm.set_builtin_class(&hv, cls);
+        }
+        Ok(hv)
+    });
     vm.def(&c, "[]", |vm, s, a, _| {
         let h = this_hash(vm, s)?;
         let key = arg(a, 0);
