@@ -38,7 +38,7 @@ pub fn init(vm: &mut Vm) {
             let text = str_of(vm, x)?;
             *vm.heap[this_str(vm, s)?].borrow_mut() = text;
         }
-        Ok(Value::NIL)
+        Ok(*s)
     });
     vm.def(&c, "to_s", |_, s, _, _| Ok(*s));
     vm.def(&c, "to_str", |_, s, _, _| Ok(*s));

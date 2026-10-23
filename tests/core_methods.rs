@@ -84,3 +84,27 @@ fn string_search_bytes_and_substitution() {
          \".abc\"\n\"b\"\n\"aa\"\n:range\n"
     );
 }
+
+#[test]
+fn array_methods() {
+    let out = run(r##"
+        p [].send(:initialize, 2), [1, 2, 3].shift(2), [1, 2, 3].pop(2), [].shift(1)
+        a = ["a", "b"]
+        p a.delete("x") { _1 + "!" }, a.delete("a"), a
+        p [1, 2].eql?([1, 2]), [1, 2].eql?([1.0, 2.0]), [1, 2] == [1.0, 2.0], {[1] => :a}[[1.0]]
+        p (begin; [1].first(-1); rescue ArgumentError => e; e.message; end)
+        p (begin; [1].last(1, 2); rescue ArgumentError; :argc; end), (begin; [].[](); rescue ArgumentError; :argc; end)
+        p [3, 1, 2].sort { |x, y| (x - y).to_f }, (begin; [1, 2].sort { nil }; rescue ArgumentError => e; e.message; end)
+        p [1, 2, 1].rindex(1), [1, 2, 3].rindex { _1 < 3 }, [1, :a, "s", 2].grep(Integer), [1, :a].grep_v(Integer)
+        p (1..6).find_all(&:even?), [1, 2].grep(Integer) { _1 * 10 }
+        x = [1]
+        x.send(:initialize_copy, [7, 8])
+        p x, (begin; [1][Float::NAN]; rescue RangeError; :range; end)
+    "##);
+    assert_eq!(
+        out,
+        "[nil, nil]\n[1, 2]\n[2, 3]\n[]\n\"x!\"\n\"a\"\n[\"b\"]\ntrue\nfalse\ntrue\nnil\n\
+         \"negative array size\"\n:argc\n:argc\n[1, 2, 3]\n\"comparison of Integer with Integer failed\"\n\
+         2\n1\n[1, 2]\n[:a]\n[2, 4, 6]\n[10, 20]\n[7, 8]\n:range\n"
+    );
+}

@@ -52,6 +52,9 @@ pub fn init(vm: &mut Vm) {
         Ok(vm.array(out))
     });
     vm.def(&e, "select", |vm, s, _, b| select(vm, s, b, true));
+    vm.def(&e, "find_all", |vm, s, _, b| select(vm, s, b, true));
+    vm.def(&e, "grep", |vm, s, a, b| grep(vm, s, a, b, true));
+    vm.def(&e, "grep_v", |vm, s, a, b| grep(vm, s, a, b, false));
     vm.def(&e, "filter", |vm, s, _, b| select(vm, s, b, true));
     vm.def(&e, "reject", |vm, s, _, b| select(vm, s, b, false));
     vm.def(&e, "partition", |vm, s, _, b| {
@@ -440,3 +443,20 @@ fn quantifier(
     }
     Ok(Value::bool(pred(hits, items.len())))
 }
+
+/// grep(pattern) { |x| }: the elements `pattern === x` (or not, for
+/// grep_v) takes, through the block when given.
+fn grep(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>, matching: bool) -> VmResult {
+    check_argc(vm, a, 1, 1)?;
+    let mut out = Vec::new();
+    for x in to_vec(vm, s)? {
+        if vm.send(&a[0], "===", vec![x])?.truthy() == matching {
+            out.push(match b {
+                Some(b) => vm.call_block(b, vec![x])?,
+                None => x,
+            });
+        }
+    }
+    Ok(vm.array(out))
+}
+

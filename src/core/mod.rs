@@ -25,6 +25,7 @@ pub fn init(vm: &mut Vm) {
     numeric::init(vm);
     string::init(vm);
     array::init(vm);
+    array::init_more(vm);
     hash::init(vm);
     range::init(vm);
     enumerable::init(vm);
@@ -210,7 +211,11 @@ pub fn sort_values(vm: &mut Vm, v: Vec<Value>, blk: Option<&Value>) -> Result<Ve
                 v,
                 &mut |vm, x, y| match vm.call_block(&b, vec![*x, *y]).map(|r| vm.kind(r))? {
                     V::Int(i) => Ok(i.cmp(&0)),
-                    _ => Err(vm.arg_err("comparison failed")),
+                    V::Float(f) if !f.is_nan() => Ok(f.partial_cmp(&0.0).unwrap_or(Ordering::Equal)),
+                    _ => {
+                        let (cx, cy) = (vm.class_name(x), vm.class_name(y));
+                        Err(vm.arg_err(format!("comparison of {cx} with {cy} failed")))
+                    }
                 },
             )
         }

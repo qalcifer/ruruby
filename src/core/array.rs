@@ -20,7 +20,7 @@ pub fn init(vm: &mut Vm) {
         vm.check_frozen(s)?;
         let items = super::kernel::array_new_items(vm, a, b)?;
         *vm.heap[this_ary(vm, s)?].borrow_mut() = items;
-        Ok(Value::NIL)
+        Ok(*s)
     });
     // Array[1, 2]: an instance of the receiver (a subclass too)
     vm.def_singleton(&c, "[]", |vm, s, a, _| {
@@ -110,19 +110,21 @@ pub fn init(vm: &mut Vm) {
         }
     });
     vm.def(&c, "first", |vm, s, a, _| {
+        check_argc(vm, a, 0, 1)?;
         let v = items(vm, s)?;
         if a.is_empty() {
             return Ok(v.first().cloned().unwrap_or(Value::NIL));
         }
-        let n = int_of(vm, &a[0])?.max(0) as usize;
+        let n = count_arg(vm, &a[0])?;
         Ok(vm.array(v.into_iter().take(n).collect()))
     });
     vm.def(&c, "last", |vm, s, a, _| {
+        check_argc(vm, a, 0, 1)?;
         let v = items(vm, s)?;
         if a.is_empty() {
             return Ok(v.last().cloned().unwrap_or(Value::NIL));
         }
-        let n = (int_of(vm, &a[0])?.max(0) as usize).min(v.len());
+        let n = count_arg(vm, &a[0])?.min(v.len());
         Ok(vm.array(v[v.len() - n..].to_vec()))
     });
     let push: NativeFn = |vm, s, a, _| {
@@ -133,13 +135,33 @@ pub fn init(vm: &mut Vm) {
     vm.def(&c, "push", push);
     vm.def(&c, "append", push);
     vm.def(&c, "<<", push);
-    vm.def(&c, "pop", |vm, s, _, _| {
+    // pop / pop(n), shift / shift(n)
+    vm.def(&c, "pop", |vm, s, a, _| {
         vm.check_frozen(s)?;
-        Ok(vm.heap[this_ary(vm, s)?].borrow_mut().pop().unwrap_or(Value::NIL))
-    });
-    vm.def(&c, "shift", |vm, s, _, _| {
-        vm.check_frozen(s)?;
+        check_argc(vm, a, 0, 1)?;
         let arr = this_ary(vm, s)?;
+        if let Some(n) = a.first() {
+            let n = count_arg(vm, n)?;
+            let mut v = vm.heap[arr].borrow_mut();
+            let at = v.len().saturating_sub(n);
+            let taken = v.split_off(at);
+            drop(v);
+            return Ok(vm.array(taken));
+        }
+        Ok(vm.heap[arr].borrow_mut().pop().unwrap_or(Value::NIL))
+    });
+    vm.def(&c, "shift", |vm, s, a, _| {
+        vm.check_frozen(s)?;
+        check_argc(vm, a, 0, 1)?;
+        let arr = this_ary(vm, s)?;
+        if let Some(n) = a.first() {
+            let n = count_arg(vm, n)?;
+            let mut v = vm.heap[arr].borrow_mut();
+            let n = n.min(v.len());
+            let taken: Vec<Value> = v.drain(..n).collect();
+            drop(v);
+            return Ok(vm.array(taken));
+        }
         let mut v = vm.heap[arr].borrow_mut();
         Ok(if v.is_empty() {
             Value::NIL
@@ -184,20 +206,25 @@ pub fn init(vm: &mut Vm) {
         *vm.heap[this_ary(vm, s)?].borrow_mut() = new;
         Ok(*s)
     });
-    vm.def(&c, "delete", |vm, s, a, _| {
+    // delete(x) { |x| }: the block's value when nothing equals x
+    vm.def(&c, "delete", |vm, s, a, b| {
         vm.check_frozen(s)?;
         let target = arg(a, 0);
-        let mut found = Value::NIL;
+        let mut found = None;
         let mut kept = Vec::new();
         for x in items(vm, s)? {
             if vm.equal(&x, &target)? {
-                found = x;
+                found = Some(x);
             } else {
                 kept.push(x);
             }
         }
         *vm.heap[this_ary(vm, s)?].borrow_mut() = kept;
-        Ok(found)
+        match (found, b) {
+            (Some(x), _) => Ok(x),
+            (None, Some(b)) => vm.call_block(b, vec![target]),
+            (None, None) => Ok(Value::NIL),
+        }
     });
     vm.def(&c, "delete_at", |vm, s, a, _| {
         vm.check_frozen(s)?;
@@ -465,6 +492,9 @@ fn aset(vm: &mut Vm, s: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
 }
 
 fn aref(vm: &mut Vm, s: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
+    if !(1..=2).contains(&a.len()) {
+        check_argc(vm, a, 1, 2)?;
+    }
     // `a[i]` is hot (Ruby iterators index in a loop): read it in place
     if let [x] = a
         && let V::Int(i) = vm.kind(*x)
@@ -502,7 +532,7 @@ fn aref(vm: &mut Vm, s: &Value, a: &[Value], _: Option<&Value>) -> VmResult {
             let end = (end.max(start as i64) as usize).min(len);
             Ok(vm.array(v[start..end].to_vec()))
         }
-        (V::Float(f), 1) => Ok(norm_index(f as i64, len)
+        (V::Float(_), 1) => Ok(norm_index(int_of(vm, &a[0])?, len)
             .and_then(|i| v.get(i).cloned())
             .unwrap_or(Value::NIL)),
         _ => Err(vm.type_err(format!(
@@ -563,3 +593,39 @@ fn flatten(vm: &Vm, v: &[Value], depth: i64, out: &mut Vec<Value>, seen: &mut Ve
     }
     true
 }
+
+/// A count argument (first(n), pop(n)…): ArgumentError when negative.
+fn count_arg(vm: &Vm, v: &Value) -> Result<usize, Unwind> {
+    let n = int_of(vm, v)?;
+    if n < 0 {
+        return Err(vm.arg_err("negative array size"));
+    }
+    Ok(n as usize)
+}
+
+pub fn init_more(vm: &mut Vm) {
+    let c = vm.c.array;
+    // rindex(x) / rindex { |x| }: the last position
+    vm.def(&c, "rindex", |vm, s, a, b| {
+        let v = items(vm, s)?;
+        for i in (0..v.len()).rev() {
+            let hit = match (a.first(), b) {
+                (Some(x), _) => vm.equal(&v[i], x)?,
+                (None, Some(b)) => vm.call_block(b, vec![v[i]])?.truthy(),
+                (None, None) => return Err(vm.arg_err("wrong number of arguments (given 0, expected 1)")),
+            };
+            if hit {
+                return Ok(Value::small_int(i as i64));
+            }
+        }
+        Ok(Value::NIL)
+    });
+    vm.def(&c, "initialize_copy", |vm, s, a, _| {
+        vm.check_frozen(s)?;
+        let src = this_ary(vm, &arg(a, 0))?;
+        let v = vm.heap[src].borrow().clone();
+        *vm.heap[this_ary(vm, s)?].borrow_mut() = v;
+        Ok(*s)
+    });
+}
+

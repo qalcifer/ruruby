@@ -35,7 +35,7 @@ fn index_finds_what_a_scan_finds() {
         out,
         "[]\n[6, 6, 6]\n118\n\
          [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, \
-         nil, 6, nil, 11, 13, 15, nil, 13, 17, nil, nil, nil, nil]\n"
+         nil, 6, nil, 11, 13, 15, nil, nil, 17, nil, nil, nil, nil]\n"
     );
 }
 

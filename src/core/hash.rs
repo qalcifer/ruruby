@@ -31,7 +31,7 @@ pub fn init(vm: &mut Vm) {
         let mut h = vm.heap[this_hash(vm, s)?].borrow_mut();
         h.default = arg(a, 0);
         h.default_proc = b.cloned();
-        Ok(Value::NIL)
+        Ok(*s)
     });
     // Hash[hash], Hash[[[k, v], ...]], Hash[k, v, ...]: an instance of the
     // receiver (a subclass too)

@@ -576,7 +576,7 @@ pub fn values_eq(heap: &Heap, a: &Value, b: &Value) -> bool {
     if a.is_unique() && b.is_unique() {
         return a.0 == b.0;
     }
-    eq_rec(heap, a, b, &mut Vec::new())
+    eq_rec(heap, a, b, &mut Vec::new(), false)
 }
 
 /// `in_progress` holds the container pairs currently being compared. Like
@@ -599,15 +599,16 @@ fn guarded(
     r
 }
 
-fn eq_rec(heap: &Heap, a: &Value, b: &Value, in_progress: &mut InProgress) -> bool {
+/// `strict`: `eql?` (an Integer is never eql? a Float, at any depth), else `==`.
+fn eq_rec(heap: &Heap, a: &Value, b: &Value, in_progress: &mut InProgress, strict: bool) -> bool {
     use V::*;
     match (heap.kind(*a), heap.kind(*b)) {
-        (Int(x), Float(y)) | (Float(y), Int(x)) => (x as f64) == y,
+        (Int(x), Float(y)) | (Float(y), Int(x)) => !strict && (x as f64) == y,
         (Str(x), Str(y)) => x == y || *heap[x].borrow() == *heap[y].borrow(),
         (Array(x), Array(y)) => {
             let (xv, yv) = (heap[x].borrow().clone(), heap[y].borrow().clone());
             guarded(x.id(), y.id(), in_progress, |ip| {
-                xv.len() == yv.len() && xv.iter().zip(&yv).all(|(p, q)| eq_rec(heap, p, q, ip))
+                xv.len() == yv.len() && xv.iter().zip(&yv).all(|(p, q)| eq_rec(heap, p, q, ip, strict))
             })
         }
         (Hash(x), Hash(y)) => {
@@ -616,13 +617,13 @@ fn eq_rec(heap: &Heap, a: &Value, b: &Value, in_progress: &mut InProgress) -> bo
                 xh.len() == yh.len()
                     && xh.iter().all(|(k, v)| {
                         yh.get(heap, &k)
-                            .is_some_and(|w| eq_rec(heap, &v, &w, ip))
+                            .is_some_and(|w| eq_rec(heap, &v, &w, ip, strict))
                     })
             })
         }
         (Range(x), Range(y)) => {
             let (x, y) = (&heap[x], &heap[y]);
-            eq_rec(heap, &x.0, &y.0, in_progress) && eq_rec(heap, &x.1, &y.1, in_progress) && x.2 == y.2
+            eq_rec(heap, &x.0, &y.0, in_progress, strict) && eq_rec(heap, &x.1, &y.1, in_progress, strict) && x.2 == y.2
         }
         _ => heap.identical(a, b),
     }
@@ -634,10 +635,7 @@ pub fn eql(heap: &Heap, a: &Value, b: &Value) -> bool {
     if a.is_unique() || b.is_unique() {
         return a.0 == b.0;
     }
-    match (heap.kind(*a), heap.kind(*b)) {
-        (V::Int(_), V::Float(_)) | (V::Float(_), V::Int(_)) => false,
-        _ => values_eq(heap, a, b),
-    }
+    eq_rec(heap, a, b, &mut Vec::new(), true)
 }
 
 /// The hash of a Hash key: values that are [`eql`] hash the same.
