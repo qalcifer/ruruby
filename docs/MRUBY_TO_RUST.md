@@ -231,7 +231,10 @@ Each step can be checked against mruby's own tests.
    size, is the limit), immediates compared by bits (Hash lookups 2×).
    Hashes with more than 8 pairs got an index (open addressing over the
    insertion-ordered pairs, like mruby's split between small and big
-   hashes): 250k inserts and lookups ~50 s → 0.12 s.
+   hashes): 250k inserts and lookups ~50 s → 0.12 s. Deletes leave dead
+   entries that are compacted later (O(1) instead of shifting), and keys
+   whose class defines `hash`/`eql?` are hashed and compared through them,
+   raising if a callback changes the hash under the lookup.
    Next: fewer frame copies per call.
 7. **Numbers.** Bignum (`num-bigint`, matching `mruby-bigint`), Rational, Complex.
 8. **Enumerators.** `Enumerator`, external iteration (needs Fibers), `lazy`.
