@@ -179,6 +179,8 @@ pub struct CommonSyms {
     pub to_proc: Sym,
     pub hash: Sym,
     pub eql: Sym,
+    pub initialize_copy: Sym,
+    pub respond_to_missing: Sym,
 }
 
 pub struct Vm {
@@ -251,6 +253,8 @@ struct Frame {
     is_home: bool,
     /// A lambda: `break` in its own body returns from it.
     lambda: bool,
+    /// Visibility `def` gives methods (`private` with no arguments).
+    vis: Vis,
 }
 
 impl Frame {
@@ -275,6 +279,7 @@ impl Frame {
             break_tag: 0,
             is_home: false,
             lambda: false,
+            vis: Vis::Public,
         }
     }
 }
@@ -470,6 +475,8 @@ impl Vm {
             to_ary: syms.intern("to_ary"),
             hash: syms.intern("hash"),
             eql: syms.intern("eql?"),
+            initialize_copy: syms.intern("initialize_copy"),
+            respond_to_missing: syms.intern("respond_to_missing?"),
             to_proc: syms.intern("to_proc"),
         };
         let main_obj = Value::from(heap.alloc(RObject::new(c.object)));
@@ -2405,8 +2412,21 @@ impl Vm {
             }
             Op::TDef(s, idx) => {
                 let irep = f.irep.reps[idx].clone();
-                self.heap[f.target].methods.insert(s, Method::Ruby(irep));
+                // like Ruby, these are private wherever they are defined
+                let vis = if [self.s.initialize, self.s.initialize_copy, self.s.respond_to_missing]
+                    .contains(&s)
+                {
+                    Vis::Private
+                } else {
+                    f.vis
+                };
+                if f.vis == Vis::ModuleFunction {
+                    let meta = self.singleton_class(&Value::from(f.target))?;
+                    self.heap[meta].methods.insert(s, Method::Ruby(irep.clone()));
+                }
+                self.heap[f.target].methods.insert_vis(s, Method::Ruby(irep), vis);
             }
+            Op::DefaultVis(vis) => f.vis = vis,
             Op::SDef(a, s, idx) => {
                 let cls = self.singleton_class(&self.reg(f, a))?;
                 self.heap[cls].methods.insert(s, Method::Ruby(f.irep.reps[idx].clone()));

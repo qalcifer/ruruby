@@ -143,8 +143,12 @@ pub enum Op {
     Block(Reg, usize),
     /// R[a] = lambda(Irep[b])
     Lambda(Reg, usize),
-    /// target_class.define_method(sym, Irep[b])
+    /// target_class.define_method(sym, Irep[b]), with the frame's default visibility
     TDef(Sym, usize),
+    /// The default visibility of the methods `def` defines from here on in
+    /// this frame (`private`, `public`, `protected`, `module_function` with
+    /// no arguments).
+    DefaultVis(Vis),
     /// R[a].singleton_class.define_method(sym, Irep[b])
     SDef(Reg, Sym, usize),
     /// R[a] = class/module `sym` under R[a] (nil = current), superclass R[a+1]

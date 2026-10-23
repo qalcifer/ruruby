@@ -69,3 +69,52 @@ fn visibility_errors_and_inherited_methods() {
          \"undefined method 'nope' for class 'A'\"\n:redefined\n2\n"
     );
 }
+
+#[test]
+fn scope_default_visibility() {
+    let out = run(r##"
+        def err
+          yield
+        rescue NoMethodError => e
+          e.message
+        end
+        class A
+          def a = :a
+          private
+          def b = :b
+          protected
+          def c = :c
+          public
+          def d = "#{b} #{c}"
+          def initialize = nil
+          private
+          def self.cm = :cm
+        end
+        x = A.new
+        p x.a, x.d, err { x.b }, err { x.c }, err { x.initialize }, A.cm
+        class A; def e = :e; end
+        p x.e
+        module M
+          module_function
+          def f = :f
+        end
+        class B; include M; def g = f; end
+        p M.f, B.new.g, err { B.new.f }
+        class C
+          private
+          class D; def inner = :inner; end
+          def m
+            def nested = :nested
+            :m
+          end
+        end
+        p C::D.new.inner, C.new.send(:m), C.new.nested
+    "##);
+    assert_eq!(
+        out,
+        ":a\n\"b c\"\n\"private method 'b' called for an instance of A\"\n\
+         \"protected method 'c' called for an instance of A\"\n\
+         \"private method 'initialize' called for an instance of A\"\n:cm\n:e\n:f\n:f\n\
+         \"private method 'f' called for an instance of B\"\n:inner\n:m\n:nested\n"
+    );
+}

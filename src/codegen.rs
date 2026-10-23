@@ -8,6 +8,7 @@
 use crate::ast::*;
 use crate::opcode::{ArgSpec, CatchHandler, DefinedKind, Irep, Literal, Op, Reg};
 use crate::symbol::{Sym, SymbolTable};
+use crate::value::Vis;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -792,6 +793,20 @@ impl Codegen<'_> {
         safe: bool,
         dst: Reg,
     ) -> CResult<()> {
+        if let (None, [], None, None) = (recv, args, block, block_arg) {
+            let vis = match name {
+                "private" => Some(Vis::Private),
+                "public" => Some(Vis::Public),
+                "protected" => Some(Vis::Protected),
+                "module_function" => Some(Vis::ModuleFunction),
+                _ => None,
+            };
+            if let Some(vis) = vis {
+                self.emit(Op::DefaultVis(vis));
+                self.emit(Op::LoadNil(dst));
+                return Ok(());
+            }
+        }
         if let (Some(recv), [arg], None, None, false, Some(op)) =
             (recv, args, block, block_arg, safe, binop(name))
             && !matches!(arg, Node::Splat(_))
