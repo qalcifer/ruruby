@@ -167,6 +167,13 @@ Known limitations of Hash (see the roadmap for the rest):
   `eql?` only of keys with the same hash (like CRuby), so mruby's tests of
   `eql?` callbacks that modify the hash differ in those shapes.
 
+Object model (step 5): method visibility (private/protected/public with
+names or as a scope's default, module_function, enforced on calls,
+introspection by visibility, shared with blocks), subclasses of Array, Hash
+and String (and instance variables and singleton methods on their values),
+frozen objects (FrozenError from every change), Method and UnboundMethod
+objects.
+
 ## 4. Roadmap (suggested order)
 
 Each step can be checked against mruby's own tests.
