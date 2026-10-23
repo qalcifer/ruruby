@@ -473,6 +473,14 @@ impl Value {
         })
     }
 
+    /// nil, true, false, an inline Integer or a Symbol: a value equal only
+    /// to itself (a boxed Integer is never in inline range), so comparing
+    /// bits is enough.
+    #[inline]
+    fn is_unique(self) -> bool {
+        matches!(self.0 >> 48, TAG_SPECIAL | TAG_INT | TAG_SYM)
+    }
+
     #[inline]
     pub fn truthy(&self) -> bool {
         self.0 != Value::NIL.0 && self.0 != Value::FALSE.0
@@ -549,6 +557,9 @@ impl Heap {
 /// Structural `==` for built-in types (objects compare by identity here;
 /// the VM dispatches user-defined `==` before getting here).
 pub fn values_eq(heap: &Heap, a: &Value, b: &Value) -> bool {
+    if a.is_unique() && b.is_unique() {
+        return a.0 == b.0;
+    }
     eq_rec(heap, a, b, &mut Vec::new())
 }
 
@@ -603,6 +614,10 @@ fn eq_rec(heap: &Heap, a: &Value, b: &Value, in_progress: &mut InProgress) -> bo
 
 /// `eql?` — hash-key equality (`1.eql?(1.0)` is false).
 pub fn eql(heap: &Heap, a: &Value, b: &Value) -> bool {
+    // also covers an Integer against a Float: never eql?
+    if a.is_unique() || b.is_unique() {
+        return a.0 == b.0;
+    }
     match (heap.kind(*a), heap.kind(*b)) {
         (V::Int(_), V::Float(_)) | (V::Float(_), V::Int(_)) => false,
         _ => values_eq(heap, a, b),
