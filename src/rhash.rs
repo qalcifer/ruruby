@@ -183,6 +183,15 @@ impl RHash {
         Some(v)
     }
 
+    /// `Hash#rehash`: hashes the keys again, after they were mutated.
+    /// Keys that became `eql?` keep the last value, at the first's place.
+    pub fn rehash(&mut self, heap: &Heap) {
+        let pairs = std::mem::take(&mut self.pairs);
+        self.index = None;
+        for (k, v) in pairs {
+            self.set(heap, k, v);
+        }
+    }
 }
 
 impl Default for RHash {

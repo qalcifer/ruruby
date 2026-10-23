@@ -155,6 +155,11 @@ pub fn init(vm: &mut Vm) {
         vm.heap[this_hash(vm, s)?].borrow_mut().clear();
         Ok(*s)
     });
+    vm.def(&c, "rehash", |vm, s, _, _| {
+        let h = this_hash(vm, s)?;
+        vm.heap[h].borrow_mut().rehash(&vm.heap);
+        Ok(*s)
+    });
     vm.def(&c, "merge", |vm, s, a, b| {
         let copy = vm.heap[this_hash(vm, s)?].borrow().clone();
         let hv = vm.hash(copy);

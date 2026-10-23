@@ -63,14 +63,22 @@ fn big_hash_keeps_order_through_updates_and_deletes() {
 }
 
 #[test]
-fn a_hash_as_its_own_key() {
+fn mutated_keys_and_rehash() {
+    // like Ruby: a key mutated after insertion isn't found until rehash
     let out = run(r#"
+        h = {}
+        20.times { |i| h[[i]] = i }
+        k = h.keys[5]
+        k << :x
+        p h[[5]], h[[5, :x]]
+        h.rehash
+        p h[[5, :x]], h.size, h.keys[5]
         s = {}
         s[s] = 1
         20.times { |i| s[i] = i }
         p s[s], s.size
     "#);
-    assert_eq!(out, "1\n21\n");
+    assert_eq!(out, "nil\nnil\n5\n20\n[5, :x]\n1\n21\n");
 }
 
 #[test]
