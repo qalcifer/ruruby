@@ -149,6 +149,8 @@ impl Codegen<'_> {
         if irep.catch.is_empty() {
             peephole(&mut irep.code);
         }
+        irep.sets_vis = sets_vis(&irep);
+        irep.needs_env = reach(&irep) > 0 || irep.sets_vis;
         irep.caches = irep.code.iter().map(|_| RefCell::default()).collect();
         irep
     }
@@ -1604,6 +1606,28 @@ impl Codegen<'_> {
         self.patch(ok);
         Ok(())
     }
+}
+
+/// How many frames above its own `irep`'s code reaches through upvars
+/// (GetUpVar/SetUpVar depth + 1; through a nested block, one less).
+fn reach(irep: &Irep) -> usize {
+    let own = irep
+        .code
+        .iter()
+        .filter_map(|op| match op {
+            Op::GetUpVar(_, _, d) | Op::SetUpVar(_, _, d) => Some(d + 1),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0);
+    let nested = irep.reps.iter().map(|r| reach(r).saturating_sub(1)).max().unwrap_or(0);
+    own.max(nested)
+}
+
+/// Whether the code (or a block in it) sets a default visibility, which a
+/// block shares with the scope it was written in.
+fn sets_vis(irep: &Irep) -> bool {
+    irep.code.iter().any(|op| matches!(op, Op::DefaultVis(_))) || irep.reps.iter().any(|r| sets_vis(r))
 }
 
 /// Rewrites that keep every instruction at its place (so no jump target

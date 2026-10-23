@@ -260,3 +260,21 @@ fn blocks_share_the_scope_visibility() {
     "##);
     assert_eq!(out, "true\n[:n, :o]\n[:q, :r]\ntrue\ntrue\n");
 }
+
+#[test]
+fn blocks_without_upvars_still_share_visibility() {
+    // a block that reads no outer local skips the frame's env, unless the
+    // frame's code sets a default visibility
+    let out = run(r##"
+        c = Class.new do
+          blk = proc { attr_reader :late }
+          private
+          blk.call
+          [1].each { def in_block = 1 }
+        end
+        p c.private_method_defined?(:late), c.private_method_defined?(:in_block)
+        d = Class.new { [1].each { define_method(:pub) { 1 } } }
+        p d.public_method_defined?(:pub)
+    "##);
+    assert_eq!(out, "true\ntrue\ntrue\n");
+}

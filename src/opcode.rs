@@ -321,6 +321,13 @@ pub struct Irep {
     pub nlocals: usize,
     pub nregs: usize,
     pub spec: ArgSpec,
+    /// For a block: whether it needs the env of the frame that creates it
+    /// (it, or a block in it, reads or writes that frame's locals, or sets
+    /// a default visibility, which is shared with the frame).
+    pub needs_env: bool,
+    /// The code (or a block in it) sets a default visibility: its blocks
+    /// always share the frame's env, which holds it.
+    pub sets_vis: bool,
 }
 
 impl std::fmt::Debug for CallCache {

@@ -277,7 +277,9 @@ pub enum EnvRegs {
 pub enum ProcBody {
     Ruby {
         irep: Rc<Irep>,
-        env: EnvRef,
+        /// The creating frame's env; None when the block doesn't need it
+        /// (Irep::needs_env).
+        env: Option<EnvRef>,
     },
     /// `&:sym` (Symbol#to_proc)
     SymCall(Sym),

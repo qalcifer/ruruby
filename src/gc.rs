@@ -602,7 +602,11 @@ impl<'h> Marker<'h> {
         }
         self.class(p.target);
         match &p.body {
-            ProcBody::Ruby { env, .. } => self.env(*env),
+            ProcBody::Ruby { env, .. } => {
+                if let Some(e) = env {
+                    self.env(*e);
+                }
+            }
             ProcBody::Collect(buf) => self.value(&Value::from(*buf)),
             ProcBody::SymCall(_) => {}
             ProcBody::Method(m) => self.value(m),

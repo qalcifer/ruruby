@@ -1702,7 +1702,7 @@ impl Vm {
                 let bound = self.bind_args(&irep, &self_, args, &block, lambda)?;
                 let mut f = Frame::new(irep, bound.base, self_, target);
                 f.own_scope = call.target.is_some();
-                f.upper = Some(env);
+                f.upper = env;
                 f.block = outer_block;
                 f.method = method;
                 f.opt_filled = bound.opt_filled;
@@ -2760,12 +2760,16 @@ impl Vm {
                 self.set_reg(f, a, v);
             }
             Op::Block(a, idx) | Op::Lambda(a, idx) => {
-                let env = self.frame_env(f);
+                let irep = f.irep.reps[idx].clone();
+                // a block that touches neither the frame's locals nor its
+                // default visibility doesn't make the frame keep an env
+                let env = if irep.needs_env || f.env.is_some() || f.irep.sets_vis || self.frame_vis(f) != Vis::Public {
+                    Some(self.frame_env(f))
+                } else {
+                    None
+                };
                 let p = RProc {
-                    body: ProcBody::Ruby {
-                        irep: f.irep.reps[idx].clone(),
-                        env,
-                    },
+                    body: ProcBody::Ruby { irep, env },
                     self_: f.self_,
                     block: f.block,
                     home: f.home,

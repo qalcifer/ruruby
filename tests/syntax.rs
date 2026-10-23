@@ -445,3 +445,19 @@ fn fused_comparisons_keep_their_meaning() {
          [1, 1, 0, 0, 0]\n10\n7\n4\n"
     );
 }
+
+#[test]
+fn blocks_reaching_outer_locals_through_nested_blocks() {
+    // only blocks that reach no outer local skip the env; a nested block
+    // reaching two frames up keeps the chain
+    let out = run(r#"
+        x = 0
+        [1, 2].each { [10].each { x += 1 } }
+        def mk = [1].map { |a| -> { a + 1 } }.first
+        y = 5
+        f = proc { proc { proc { y * 2 } } }
+        g = [1].map { |v| [2].map { |w| [3].map { v + w } } }
+        p x, mk.call, f.call.call.call, g, [1, 2].map { |z| z * 3 }
+    "#);
+    assert_eq!(out, "2\n2\n10\n[[[3]]]\n[3, 6]\n");
+}
