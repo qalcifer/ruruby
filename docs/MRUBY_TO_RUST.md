@@ -157,6 +157,16 @@ wording (ruruby uses Ruby 3.4's wording) and `2**-1` (Ruby returns a Rational).
 `tests/call_stack.rs`, `tests/gc.rs`), the harness test, and `tests/parse_corpus.rs` (compiles every `.rb` file in
 `./mruby`).
 
+Known limitations of Hash (see the roadmap for the rest):
+
+* `Hash#==`/`#eql?` and equality of nested containers compare keys with the
+  built-in `eql?`, so objects that define their own `hash`/`eql?` compare by
+  identity there (lookups do use their methods).
+* Creating many tiny hashes is ~25% slower than CRuby 2.6.
+* A small hash is scanned up to 8 pairs (mruby: 16), and an indexed hash asks
+  `eql?` only of keys with the same hash (like CRuby), so mruby's tests of
+  `eql?` callbacks that modify the hash differ in those shapes.
+
 ## 4. Roadmap (suggested order)
 
 Each step can be checked against mruby's own tests.
