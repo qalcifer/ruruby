@@ -2267,10 +2267,22 @@ impl Vm {
             Op::Send(a, mid, argc, has_block) => return self.send_op(f, a, mid, argc, has_block),
             Op::AddI(a, i) | Op::SubI(a, i) => {
                 let add = matches!(op, Op::AddI(..));
-                if let V::Int(x) = self.kind(self.reg(f, a))
+                if let Some(x) = self.reg(f, a).as_inline_int()
                     && let Some(v) = if add { x.checked_add(i) } else { x.checked_sub(i) }
+                    && let Some(v) = Value::inline_int(v)
                 {
-                    { let v = self.int(v); self.set_reg(f, a, v) };
+                    self.set_reg(f, a, v);
+                } else {
+                    return self.step_slow(f);
+                }
+            }
+            Op::AddIR(a, b, i) | Op::SubIR(a, b, i) => {
+                let add = matches!(op, Op::AddIR(..));
+                if let Some(x) = self.reg(f, b).as_inline_int()
+                    && let Some(v) = if add { x.checked_add(i) } else { x.checked_sub(i) }
+                    && let Some(v) = Value::inline_int(v)
+                {
+                    self.set_reg(f, a, v);
                 } else {
                     return self.step_slow(f);
                 }
@@ -2370,6 +2382,30 @@ impl Vm {
         let r = call(self);
         self.native_scope = outer;
         r
+    }
+
+    /// R[a] = R[b] ± i, any receiver: Integers (boxed or not), other
+    /// numbers, or a call of `+`/`-`.
+    fn add_imm(&mut self, f: &mut Frame, a: Reg, b: Reg, i: i64, add: bool) -> Result<Flow, Unwind> {
+        let x = self.reg(f, b);
+        if let V::Int(n) = self.kind(x)
+            && let Some(v) = if add { n.checked_add(i) } else { n.checked_sub(i) }
+        {
+            let v = self.int(v);
+            self.set_reg(f, a, v);
+            return Ok(Flow::Next);
+        }
+        // no register holds the operand (`b` may be a local's), so the
+        // call passes it as an owned argument
+        let y = self.int(i);
+        let (op, mid) = if add { (Arith::Add, self.s.add) } else { (Arith::Sub, self.s.sub) };
+        if x.is_numeric() {
+            let v = self.arith(op, &x, &y)?;
+            self.set_reg(f, a, v);
+            return Ok(Flow::Next);
+        }
+        let args = Args::Owned(vec![y]);
+        self.call_flow(f, a, 0, |vm| vm.start_call(x, mid, args, None))
     }
 
     /// Every instruction, out of line (see [`Vm::step`]). It reads its
@@ -2569,30 +2605,10 @@ impl Vm {
                     value: self.reg(f, a),
                 });
             }
-            Op::AddI(a, i) | Op::SubI(a, i) => {
-                let add = matches!(op, Op::AddI(..));
-                if let V::Int(x) = self.kind(self.reg(f, a))
-                    && let Some(v) = if add { x.checked_add(i) } else { x.checked_sub(i) }
-                {
-                    { let v = self.int(v); self.set_reg(f, a, v) };
-                } else {
-                    // no register holds the operand (`a` may be a local's),
-                    // so the slow path passes it as an owned argument
-                    let (x, y) = (self.reg(f, a), self.int(i));
-                    let (op, mid) = if add {
-                        (Arith::Add, self.s.add)
-                    } else {
-                        (Arith::Sub, self.s.sub)
-                    };
-                    if x.is_numeric() {
-                        let v = self.arith(op, &x, &y)?;
-                        self.set_reg(f, a, v);
-                    } else {
-                        let args = Args::Owned(vec![y]);
-                        return self.call_flow(f, a, 0, |vm| vm.start_call(x, mid, args, None));
-                    }
-                }
-            }
+            Op::AddI(a, i) => return self.add_imm(f, a, a, i, true),
+            Op::SubI(a, i) => return self.add_imm(f, a, a, i, false),
+            Op::AddIR(a, b, i) => return self.add_imm(f, a, b, i, true),
+            Op::SubIR(a, b, i) => return self.add_imm(f, a, b, i, false),
             Op::Add(a) => return self.arith_flow(f, a, Arith::Add, self.s.add),
             Op::Sub(a) => return self.arith_flow(f, a, Arith::Sub, self.s.sub),
             Op::Mul(a) => return self.arith_flow(f, a, Arith::Mul, self.s.mul),

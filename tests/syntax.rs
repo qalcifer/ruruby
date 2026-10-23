@@ -395,3 +395,23 @@ fn jumps_to_returns_keep_their_results() {
     "#);
     assert_eq!(out, ":big\n:one\n:none\n6\n:false\n:nil\n:broke\nnil\n[1, -2, 3]\n");
 }
+
+#[test]
+fn adding_an_immediate_to_a_local() {
+    // `x + 1` with x a local compiles to AddIR/SubIR; the slow path takes
+    // boxed Integers, Floats and any `+`/`-` method
+    let out = run(r#"
+        def f(x) = [x + 1, x - 2, 10 - 3, x + 1 + 1]
+        p f(1), f(2**62), f(2.5)
+        class Tag; def +(o) = "tag+#{o}"; def -(o) = "tag-#{o}"; end
+        t = Tag.new
+        p t + 1, t - 1
+        m = 140737488355327
+        p m + 1, -m - 2
+    "#);
+    assert_eq!(
+        out,
+        "[2, -1, 7, 3]\n[4611686018427387905, 4611686018427387902, 7, 4611686018427387906]\n\
+         [3.5, 0.5, 7, 4.5]\n\"tag+1\"\n\"tag-1\"\n140737488355328\n-140737488355329\n"
+    );
+}

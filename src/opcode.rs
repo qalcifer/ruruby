@@ -98,6 +98,10 @@ pub enum Op {
     AddI(Reg, i64),
     /// R[a] = R[a] - i (mruby: SUBI)
     SubI(Reg, i64),
+    /// R[a] = R[b] + i: `x + 1` with x a local (no Move first)
+    AddIR(Reg, Reg, i64),
+    /// R[a] = R[b] - i
+    SubIR(Reg, Reg, i64),
     /// R[a] = R[a] op R[a+1], with a fast path for numbers.
     Add(Reg),
     Sub(Reg),

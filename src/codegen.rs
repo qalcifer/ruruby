@@ -821,6 +821,14 @@ impl Codegen<'_> {
             && !matches!(arg, Node::Splat(_))
         {
             let a = self.op_reg(dst);
+            // `x + 1` with x a local: one instruction reading the local
+            if let (Node::LVar(v), Node::Int(i), "+" | "-") = (recv, arg, name)
+                && let Some((0, r)) = self.lookup(v)
+            {
+                self.emit(if name == "+" { Op::AddIR(a, r, *i) } else { Op::SubIR(a, r, *i) });
+                self.op_done(a, dst);
+                return Ok(());
+            }
             self.expr(recv, a)?;
             // `x + 1`, `n - 2`: the operand is an immediate
             match (name, arg) {
