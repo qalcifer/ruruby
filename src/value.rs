@@ -571,6 +571,68 @@ pub fn eql(heap: &Heap, a: &Value, b: &Value) -> bool {
     }
 }
 
+/// The hash of a Hash key: values that are [`eql`] hash the same.
+///
+/// Numbers hash as their `f64` value, since inside containers an Integer
+/// and a Float compare with `==` (`(x as f64) == y`). Containers hash their
+/// elements down to a fixed depth, which keeps recursive ones finite and
+/// is consistent for equal structures.
+pub fn hash_key(heap: &Heap, v: &Value) -> u64 {
+    let h = hash_rec(heap, v, 0);
+    // fmix64 (MurmurHash3): the table indexes with the low bits
+    let h = (h ^ (h >> 33)).wrapping_mul(0xff51_afd7_ed55_8ccd);
+    let h = (h ^ (h >> 33)).wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+    h ^ (h >> 33)
+}
+
+const HASH_DEPTH: u32 = 3;
+
+fn mix(h: u64, x: u64) -> u64 {
+    (h.rotate_left(5) ^ x).wrapping_mul(0x517c_c1b7_2722_0a95)
+}
+
+fn hash_f64(f: f64) -> u64 {
+    if f == 0.0 { 0 } else { f.to_bits() }
+}
+
+fn hash_rec(heap: &Heap, v: &Value, depth: u32) -> u64 {
+    if let Some(n) = v.as_inline_int() {
+        return hash_f64(n as f64);
+    }
+    if v.is_unique() {
+        return v.0;
+    }
+    match heap.kind(*v) {
+        V::Int(n) => hash_f64(n as f64),
+        V::Float(f) => hash_f64(f),
+        V::Str(s) => heap[s]
+            .borrow()
+            .as_bytes()
+            .chunks(8)
+            .fold(1, |h, c| {
+                let mut w = [0u8; 8];
+                w[..c.len()].copy_from_slice(c);
+                mix(h, u64::from_le_bytes(w))
+            }),
+        V::Array(a) => {
+            let a = heap[a].borrow();
+            let h = mix(2, a.len() as u64);
+            if depth == HASH_DEPTH {
+                return h;
+            }
+            a.iter().fold(h, |h, x| mix(h, hash_rec(heap, x, depth + 1)))
+        }
+        // not by contents: a Hash may be a key of itself, and is borrowed
+        // while its own key is hashed (Hash keys only collide with each other)
+        V::Hash(_) => 3,
+        V::Range(r) => {
+            let (lo, hi, excl) = &heap[r];
+            mix(mix(mix(4, *excl as u64), hash_rec(heap, lo, depth)), hash_rec(heap, hi, depth))
+        }
+        _ => v.heap_id(),
+    }
+}
+
 pub fn num_cmp(heap: &Heap, x: &Value, y: &Value) -> Option<Ordering> {
     match (heap.kind(*x), heap.kind(*y)) {
         (V::Int(a), V::Int(b)) => Some(a.cmp(&b)),
