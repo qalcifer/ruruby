@@ -185,3 +185,62 @@ fn aliases_and_builtin_private_methods() {
     "##);
     assert_eq!(out, ":private\n:private\n:pub\n:priv\n:private\n:private\n");
 }
+
+#[test]
+fn respond_to_and_public_send() {
+    let out = run(r##"
+        class R
+          def pub = :pub
+          private def priv = :priv
+          protected def prot = :prot
+          def respond_to_missing?(name, all = false) = (@asked = [name, all]; name == :ghost)
+          def asked = @asked
+        end
+        r = R.new
+        p r.respond_to?(:pub), r.respond_to?(:priv), r.respond_to?(:priv, true)
+        p r.respond_to?(:prot), r.respond_to?(:prot, true), r.respond_to?(:initialize)
+        p r.respond_to?(:ghost), r.asked, r.respond_to?(:nope, true), r.asked
+        p r.public_send(:pub), (begin; r.public_send(:priv); rescue NoMethodError => e; e.message; end)
+        p (begin; r.respond_to?; rescue ArgumentError; :argc; end)
+    "##);
+    assert_eq!(
+        out,
+        "true\nfalse\ntrue\nfalse\ntrue\nfalse\ntrue\n[:ghost, false]\nfalse\n[:nope, true]\n\
+         :pub\n\"private method 'priv' called for an instance of R\"\n:argc\n"
+    );
+}
+
+#[test]
+fn listings_by_visibility() {
+    let out = run(r##"
+        module M
+          def mpub = 1
+          private def mpriv = 1
+        end
+        class A
+          include M
+          def pub = 1
+          private def priv = 1
+          protected def prot = 1
+        end
+        class B < A
+          public :priv
+          undef_method :pub
+        end
+        p A.instance_methods(false), A.public_instance_methods(false)
+        p A.private_instance_methods(false), A.protected_instance_methods(false)
+        p A.method_defined?(:mpub), A.method_defined?(:mpriv), A.method_defined?(:prot)
+        p A.method_defined?(:mpub, false), A.private_method_defined?(:mpriv)
+        p B.method_defined?(:priv, false), B.method_defined?(:pub), A.method_defined?(:priv)
+        o = A.new
+        def o.single = 1
+        p o.singleton_methods, o.methods.include?(:priv), o.private_methods.include?(:priv)
+        p o.protected_methods.include?(:prot), o.public_methods.include?(:mpub)
+        p B.instance_methods.include?(:pub), B.public_instance_methods(false)
+    "##);
+    assert_eq!(
+        out,
+        "[:prot, :pub]\n[:pub]\n[:priv]\n[:prot]\ntrue\nfalse\ntrue\nfalse\ntrue\n\
+         true\nfalse\nfalse\n[:single]\nfalse\ntrue\ntrue\ntrue\nfalse\n[:priv]\n"
+    );
+}

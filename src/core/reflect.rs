@@ -59,6 +59,7 @@ pub fn init(vm: &mut Vm) {
     init_module(vm);
     init_proc(vm);
     init_pattern_support(vm);
+    init_introspection(vm);
 }
 
 fn init_kernel(vm: &mut Vm) {
@@ -97,22 +98,6 @@ fn init_kernel(vm: &mut Vm) {
         vm.heap[sc].methods.insert(name, Method::Proc(body));
         Ok(Value::sym(name))
     });
-    vm.def(&k, "singleton_methods", |vm, s, _, _| {
-        let names: Vec<Sym> = match vm.kind(*s) {
-            V::Class(c) => vm.heap[c]
-                .meta
-                .get()
-                .map(|m| vm.heap[m].methods.borrow().keys().copied().collect())
-                .unwrap_or_default(),
-            V::Object(o) => vm.heap[o]
-                .singleton
-                .get()
-                .map(|m| vm.heap[m].methods.borrow().keys().copied().collect())
-                .unwrap_or_default(),
-            _ => vec![],
-        };
-        Ok(sorted_syms(vm, names))
-    });
     vm.def(&k, "proc", |vm, _, _, b| need_block(vm, b));
     vm.def(&k, "lambda", |vm, _, _, b| {
         let b = need_block(vm, b)?;
@@ -134,9 +119,6 @@ fn init_kernel(vm: &mut Vm) {
             Some(i) => Ok(t.items.remove(i).1),
             None => Err(vm.name_err(format!("instance variable {} not defined", vm.sym_name(iv)))),
         }
-    });
-    vm.def(&k, "respond_to_missing?", |_, _, _, _| {
-        Ok(Value::FALSE)
     });
     vm.def(&k, "caller", |vm, _, _, _| Ok(vm.array(vec![])));
     vm.def(&k, "at_exit", |vm, _, _, b| {
@@ -287,37 +269,6 @@ fn init_module(vm: &mut Vm) {
     };
     vm.def(&m, "class_exec", class_exec);
     vm.def(&m, "module_exec", class_exec);
-    vm.def(&m, "instance_methods", |vm, s, a, _| {
-        let cls = this_class(vm, s)?;
-        let own_only = a.first().is_some_and(|v| !v.truthy());
-        let classes = if own_only {
-            vec![cls]
-        } else {
-            vm.ancestors(&cls)
-        };
-        let mut syms = Vec::new();
-        for c in classes {
-            for (k, m) in vm.heap[c].methods.borrow().iter() {
-                if !matches!(m, Method::Undefined) && !syms.contains(k) {
-                    syms.push(*k);
-                }
-            }
-        }
-        Ok(sorted_syms(vm, syms))
-    });
-    let method_defined: NativeFn = |vm, s, a, _| {
-        let cls = this_class(vm, s)?;
-        let mid = sym_of(vm, &arg(a, 0))?;
-        Ok(Value::bool(vm.find_method(&cls, mid).is_some()))
-    };
-    vm.def(&m, "method_defined?", method_defined);
-    vm.def(&m, "public_method_defined?", method_defined);
-    vm.def(&m, "private_method_defined?", |_, _, _, _| {
-        Ok(Value::FALSE)
-    });
-    vm.def(&m, "protected_method_defined?", |_, _, _, _| {
-        Ok(Value::FALSE)
-    });
     vm.def(&m, "instance_method", |vm, s, a, _| {
         let cls = this_class(vm, s)?;
         let mid = sym_of(vm, &arg(a, 0))?;
@@ -627,4 +578,153 @@ fn set_vis(vm: &mut Vm, s: &Value, a: &[Value], vis: Vis) -> VmResult {
         1 => a[0],
         _ => vm.array(a.to_vec()),
     })
+}
+
+/// Which visibilities a listing or a `*_defined?` query reports.
+#[derive(Clone, Copy)]
+enum Shown {
+    /// `instance_methods`, `methods`, `method_defined?`: what a call with
+    /// a receiver may reach from somewhere (public and protected)
+    Callable,
+    Only(Vis),
+}
+
+impl Shown {
+    fn matches(self, vis: Vis) -> bool {
+        match self {
+            Shown::Callable => matches!(vis, Vis::Public | Vis::Protected),
+            Shown::Only(v) => v == vis,
+        }
+    }
+}
+
+/// The methods `cls` has (with `inherit`, also from its ancestors) whose
+/// visibility `shown` takes, sorted. For each name the first module of the
+/// lookup order decides; an undef hides the name.
+fn listed(vm: &mut Vm, cls: ClassRef, inherit: bool, shown: Shown) -> Value {
+    let classes = if inherit { vm.ancestors(&cls) } else { vec![cls] };
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for c in classes {
+        let table = &vm.heap[c].methods;
+        for (k, m) in table.borrow().iter() {
+            if seen.insert(*k) && !matches!(m, Method::Undefined) && shown.matches(table.vis(*k)) {
+                out.push(*k);
+            }
+        }
+    }
+    sorted_syms(vm, out)
+}
+
+/// Whether `cls` (only itself without `inherit`) has `name` with a
+/// visibility `shown` takes.
+fn defined_as(vm: &Vm, cls: ClassRef, name: Sym, inherit: bool, shown: Shown) -> bool {
+    if inherit {
+        return vm.find_method_vis(&cls, name).is_some_and(|(_, _, vis)| shown.matches(vis));
+    }
+    let table = &vm.heap[cls].methods;
+    matches!(table.borrow().get(&name), Some(m) if !matches!(m, Method::Undefined))
+        && shown.matches(table.vis(name))
+}
+
+fn init_introspection(vm: &mut Vm) {
+    let k = vm.c.kernel;
+    // respond_to?(name, include_all = false): a method a call with a
+    // receiver can reach, any method with include_all; else what
+    // respond_to_missing? says (when it is defined at all)
+    vm.def(&k, "respond_to?", |vm, s, a, _| {
+        check_argc(vm, a, 1, 2)?;
+        let mid = sym_of(vm, &arg(a, 0))?;
+        let include_all = a.get(1).copied().unwrap_or(Value::FALSE);
+        let cls = vm.dispatch_class(s);
+        match vm.find_method_vis(&cls, mid) {
+            Some((_, _, Vis::Public)) => return Ok(Value::TRUE),
+            Some(_) if include_all.truthy() => return Ok(Value::TRUE),
+            _ => {}
+        }
+        let rtm = vm.s.respond_to_missing;
+        if vm.find_method(&cls, rtm).is_none() {
+            return Ok(Value::FALSE);
+        }
+        let r = vm.call_method(s, rtm, vec![Value::sym(mid), include_all], None)?;
+        Ok(Value::bool(r.truthy()))
+    });
+    vm.def(&k, "respond_to_missing?", |_, _, _, _| Ok(Value::FALSE));
+    // send, but only to public methods
+    vm.def(&k, "public_send", |vm, s, a, b| {
+        let Some((name, rest)) = a.split_first() else {
+            return Err(vm.arg_err("no method name given"));
+        };
+        let mid = sym_of(vm, name)?;
+        let cls = vm.dispatch_class(s);
+        if let Some((_, _, vis)) = vm.find_method_vis(&cls, mid)
+            && vis != Vis::Public
+        {
+            return Err(vm.not_visible(vis, s, mid));
+        }
+        vm.call_with_block(s, mid, rest.to_vec(), b.cloned())
+    });
+    fn of_object(vm: &mut Vm, s: &Value, shown: Shown) -> VmResult {
+        let c = vm.dispatch_class(s);
+        Ok(listed(vm, c, true, shown))
+    }
+    vm.def(&k, "methods", |vm, s, _, _| of_object(vm, s, Shown::Callable));
+    vm.def(&k, "public_methods", |vm, s, _, _| of_object(vm, s, Shown::Only(Vis::Public)));
+    vm.def(&k, "private_methods", |vm, s, _, _| of_object(vm, s, Shown::Only(Vis::Private)));
+    vm.def(&k, "protected_methods", |vm, s, _, _| {
+        of_object(vm, s, Shown::Only(Vis::Protected))
+    });
+    // the methods of the object's own singleton class
+    vm.def(&k, "singleton_methods", |vm, s, _, _| {
+        let sc = match vm.kind(*s) {
+            V::Class(c) => vm.heap[c].meta.get(),
+            V::Object(o) => vm.heap[o].singleton.get(),
+            _ => None,
+        };
+        match sc {
+            Some(sc) => Ok(listed(vm, sc, false, Shown::Callable)),
+            None => Ok(vm.array(vec![])),
+        }
+    });
+
+    let m = vm.c.module;
+    // instance_methods(inherit = true) & co.
+    vm.def(&m, "instance_methods", |vm, s, a, _| {
+        let cls = this_class(vm, s)?;
+        Ok(listed(vm, cls, inherit(a, 0), Shown::Callable))
+    });
+    vm.def(&m, "public_instance_methods", |vm, s, a, _| {
+        let cls = this_class(vm, s)?;
+        Ok(listed(vm, cls, inherit(a, 0), Shown::Only(Vis::Public)))
+    });
+    vm.def(&m, "private_instance_methods", |vm, s, a, _| {
+        let cls = this_class(vm, s)?;
+        Ok(listed(vm, cls, inherit(a, 0), Shown::Only(Vis::Private)))
+    });
+    vm.def(&m, "protected_instance_methods", |vm, s, a, _| {
+        let cls = this_class(vm, s)?;
+        Ok(listed(vm, cls, inherit(a, 0), Shown::Only(Vis::Protected)))
+    });
+    // method_defined?(name, inherit = true) & co.
+    vm.def(&m, "method_defined?", |vm, s, a, _| {
+        let (cls, mid) = (this_class(vm, s)?, sym_of(vm, &arg(a, 0))?);
+        Ok(Value::bool(defined_as(vm, cls, mid, inherit(a, 1), Shown::Callable)))
+    });
+    vm.def(&m, "public_method_defined?", |vm, s, a, _| {
+        let (cls, mid) = (this_class(vm, s)?, sym_of(vm, &arg(a, 0))?);
+        Ok(Value::bool(defined_as(vm, cls, mid, inherit(a, 1), Shown::Only(Vis::Public))))
+    });
+    vm.def(&m, "private_method_defined?", |vm, s, a, _| {
+        let (cls, mid) = (this_class(vm, s)?, sym_of(vm, &arg(a, 0))?);
+        Ok(Value::bool(defined_as(vm, cls, mid, inherit(a, 1), Shown::Only(Vis::Private))))
+    });
+    vm.def(&m, "protected_method_defined?", |vm, s, a, _| {
+        let (cls, mid) = (this_class(vm, s)?, sym_of(vm, &arg(a, 0))?);
+        Ok(Value::bool(defined_as(vm, cls, mid, inherit(a, 1), Shown::Only(Vis::Protected))))
+    });
+}
+
+/// The `inherit` argument at `i`: true when missing, read for truth.
+fn inherit(a: &[Value], i: usize) -> bool {
+    a.get(i).is_none_or(|v| v.truthy())
 }

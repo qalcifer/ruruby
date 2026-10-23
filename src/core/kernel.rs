@@ -123,13 +123,8 @@ fn init_object(vm: &mut Vm) {
         V::Class(c) => Ok(Value::bool(vm.class_of(s) == c)),
         _ => Err(vm.type_err("class or module required")),
     });
-    vm.def(&o, "respond_to?", |vm, s, a, _| {
-        let m = sym_of(vm, &arg(a, 0))?;
-        Ok(Value::bool(vm.respond_to(s, m)))
-    });
     vm.def(&o, "send", send);
     vm.def(&o, "__send__", send);
-    vm.def(&o, "public_send", send);
     vm.def(&o, "object_id", |vm, s, _, _| {
         let id = match vm.kind(*s) {
             V::Nil => 8,
@@ -397,23 +392,6 @@ fn init_module(vm: &mut Vm) {
         Ok(vm.array(
             vm.ancestors(&cls).into_iter().map(Value::from).collect(),
         ))
-    });
-    vm.def(&m, "instance_methods", |vm, s, _, _| {
-        let V::Class(cls) = vm.kind(*s) else { unreachable!() };
-        let mut names: Vec<String> = vm.heap[cls]
-            .methods
-            .borrow()
-            .keys()
-            .map(|k| vm.sym_name(*k).to_string())
-            .collect();
-        names.sort();
-        let syms = names.iter().map(|n| Value::sym(vm.intern(n))).collect();
-        Ok(vm.array(syms))
-    });
-    vm.def(&m, "method_defined?", |vm, s, a, _| {
-        let V::Class(cls) = vm.kind(*s) else { unreachable!() };
-        let mid = sym_of(vm, &arg(a, 0))?;
-        Ok(Value::bool(vm.find_method(&cls, mid).is_some()))
     });
     vm.def(&m, "===", |vm, s, a, _| {
         let V::Class(cls) = vm.kind(*s) else { unreachable!() };
