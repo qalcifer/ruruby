@@ -219,7 +219,7 @@ pub fn to_vec(vm: &mut Vm, v: &Value) -> Result<Vec<Value>, Unwind> {
     match vm.kind(*v) {
         V::Array(a) => Ok(vm.heap[a].borrow().clone()),
         V::Hash(h) => {
-            let pairs = vm.heap[h].borrow().pairs().to_vec();
+            let pairs = vm.heap[h].borrow().to_vec();
             Ok(pairs.into_iter().map(|(k, v)| vm.array(vec![k, v])).collect())
         }
         V::Range(r) => {

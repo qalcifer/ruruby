@@ -94,3 +94,27 @@ fn big_hash_survives_collection() {
     "#);
     assert_eq!(out, "[4321]\n\"v\"\n5001\n");
 }
+
+#[test]
+fn deletes_leave_no_trace() {
+    // deleted entries stay as dead slots until compaction; lookups,
+    // order and size must not see them, across the scan/index threshold
+    let out = run(r#"
+        h = {}
+        20.times { |i| h[i] = i }
+        i = 20
+        10_000.times { h.delete(i - 20); h[i] = i; i += 1 }
+        p h.size, h.keys.first, h.keys.last, h[i - 1], h[i - 21], h.key?(i - 20)
+        (i - 20...i - 3).each { |k| h.delete(k) }
+        p h.size, h.keys
+        30.times { |k| h[-k] = k }
+        p h.size, h[-29], h[i - 1], h.keys.first(4)
+        h.delete(10_018)
+        p h.keys.first(3), h.values.last
+    "#);
+    assert_eq!(
+        out,
+        "20\n10000\n10019\n10019\nnil\ntrue\n3\n[10017, 10018, 10019]\n33\n29\n10019\n\
+         [10017, 10018, 10019, 0]\n[10017, 10019, 0]\n29\n"
+    );
+}

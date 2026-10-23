@@ -4,7 +4,7 @@ use super::*;
 use crate::vm::VmResult;
 
 fn pairs(vm: &Vm, s: &Value) -> Result<Vec<(Value, Value)>, Unwind> {
-    Ok(vm.heap[this_hash(vm, s)?].borrow().pairs().to_vec())
+    Ok(vm.heap[this_hash(vm, s)?].borrow().to_vec())
 }
 
 fn pair(vm: &mut Vm, k: &Value, v: &Value) -> Value {

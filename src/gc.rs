@@ -402,9 +402,9 @@ impl<'h> Marker<'h> {
                 V::Hash(h) => {
                     if self.visit(h) {
                         let h = heap[h].borrow();
-                        for (k, v) in h.pairs() {
-                            self.value(k);
-                            self.value(v);
+                        for (k, v) in h.iter() {
+                            self.value(&k);
+                            self.value(&v);
                         }
                         self.value(&h.default);
                         if let Some(p) = &h.default_proc {

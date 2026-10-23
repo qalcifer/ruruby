@@ -347,6 +347,13 @@ impl Value {
     pub const NIL: Value = Value(TAG_SPECIAL << 48);
     pub const FALSE: Value = Value(TAG_SPECIAL << 48 | 1);
     pub const TRUE: Value = Value(TAG_SPECIAL << 48 | 2);
+    /// A deleted Hash entry's key (src/rhash.rs); never seen outside it.
+    pub(crate) const DELETED: Value = Value(0xFFFC << 48);
+
+    #[inline]
+    pub(crate) fn is_deleted(self) -> bool {
+        self.0 == Value::DELETED.0
+    }
 
     #[inline]
     pub fn bool(b: bool) -> Value {
@@ -545,9 +552,9 @@ fn eq_rec(heap: &Heap, a: &Value, b: &Value, in_progress: &mut InProgress) -> bo
             let (xh, yh) = (heap[x].borrow().clone(), heap[y].borrow().clone());
             guarded(x.id(), y.id(), in_progress, |ip| {
                 xh.len() == yh.len()
-                    && xh.pairs().iter().all(|(k, v)| {
-                        yh.get(heap, k)
-                            .is_some_and(|w| eq_rec(heap, v, &w, ip))
+                    && xh.iter().all(|(k, v)| {
+                        yh.get(heap, &k)
+                            .is_some_and(|w| eq_rec(heap, &v, &w, ip))
                     })
             })
         }

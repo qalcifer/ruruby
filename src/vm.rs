@@ -1326,10 +1326,9 @@ impl Vm {
             r += 1;
         } else if !kwh.is_empty() {
             let unknown: Vec<Sym> = kwh
-                .pairs()
                 .iter()
                 .filter_map(|(k, _)| {
-                    if let V::Sym(s) = self.kind(*k) {
+                    if let V::Sym(s) = self.kind(k) {
                         Some(s)
                     } else {
                         None
@@ -1475,7 +1474,7 @@ impl Vm {
             V::Array(a) => self.heap[a].borrow().clone(),
             V::Nil => vec![],
             V::Hash(h) => {
-                let pairs = self.heap[h].borrow().pairs().to_vec();
+                let pairs = self.heap[h].borrow().to_vec();
                 pairs.into_iter().map(|(k, v)| self.array(vec![k, v])).collect()
             }
             V::Range(_) => crate::core::to_vec(self, v)?,
@@ -2189,7 +2188,7 @@ impl Vm {
             }
             Op::HashCat(a, b) => {
                 let pairs = match self.kind(self.reg(f, b)) {
-                    V::Hash(other) => self.heap[other].borrow().pairs().to_vec(),
+                    V::Hash(other) => self.heap[other].borrow().to_vec(),
                     V::Nil => vec![],
                     _ => {
                         let what = self.class_name(&self.reg(f, b));
@@ -2574,7 +2573,7 @@ impl Vm {
     }
 
     fn inspect_hash(&mut self, h: HashRef) -> Result<String, Unwind> {
-        let pairs = self.heap[h].borrow().pairs().to_vec();
+        let pairs = self.heap[h].borrow().to_vec();
         if pairs.is_empty() {
             return Ok("{}".into());
         }
