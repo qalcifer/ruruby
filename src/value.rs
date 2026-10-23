@@ -493,6 +493,12 @@ impl Value {
         matches!(self.0 >> 48, TAG_SPECIAL | TAG_INT | TAG_SYM)
     }
 
+    /// A Hash (`V::Hash`), by its bits.
+    #[inline]
+    pub fn is_hash(self) -> bool {
+        self.0 >> 45 == (TAG_HEAP << 3 | ty::HASH)
+    }
+
     /// A user object (`V::Object`), by its bits.
     #[inline]
     pub fn is_object(self) -> bool {

@@ -331,6 +331,11 @@ pub struct Irep {
     /// The code (or a block in it) sets a default visibility: its blocks
     /// always share the frame's env, which holds it.
     pub sets_vis: bool,
+    /// Only required parameters (no optional, rest, post, keyword or
+    /// auto-splat): arguments bind by copying (Vm::bind_args).
+    pub simple_args: bool,
+    /// Registers a frame of this code needs.
+    pub frame_size: usize,
 }
 
 impl std::fmt::Debug for CallCache {

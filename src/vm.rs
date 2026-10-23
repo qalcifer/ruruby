@@ -1492,17 +1492,14 @@ impl Vm {
         let spec = &irep.spec;
         // fast path: only required parameters, as many arguments, no keywords
         if let Args::Stack { at, n } = args
+            && irep.simple_args
             && n == spec.req
-            && spec.opt == 0
-            && !spec.rest
-            && spec.post == 0
-            && !spec.takes_kw()
-            && !spec.nokw
-            && !spec.auto_splat
-            && !(n > 0 && matches!(self.kind(self.stack[at + n - 1]), V::Hash(h) if self.heap[h].borrow().kw))
+            && !(n > 0
+                && self.stack[at + n - 1].is_hash()
+                && matches!(self.kind(self.stack[at + n - 1]), V::Hash(h) if self.heap[h].borrow().kw))
         {
             let base = self.stack.len();
-            self.stack.resize(base + irep.nregs.max(1 + spec.nparams()), Value::NIL);
+            self.stack.resize(base + irep.frame_size, Value::NIL);
             self.stack[base] = *self_;
             for i in 0..n {
                 self.stack[base + 1 + i] = self.stack[at + i];

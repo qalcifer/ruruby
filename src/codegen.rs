@@ -150,6 +150,14 @@ impl Codegen<'_> {
             peephole(&mut irep.code);
         }
         irep.sets_vis = sets_vis(&irep);
+        let spec = &irep.spec;
+        irep.simple_args = spec.opt == 0
+            && !spec.rest
+            && spec.post == 0
+            && !spec.takes_kw()
+            && !spec.nokw
+            && !spec.auto_splat;
+        irep.frame_size = irep.nregs.max(1 + spec.nparams());
         irep.needs_env = reach(&irep) > 0 || irep.sets_vis;
         irep.caches = irep.code.iter().map(|_| RefCell::default()).collect();
         irep
