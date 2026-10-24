@@ -95,6 +95,9 @@ pub enum Node {
     /// `class << obj; body; end`
     SClass(Box<Node>, Box<Node>, Vec<String>),
     Return(Option<Box<Node>>),
+    /// `expr?` (lang-fork): `Err(e)` and `none` return from the method,
+    /// `Ok(v)` gives `v`, anything else itself.
+    Try(Box<Node>),
     Break(Option<Box<Node>>),
     Next(Option<Box<Node>>),
     Redo,

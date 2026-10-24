@@ -55,3 +55,58 @@ fn ok_and_err_values() {
         r#"true"#,
     ]);
 }
+
+/// `expr?`: Err and none return from the method (from a block: from the
+/// method around it), Ok(v) gives v. After a method name `?` belongs to
+/// the name (`empty?`): `.first()?`.
+#[test]
+fn try_operator() {
+    let out = run(r##"
+        def half(n) = n.even? ? Ok(n / 2) : Err("#{n} is odd")
+        def quarter(n)
+          h = half(n)?
+          Ok(half(h)?)
+        end
+        p quarter(8), quarter(6), quarter(5)
+        def first_word(s)
+          w = s.split(" ").first()?
+          w.upcase
+        end
+        p first_word("hi there"), first_word("")
+        def from_block(xs)
+          xs.each { |x| half(x)? }
+          :all_even
+        end
+        p from_block([2, 4]), from_block([2, 3, 4])
+        def local_try(n)
+          r = half(n)
+          v = r?
+          v + 100
+        end
+        p local_try(10), local_try(1)
+        def chain(n) = Ok(half(n)?.to_s + "!")
+        p chain(4), chain(3)
+        x = 5
+        p x > 3 ? :big : :small, [1].empty?, x.even? ? 1 : 2
+        def plain(v) = Ok(v?)
+        p plain(7), plain(nil)
+    "##);
+    assert_eq!(out.lines().collect::<Vec<_>>(), [
+        r#"Ok(2)"#,
+        r#"Err("3 is odd")"#,
+        r#"Err("5 is odd")"#,
+        r#""HI""#,
+        r#"nil"#,
+        r#":all_even"#,
+        r#"Err("3 is odd")"#,
+        r#"105"#,
+        r#"Err("1 is odd")"#,
+        r#"Ok("2!")"#,
+        r#"Err("3 is odd")"#,
+        r#":big"#,
+        r#"false"#,
+        r#"2"#,
+        r#"Ok(7)"#,
+        r#"nil"#,
+    ]);
+}

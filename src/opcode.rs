@@ -220,6 +220,9 @@ pub enum Op {
     Exec(Reg, u32),
     /// alias_method(target_class, new, old)
     Alias(Sym, Sym),
+    /// `expr?`: R[a] = v and jump to `t` for `Ok(v)` (or any value but an
+    /// Err or none); an Err or none falls through to the `return` after it.
+    TryOk(Reg, u32),
     /// `use`: runs the used file once (in a namespace of its own) and copies
     /// the imported constants into the current namespace; pool[i] is a
     /// [`Literal::Use`].

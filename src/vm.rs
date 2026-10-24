@@ -250,6 +250,8 @@ pub struct Vm {
     pub units: HashMap<String, Unit>,
     /// The directory `use` paths start from.
     pub module_root: Option<std::path::PathBuf>,
+    /// `Ok`, `Err` (from result.rb) and the ivar holding an Ok's value, for `?`.
+    pub results: Option<(ClassRef, ClassRef, Sym)>,
 }
 
 /// A file compiled for `use`.
@@ -575,6 +577,7 @@ impl Vm {
             basic: BasicOps::default(),
             units: HashMap::new(),
             module_root: None,
+            results: None,
         };
         crate::core::init(&mut vm);
         crate::core::load_prelude(&mut vm);
@@ -3060,6 +3063,23 @@ impl Vm {
                 self.heap[target].methods.insert_vis(s, Method::Ruby(irep), vis);
             }
             Op::Use(i) => return self.use_op(f, i),
+            Op::TryOk(a, t) => {
+                let v = self.reg(f, a);
+                let pass = match self.results {
+                    _ if v.is_nil() => false,
+                    Some((ok, err, value)) => {
+                        if self.is_a(&v, &ok) {
+                            let x = self.ivar_get(&v, value);
+                            self.set_reg(f, a, x);
+                        }
+                        !self.is_a(&v, &err)
+                    }
+                    None => true,
+                };
+                if pass {
+                    f.pc = t as usize;
+                }
+            }
             Op::DefaultVis(vis) => match self.scope_env(f) {
                 Some(e) => {
                     self.shared_vis |= vis != Vis::Public;

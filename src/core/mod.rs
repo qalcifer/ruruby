@@ -46,6 +46,16 @@ pub fn load_prelude(vm: &mut Vm) {
             panic!("{name} failed: {}", vm.exc_message(&e));
         }
     }
+    let class = |vm: &mut Vm, name: &str| {
+        let s = vm.intern(name);
+        match vm.heap[vm.c.object].consts.borrow().get(&s).map(|v| vm.kind(*v)) {
+            Some(V::Class(c)) => c,
+            _ => panic!("result.rb defines no {name}"),
+        }
+    };
+    let (ok, err) = (class(vm, "Ok"), class(vm, "Err"));
+    let value = vm.intern("@value");
+    vm.results = Some((ok, err, value));
 }
 
 /// Argument `i`, or nil when missing.

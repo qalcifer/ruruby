@@ -264,7 +264,8 @@ impl Codegen<'_> {
             | Op::JmpNot(_, t)
             | Op::JmpNil(_, t)
             | Op::OptArg(_, t)
-            | Op::KwArg(_, t) => *t = target as u32,
+            | Op::KwArg(_, t)
+            | Op::TryOk(_, t) => *t = target as u32,
             Op::JmpCmpI { target: t, .. } | Op::JmpCmpR { target: t, .. } => *t = target as u32,
             op => unreachable!("not a jump: {op:?}"),
         }
@@ -664,6 +665,14 @@ impl Codegen<'_> {
                 self.emit(Op::Exec(a, idx as u32));
                 self.emit(Op::Move(dst, a));
                 self.free_to(a);
+            }
+            Node::Try(inner) => {
+                self.expr(inner, dst)?;
+                let pass = self.emit(Op::TryOk(dst, 0));
+                // an Err or none returns from the method, like `return`
+                self.inline_ensures(0, dst)?;
+                self.emit(if self.kind() == Kind::Block { Op::ReturnBlk(dst) } else { Op::Return(dst) });
+                self.patch(pass);
             }
             Node::Return(v) => {
                 self.opt_expr(v.as_deref(), dst)?;

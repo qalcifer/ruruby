@@ -992,6 +992,12 @@ impl Parser {
                         _ => return Err(self.err("expected constant after '::'")),
                     };
                 }
+                // `f(x)?`, `a[i]?`: a `?` right after, before the end of the
+                // expression (a ternary has a space or an operand after it)
+                Tok::Question if !self.spc() && self.try_ends(1) => {
+                    self.advance();
+                    node = Node::Try(b(node));
+                }
                 Tok::LBracket if !self.spc() || !matches!(node, Node::Call { .. }) => {
                     self.advance();
                     let (mut args, _) =
@@ -1007,6 +1013,23 @@ impl Parser {
                 }
             }
         }
+    }
+
+    /// Whether the token `n` ahead can follow a postfix `?`.
+    fn try_ends(&self, n: usize) -> bool {
+        matches!(
+            self.peek_n(n),
+            Tok::Newline
+                | Tok::Semi
+                | Tok::Eof
+                | Tok::RParen
+                | Tok::RBracket
+                | Tok::RBrace
+                | Tok::Comma
+                | Tok::Dot
+                | Tok::AndDot
+                | Tok::Kw(Kw::End | Kw::If | Kw::Unless | Kw::Then)
+        )
     }
 
     // ---- method calls --------------------------------------------------
@@ -1690,6 +1713,13 @@ impl Parser {
         let call_follows = self.at(&Tok::LParen) && !self.spc();
         if self.is_local(&name) && !call_follows {
             return Ok(Node::LVar(name));
+        }
+        // `v?` on a local: the lexer took the `?` into the name
+        if let Some(var) = name.strip_suffix('?')
+            && self.is_local(var)
+            && !call_follows
+        {
+            return Ok(Node::Try(b(Node::LVar(var.to_string()))));
         }
         match name.as_str() {
             "__LINE__" => return Ok(Node::Int(line as i64)),
