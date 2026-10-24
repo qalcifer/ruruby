@@ -19,12 +19,15 @@ use crate::value::{Env, EnvRegs, IvTable, Method, ProcBody, RClass, RHash, RObje
 use std::cell::RefCell;
 use std::fmt;
 use std::marker::PhantomData;
+use std::num::NonZeroU32;
 use std::ops::Index;
 
 /// A handle to a heap object of type `T`.
 pub struct Gc<T> {
     idx: u32,
-    generation: u32,
+    /// The generation with [`GEN_LIVE`] set: never 0, so an
+    /// `Option<Gc<T>>` is as small as a handle.
+    generation: NonZeroU32,
     _t: PhantomData<fn() -> T>,
 }
 
@@ -46,7 +49,7 @@ impl<T> Eq for Gc<T> {}
 
 impl<T> fmt::Debug for Gc<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Gc({}:{})", self.idx, self.generation)
+        write!(f, "Gc({}:{})", self.idx, self.generation())
     }
 }
 
@@ -55,6 +58,14 @@ impl<T> fmt::Debug for Gc<T> {
 /// unless its slot was reused a multiple of 8,192 times since.
 pub const GEN_BITS: u32 = 13;
 const GEN_MASK: u32 = (1 << GEN_BITS) - 1;
+/// Set in every stored generation (handles' and slots').
+const GEN_LIVE: u32 = 1 << 31;
+
+/// A generation as stored.
+#[inline]
+fn stored_gen(generation: u32) -> NonZeroU32 {
+    NonZeroU32::new(generation & GEN_MASK | GEN_LIVE).unwrap()
+}
 
 impl<T> Gc<T> {
     /// The handle a [`Value`] packed as `(idx, generation)`.
@@ -62,7 +73,7 @@ impl<T> Gc<T> {
     pub(crate) fn from_raw(idx: u32, generation: u32) -> Self {
         Gc {
             idx,
-            generation,
+            generation: stored_gen(generation),
             _t: PhantomData,
         }
     }
@@ -74,7 +85,7 @@ impl<T> Gc<T> {
 
     #[inline]
     pub(crate) fn generation(self) -> u32 {
-        self.generation
+        self.generation.get() & GEN_MASK
     }
 }
 
@@ -82,7 +93,7 @@ impl<T: HeapObj> Gc<T> {
     /// Identity of the object, unique among live objects of all types and
     /// never 0. The low 4 bits hold the type's tag (1..=15).
     pub fn id(self) -> u64 {
-        (self.generation as u64) << 40 | (self.idx as u64) << 4 | T::TAG
+        (self.generation() as u64) << 40 | (self.idx as u64) << 4 | T::TAG
     }
 }
 
@@ -98,7 +109,8 @@ pub type ClassRef = Gc<RClass>;
 pub type IntRef = Gc<i64>;
 
 struct Slot<T> {
-    generation: u32,
+    /// As stored in handles (with [`GEN_LIVE`]).
+    generation: NonZeroU32,
     val: Option<T>,
 }
 
@@ -154,7 +166,7 @@ impl<T> Arena<T> {
                 i
             }
             None => {
-                self.slots.push(Slot { generation: 0, val: Some(v) });
+                self.slots.push(Slot { generation: stored_gen(0), val: Some(v) });
                 (self.slots.len() - 1) as u32
             }
         };
@@ -218,7 +230,7 @@ impl<T> Arena<T> {
         for (i, slot) in self.slots.iter_mut().enumerate() {
             if slot.val.is_some() && !marks.get(i).copied().unwrap_or(false) {
                 slot.val = None;
-                slot.generation = (slot.generation + 1) & GEN_MASK;
+                slot.generation = stored_gen(slot.generation.get() + 1);
                 if let Some(x) = self.extra.get_mut(i) {
                     *x = None;
                 }
