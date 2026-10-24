@@ -735,11 +735,14 @@ impl Codegen<'_> {
     }
 
     fn hash(&mut self, items: &[HashItem], kw: bool, dst: Reg) -> CResult<()> {
-        let t = self.alloc();
         let lead = items
             .iter()
             .take_while(|i| matches!(i, HashItem::Pair(..)))
             .count();
+        // pairs only: the Hash instruction writes `dst` itself, after
+        // reading every item
+        let direct = lead == items.len() && !kw;
+        let t = if direct { dst } else { self.alloc() };
         let base = self.sp();
         for item in &items[..lead] {
             if let HashItem::Pair(k, v) = item {
@@ -766,6 +769,9 @@ impl Codegen<'_> {
                 }
             }
             self.free_to(r);
+        }
+        if direct {
+            return Ok(());
         }
         if kw {
             self.emit(Op::KwHash(t));
