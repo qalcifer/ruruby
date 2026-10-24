@@ -288,3 +288,44 @@ fn deep_recursion_is_an_exception() {
 fn syntax_error_is_reported() {
     assert!(matches!(run_capture("def f("), Err(Error::Syntax(_))));
 }
+
+/// Loops test their condition at the bottom too (codegen repeats it):
+/// `next`, `break`, `until`, non-Integer operands and conditions with
+/// side effects still behave.
+#[test]
+fn loop_conditions() {
+    let out = run(r#"
+        i = 0; out = []
+        while i < 6
+          i += 1
+          next if i == 2
+          break if i == 5
+          out << i
+        end
+        p out, i
+        j = 0.5
+        j += 1 while j < 3
+        p j
+        k = 10
+        until k <= 7
+          k -= 1
+        end
+        p k
+        calls = 0
+        n = 0
+        while (calls += 1; n < 3)
+          n += 1
+        end
+        p calls
+        x = 0
+        r = while x < 3 do x += 1 end
+        p r
+        a, b = 0, 5
+        a += 1 while a < b
+        p a
+        s = "aaa"
+        s = s[1..] while s.size > 1
+        p s
+    "#);
+    assert_eq!(out, "[1, 3, 4]\n5\n3.5\n7\n4\nnil\n5\n\"a\"\n");
+}

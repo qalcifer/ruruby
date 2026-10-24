@@ -1215,7 +1215,12 @@ impl Codegen<'_> {
             let body_start = self.pc();
             self.cur().loops.last_mut().unwrap().body_start = body_start;
             self.stmt(body)?;
-            self.emit(Op::Jmp(start));
+            // the condition again at the bottom (mruby compiles loops
+            // this way): an iteration takes one branch, not a Jmp to the
+            // test at the top and then a branch
+            for j in self.cond_jump(cond, t, !until)? {
+                self.patch_to(j, body_start);
+            }
         }
         let lp = self.cur().loops.pop().unwrap();
         for j in jexit.into_iter().flatten() {
