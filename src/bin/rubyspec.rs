@@ -190,11 +190,18 @@ fn run_child(exe: &Path, file: &Path) -> FileResult {
             problems.push((kind, what.to_string(), msg.to_string()));
         }
     }
+    // examples a file declares but never ran: it died, or an error while
+    // loading its describe blocks kept them from being registered
+    let seen = counts.pass + counts.fail + counts.error + counts.skip;
     if !done {
         counts.broken_files = 1;
-        let seen = counts.pass + counts.fail + counts.error + counts.skip;
-        counts.lost = declared.saturating_sub(seen);
         problems.push(('X', status.to_string(), format!("file didn't finish ({status})")));
+    }
+    if !done || problems.iter().any(|p| p.0 == 'X') {
+        counts.lost = declared.saturating_sub(seen);
+        if counts.lost > 0 && done {
+            counts.broken_files = 1;
+        }
     }
     FileResult { file: file.to_path_buf(), counts, problems }
 }
@@ -222,7 +229,7 @@ fn group_of(file: &Path) -> String {
     let i = parts.iter().position(|p| p == ROOT).map_or(0, |i| i + 1);
     let rel = &parts[i.min(parts.len())..];
     match rel {
-        [top, sub, _, ..] if top == "core" || top == "library" => format!("{top}/{sub}"),
+        [top, sub, _, ..] => format!("{top}/{sub}"),
         [top, file] => format!("{top}/{}", file.trim_end_matches("_spec.rb")),
         _ => rel.join("/"),
     }
