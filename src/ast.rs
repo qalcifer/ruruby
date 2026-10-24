@@ -112,10 +112,13 @@ pub enum Node {
     Defined(Box<Node>),
     Alias(String, String),
     /// `use models::user::User`, `use shapes::{Circle, Square}`, `use util::*`
-    /// (items `None`): the file `models/user.rb` under the program's root
-    /// directory, and the constants it defines that this file imports.
+    /// (items `None`), `use geometry::Shapes::Circle`: the file
+    /// `models/user.rb` under the program's root directory (`path`), the
+    /// modules/classes inside it to go into (`inner`, here `Shapes`), and the
+    /// constants this file imports from there.
     Use {
         path: Vec<String>,
+        inner: Vec<String>,
         items: Option<Vec<String>>,
         line: u32,
     },

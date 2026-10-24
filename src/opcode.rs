@@ -275,6 +275,9 @@ pub enum Literal {
 pub struct UseDecl {
     /// The file's path under the program root, without `.rb` (`models/user`).
     pub path: String,
+    /// Modules/classes inside the file to import from (`Shapes` in
+    /// `use geometry::Shapes::Circle`).
+    pub inner: Vec<Sym>,
     /// The constants it imports; `None`: all of them (`use util::*`).
     pub items: Option<Vec<Sym>>,
 }

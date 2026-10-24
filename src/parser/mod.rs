@@ -486,8 +486,17 @@ impl Parser {
             if !self.eat(&Tok::Colon2) {
                 return Err(self.err("use: expected `::` and what to import (file::Name, file::{A, B} or file::*)"));
             }
+            if matches!(self.peek(), Tok::Ident(_)) {
+                continue;
+            }
+            // `Shapes::Circle`: modules inside the file, then what to import
+            let mut inner = Vec::new();
+            while let (Tok::Const(c), Tok::Colon2) = (self.peek().clone(), self.peek2()) {
+                self.advance();
+                self.advance();
+                inner.push(c);
+            }
             let items = match self.peek().clone() {
-                Tok::Ident(_) => continue,
                 Tok::Const(c) => {
                     self.advance();
                     Some(vec![c])
@@ -516,7 +525,7 @@ impl Parser {
                 }
                 _ => return Err(self.err("use: expected a constant, { } or * after `::`")),
             };
-            return Ok(Node::Use { path, items, line });
+            return Ok(Node::Use { path, inner, items, line });
         }
     }
 

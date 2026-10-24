@@ -17,6 +17,7 @@
 use crate::ast::{Node, Program};
 use crate::opcode::Irep;
 use crate::vm::{Unit, Vm};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -33,17 +34,85 @@ pub fn compile_program(vm: &mut Vm, prog: &Program) -> Result<Rc<Irep>, String> 
     crate::codegen::compile(prog, &mut vm.syms)
 }
 
-/// A `use` statement: path, imported names (`None`: all), line.
-type UseRef<'a> = (&'a Vec<String>, &'a Option<Vec<String>>, u32);
+/// A `use` statement: file path, modules inside it, imported names
+/// (`None`: all), line.
+type UseRef<'a> = (&'a Vec<String>, &'a Vec<String>, &'a Option<Vec<String>>, u32);
 
 /// The `use` statements among a file's top-level statements.
 fn uses(prog: &Program) -> Vec<UseRef<'_>> {
     top_level(&prog.body)
         .filter_map(|n| match n {
-            Node::Use { path, items, line } => Some((path, items, *line)),
+            Node::Use { path, inner, items, line } => Some((path, inner, items, *line)),
             _ => None,
         })
         .collect()
+}
+
+/// The constants a file (or a class/module body in it) defines.
+#[derive(Default)]
+pub struct Exports {
+    pub names: HashMap<String, Export>,
+}
+
+pub enum Export {
+    /// A class or module, with its own constants.
+    Scope(Exports),
+    /// A constant whose value is a literal: nothing inside it.
+    Value,
+    /// Only known when it runs (`X = make()`, a name the file imports).
+    Unknown,
+}
+
+impl Exports {
+    fn of(body: &Node) -> Exports {
+        let mut out = Exports::default();
+        for n in top_level(body) {
+            match n {
+                Node::Class { path, body, .. } => {
+                    if let Node::Const(c) = &**path {
+                        // a reopened class or module adds to what it had
+                        let entry = out.names.entry(c.clone()).or_insert_with(|| Export::Scope(Exports::default()));
+                        if let Export::Scope(e) = entry {
+                            e.names.extend(Exports::of(body).names);
+                        }
+                    }
+                }
+                Node::CAsgn(target, value) => {
+                    if let Node::Const(c) = &**target {
+                        let literal = matches!(
+                            **value,
+                            Node::Int(_) | Node::Float(_) | Node::Str(_) | Node::DStr(_) | Node::Sym(_) | Node::Array(_)
+                                | Node::Hash(..) | Node::Range(..) | Node::Nil | Node::True | Node::False
+                        );
+                        out.names.insert(c.clone(), if literal { Export::Value } else { Export::Unknown });
+                    }
+                }
+                Node::Use { items: Some(items), .. } => {
+                    for i in items {
+                        out.names.insert(i.clone(), Export::Unknown);
+                    }
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+
+    /// Where `inner` leads: `Ok(Some(e))`, `Ok(None)` past what's known, or
+    /// what's wrong with it.
+    fn find(&self, inner: &[String]) -> Result<Option<&Exports>, String> {
+        let mut cur = self;
+        for (i, seg) in inner.iter().enumerate() {
+            let name = inner[..=i].join("::");
+            match cur.names.get(seg) {
+                None => return Err(format!("doesn't define {name}")),
+                Some(Export::Value) => return Err(format!("defines {name} as a value, not a module or class")),
+                Some(Export::Unknown) => return Ok(None),
+                Some(Export::Scope(e)) => cur = e,
+            }
+        }
+        Ok(Some(cur))
+    }
 }
 
 fn top_level(body: &Node) -> impl Iterator<Item = &Node> {
@@ -51,29 +120,6 @@ fn top_level(body: &Node) -> impl Iterator<Item = &Node> {
         Node::Seq(v) => v.iter().collect::<Vec<_>>().into_iter(),
         n => vec![n].into_iter(),
     }
-}
-
-/// Constants a file defines at its top level (classes, modules, `X = ...`)
-/// or imports by name: what other files may `use` from it.
-fn exports(prog: &Program) -> Vec<String> {
-    let mut out = Vec::new();
-    for n in top_level(&prog.body) {
-        match n {
-            Node::Class { path, .. } => {
-                if let Node::Const(c) = &**path {
-                    out.push(c.clone());
-                }
-            }
-            Node::CAsgn(target, _) => {
-                if let Node::Const(c) = &**target {
-                    out.push(c.clone());
-                }
-            }
-            Node::Use { items: Some(items), .. } => out.extend(items.iter().cloned()),
-            _ => {}
-        }
-    }
-    out
 }
 
 /// Compiles the files `prog` uses into `vm.units`; `stack` holds the files
@@ -85,9 +131,14 @@ fn prepare_uses(vm: &mut Vm, prog: &Program, stack: &mut Vec<String>) -> Result<
         Some(k) => format!("{k}.rb:{line}:"),
         None => format!("line {line}:"),
     };
-    for (path, items, line) in uses(prog) {
+    for (path, inner, items, line) in uses(prog) {
         let key = path.join("/");
-        let shown = format!("use {}", path.join("::"));
+        let what = match items {
+            Some(v) if v.len() == 1 => v[0].clone(),
+            Some(v) => format!("{{{}}}", v.join(", ")),
+            None => "*".into(),
+        };
+        let shown = format!("use {}", path.iter().chain(inner).chain([&what]).cloned().collect::<Vec<_>>().join("::"));
         if let Some(i) = stack.iter().position(|k| *k == key) {
             let cycle: Vec<&str> = stack[i..].iter().map(String::as_str).chain([key.as_str()]).collect();
             return Err(format!("{} {shown}: cyclic use ({})", at(line), cycle.join(" -> ")));
@@ -102,13 +153,15 @@ fn prepare_uses(vm: &mut Vm, prog: &Program, stack: &mut Vec<String>) -> Result<
             stack.pop();
             r?;
             let irep = crate::codegen::compile(&used, &mut vm.syms).map_err(|e| format!("{key}.rb: {e}"))?;
-            vm.units.insert(key.clone(), Unit { irep, exports: exports(&used), module: None });
+            vm.units.insert(key.clone(), Unit { irep, exports: Exports::of(&used.body), module: None });
         }
-        if let Some(items) = items {
-            let unit = &vm.units[&key];
-            if let Some(missing) = items.iter().find(|i| !unit.exports.contains(i)) {
-                return Err(format!("{} {shown}::{missing}: {key}.rb doesn't define {missing}", at(line)));
-            }
+        let unit = &vm.units[&key];
+        let scope = unit.exports.find(inner).map_err(|e| format!("{} {shown}: {key}.rb {e}", at(line)))?;
+        if let (Some(scope), Some(items)) = (scope, items)
+            && let Some(missing) = items.iter().find(|i| !scope.names.contains_key(*i))
+        {
+            let name = inner.iter().chain([missing]).cloned().collect::<Vec<_>>().join("::");
+            return Err(format!("{} {shown}: {key}.rb doesn't define {name}", at(line)));
         }
     }
     Ok(())

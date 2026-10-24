@@ -257,8 +257,8 @@ pub struct Vm {
 /// A file compiled for `use`.
 pub struct Unit {
     pub irep: Rc<Irep>,
-    /// Constants it defines or imports at its top level.
-    pub exports: Vec<String>,
+    /// Constants it defines or imports (checked by `use` at compile time).
+    pub exports: crate::modules::Exports,
     /// Its namespace, once it ran.
     pub module: Option<ClassRef>,
 }
@@ -3408,6 +3408,18 @@ impl Vm {
                 m
             }
         };
+        // `use geometry::Shapes::Circle`: into the modules inside the file
+        let mut module = module;
+        for s in &decl.inner {
+            let found = self.heap[module].consts.borrow().get(s).copied();
+            match found.map(|v| self.kind(v)) {
+                Some(V::Class(c)) => module = c,
+                _ => {
+                    let (file, name) = (decl.path.clone(), self.sym_name(*s).to_string());
+                    return Err(self.name_err(format!("use: {file}.rb defines no module or class {name}")));
+                }
+            }
+        }
         let imports: Vec<(Sym, Value)> = match &decl.items {
             Some(items) => {
                 let consts = self.heap[module].consts.borrow();

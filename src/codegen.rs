@@ -736,9 +736,10 @@ impl Codegen<'_> {
                 self.emit(Op::Lambda(dst, idx as u32));
             }
             Node::Defined(e) => self.defined(e, dst)?,
-            Node::Use { path, items, .. } => {
+            Node::Use { path, inner, items, .. } => {
                 let items = items.as_ref().map(|v| v.iter().map(|n| self.sym(n)).collect());
-                let decl = UseDecl { path: path.join("/"), items };
+                let inner = inner.iter().map(|n| self.sym(n)).collect();
+                let decl = UseDecl { path: path.join("/"), inner, items };
                 let i = self.pool(Literal::Use(Rc::new(decl)));
                 self.emit(Op::Use(i));
                 self.emit(Op::LoadNil(dst));
