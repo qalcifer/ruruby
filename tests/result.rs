@@ -176,3 +176,153 @@ fn fallible_core_methods() {
         r#"0"#,
     ]);
 }
+
+/// Ok/Err holding none, other Results and collections; equality and hashing
+/// by value; combinators; case/in with guards and nested patterns.
+#[test]
+fn results_nest_compare_and_combine() {
+    let out = run(r##"
+        # nested results and edge values
+        p Ok(Ok(1)), Ok(Err(2)), Ok(none), Err(none), Ok([1, {a: Ok(2)}])
+        p Ok(1) == Ok(1.0), Ok(1).eql?(Ok(1.0)), Ok(1) == Err(1), Ok(1) != Ok(2)
+        p [Ok(1), Err(2), Ok(3)].select(&:ok?).map(&:unwrap), [Ok(1), Err(2)].map(&:err)
+        p({Ok(1) => :a, Err(1) => :b}.size, Ok("x").hash == Ok("x").hash)
+        p Ok(1).frozen?, Err("e").frozen?, Ok(1).is_a?(Result), Err(1).is_a?(Ok)
+        # combinators
+        p Ok(2).and_then { |x| Ok(x * 3) }.and_then { |x| Err("big #{x}") }.or_else { |e| Ok(e.size) }
+        p Err("a").map { |x| x + 1 }, Ok(1).map_err { |e| e.upcase }, Err(5).unwrap_or_else { |e| e * 2 }
+        p Ok(1).unwrap_or(0), Err(1).unwrap_or(0), Ok(3).expect("never"), Err("x").unwrap_err
+        p catch_panic { Ok(1).unwrap_err }.err.message
+        # case/in with guards and nested patterns
+        def show(r)
+          case r
+          in Ok(Integer => n) if n > 10 then "big #{n}"
+          in Ok(Integer => n) then "small #{n}"
+          in Ok([a, b]) then "pair #{a},#{b}"
+          in Err(String => msg) then "error #{msg}"
+          in Err(_) then "other error"
+          end
+        end
+        p show(Ok(50)), show(Ok(5)), show(Ok([1, 2])), show(Err("no")), show(Err(3))
+    "##);
+    assert_eq!(out.lines().collect::<Vec<_>>(), [
+        r#"Ok(Ok(1))"#,
+        r#"Ok(Err(2))"#,
+        r#"Ok(none)"#,
+        r#"Err(none)"#,
+        r#"Ok([1, {a: Ok(2)}])"#,
+        r#"true"#,
+        r#"false"#,
+        r#"false"#,
+        r#"true"#,
+        r#"[1, 3]"#,
+        r#"[none, 2]"#,
+        r#"2"#,
+        r#"true"#,
+        r#"true"#,
+        r#"true"#,
+        r#"true"#,
+        r#"false"#,
+        r#"Ok(5)"#,
+        r#"Err("a")"#,
+        r#"Ok(1)"#,
+        r#"10"#,
+        r#"1"#,
+        r#"0"#,
+        r#"3"#,
+        r#""x""#,
+        r#""called unwrap_err on Ok(1)""#,
+        r#""big 50""#,
+        r#""small 5""#,
+        r#""pair 1,2""#,
+        r#""error no""#,
+        r#""other error""#,
+    ]);
+}
+
+/// `?` on Ok(Ok(..)), Ok(none) (passes: Ok gives what it holds), none,
+/// plain values (pass through), in blocks, chained after `)`; ternaries still parse.
+#[test]
+fn try_edge_cases() {
+    let out = run(r##"
+        p catch_panic { show(Ok("x")) }.err.class
+        # ? edge cases
+        def q1 = Ok(Ok(1)?)
+        def q2 = Ok(Ok(none)?)
+        def q3(x) = Ok([x?, :after])
+        def q4(r) = (v = r?; Ok(v.to_s))
+        p q1, q2, q3(5), q3(none), q4(Ok(7)), q4(Err(:bad)), q4(false)
+        def q5(list) = list.map { |r| r? }
+        p q5([Ok(1), Ok(2)]), q5([Ok(1), Err(2), Ok(3)])
+        def q6(h) = Ok(h[:a]?.fetch(:b)?)
+        p q6({a: {b: 1}}), q6({a: {}}), q6({})
+        x = 1
+        p x > 0 ? :pos : :neg, x.positive? ? 1 : 2, [x].empty? ? 1 : 2
+    "##);
+    assert_eq!(out.lines().collect::<Vec<_>>(), [
+        r#"NoMethodError"#,
+        r#"Ok(1)"#,
+        r#"Ok(none)"#,
+        r#"Ok([5, :after])"#,
+        r#"none"#,
+        r#"Ok("7")"#,
+        r#"Err(:bad)"#,
+        r#"Ok("false")"#,
+        r#"[1, 2]"#,
+        r#"Err(2)"#,
+        r#"Ok(1)"#,
+        r#"Err("key not found: :b")"#,
+        r#"none"#,
+        r#":pos"#,
+        r#"1"#,
+        r#"2"#,
+    ]);
+}
+
+/// panic's messages, nested catch_panic, deep and runaway recursion, core
+/// errors as panics of their kind.
+#[test]
+fn panics_and_catch_panic() {
+    let out = run(r##"
+        p catch_panic { panic }.err.message, catch_panic { panic(42) }.err.message, catch_panic { panic("x") }.err.class.superclass
+        p catch_panic { catch_panic { panic "inner" }.unwrap }.err.message
+        p catch_panic { none }, catch_panic { [1, 2].map { |v| v * 2 } }
+        def deep(n) = n == 0 ? panic("bottom") : deep(n - 1)
+        p catch_panic { deep(500) }.err.message
+        def runaway(n) = runaway(n + 1)
+        p catch_panic { runaway(0) }.err.class
+        p catch_panic { 1 + "x" }.err.class, catch_panic { Integer.nope }.err.class, catch_panic { [].fetch(1).unwrap }.err.message
+    "##);
+    assert_eq!(out.lines().collect::<Vec<_>>(), [
+        r#""explicit panic""#,
+        r#""42""#,
+        r#"Exception"#,
+        r#""called unwrap on Err(#<Panic: inner>)""#,
+        r#"Ok(none)"#,
+        r#"Ok([2, 4])"#,
+        r#""bottom""#,
+        r#"SystemStackError"#,
+        r#"TypeError"#,
+        r#"NoMethodError"#,
+        r#""called unwrap on Err(\"index 1 outside of array bounds: 0...0\")""#,
+    ]);
+}
+
+/// `?` with nothing to return to (a file's top level, a class body, a block
+/// whose return would leave the top level) panics; lambdas and
+/// define_method blocks return the Err.
+#[test]
+fn try_at_the_top_level_panics() {
+    let err = |src: &str| run_capture(src).unwrap_err().to_string();
+    assert_eq!(err("x = Err(\"bad\")?\np :after"), "`?` at the top level got Err(\"bad\") (Panic)");
+    assert_eq!(err("[Ok(1), none].each { |r| r? }"), "`?` at the top level got none (Panic)");
+    assert_eq!(err("class D; X = Err(1)?; end"), "`?` at the top level got Err(1) (Panic)");
+    assert_eq!(run("p Ok(3)?"), "3\n");
+    let out = run(r#"
+        l = ->(r) { Ok(r? + 1) }
+        class C; define_method(:m) { |r| Ok(r? * 2) }; end
+        def f = [1].each { |x| return Err(x)? }
+        p l.(Ok(1)), l.(Err(:e)), C.new.m(Ok(2)), C.new.m(Err(0)), f
+    "#);
+    assert_eq!(out, "Ok(2)\nErr(:e)\nOk(4)\nErr(0)\nErr(1)\n");
+}

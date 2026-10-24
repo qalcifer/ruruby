@@ -151,3 +151,74 @@ p Circle.name, defined?(Shapes)
         assert!(err.contains(expected), "{src}: {err}");
     }
 }
+
+const BASE: &str = "$loads = ($loads || []) << :base\nclass Base; def kind = :base; end\n";
+
+/// A file used by several others runs once (a diamond), a re-export passes a
+/// class on, an imported class can be reopened, a class body sees its file's
+/// other constants, and require'd files can `use` too.
+#[test]
+fn use_graphs_and_namespaces() {
+    let dir = project(
+        "graph",
+        &[
+            ("base.rb", BASE),
+            ("left.rb", "use base::Base\n$loads << :left\nclass Left < Base; end\n"),
+            ("right.rb", "use base::Base\n$loads << :right\nclass Right < Base; end\n"),
+            ("reexport.rb", "use base::Base\n"),
+            (
+                "consts.rb",
+                "LIMIT = 10\nclass Box\n  def self.limit = LIMIT\n  def inner = Helper.new.name\n  class Helper; def name = :helper; end\nend\n",
+            ),
+            ("lib/req.rb", "use base::Base\nREQ_BASE = Base\n"),
+            (
+                "main.rb",
+                r#"
+use left::Left
+use right::Right
+use reexport::Base
+p $loads, Left.superclass.equal?(Right.superclass), Left.superclass.equal?(Base), Base.new.kind
+class Base; def extra = :reopened; end
+p Left.new.extra
+use consts::Box
+p Box.limit, Box.new.inner, defined?(LIMIT)
+require_relative "lib/req"
+p REQ_BASE.equal?(Base)
+"#,
+            ),
+        ],
+    );
+    assert_eq!(
+        run(&dir).unwrap(),
+        "[:base, :left, :right]\ntrue\ntrue\n:base\n:reopened\n10\n:helper\nnone\ntrue\n"
+    );
+}
+
+#[test]
+fn use_failures() {
+    // a panic while a used file runs ends the program, there
+    let dir = project("load-panic", &[("boom.rb", "class Partial; end\npanic \"boom while loading\"\n"), ("main.rb", "use boom::Partial\np :never\n")]);
+    assert_eq!(run(&dir).unwrap_err(), "boom while loading (Panic)");
+    // one name, one origin; the same import twice is fine
+    let dir = project(
+        "clash",
+        &[
+            ("t1.rb", "class Thing; end\n"),
+            ("t2.rb", "class Thing; end\n"),
+            ("main.rb", "use t1::Thing\nuse t1::Thing\nuse t2::{Thing}\n"),
+        ],
+    );
+    let err = run(&dir).unwrap_err();
+    assert!(err.contains("line 3: use t2::Thing: Thing is already imported from t1 (line 1)"), "{err}");
+    // `use` names a file and what to import from it
+    for (src, expected) in [
+        ("use person\n", "use: expected `::`"),
+        ("use person::\n", "use: expected a constant, { } or * after `::`"),
+        ("use person::{}\n", "use: expected a constant name in { }"),
+        ("if true\n  use person::Person\nend\n", "use is only allowed among a file's top-level statements"),
+    ] {
+        let dir = project("syntax-errors", &[("person.rb", PERSON), ("main.rb", src)]);
+        let err = run(&dir).unwrap_err();
+        assert!(err.contains(expected), "{src:?}: {err}");
+    }
+}
