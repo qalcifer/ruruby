@@ -74,6 +74,7 @@ fn binop(name: &str) -> Option<fn(Reg) -> Op> {
         "*" => Op::Mul,
         "/" => Op::Div,
         "[]" => Op::GetIdx,
+        "<<" => Op::Shl,
         "==" => Op::Eq,
         "<" => Op::Lt,
         "<=" => Op::Le,
@@ -938,6 +939,7 @@ impl Codegen<'_> {
         let has_block = self.block_arg(block, block_arg)?;
         let mid = self.sym(name);
         match argc {
+            Some(2) if name == "[]=" && recv.is_some() && !has_block => self.emit(Op::SetIdx(a)),
             Some(n) if self_send => self.emit(Op::SendSelf(a, mid, n, has_block)),
             Some(n) => self.emit(Op::Send(a, mid, n, has_block)),
             None => self.emit(Op::SendV(a, mid, has_block)),
@@ -1151,7 +1153,13 @@ impl Codegen<'_> {
                     format!("{name}=")
                 };
                 let mid = self.sym(&setter);
-                self.emit(Op::Send(a, mid, args.len() + 1, false));
+                if let ("[]", [arg]) = (name.as_str(), args.as_slice())
+                    && !matches!(arg, Node::Splat(_))
+                {
+                    self.emit(Op::SetIdx(a));
+                } else {
+                    self.emit(Op::Send(a, mid, args.len() + 1, false));
+                }
                 if let Some(j) = skip {
                     self.patch(j);
                 }

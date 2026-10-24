@@ -174,6 +174,8 @@ pub struct CommonSyms {
     pub mul: Sym,
     pub div: Sym,
     pub aref: Sym,
+    pub aset: Sym,
+    pub shl: Sym,
     pub lt: Sym,
     pub le: Sym,
     pub gt: Sym,
@@ -509,6 +511,8 @@ impl Vm {
             mul: syms.intern("*"),
             div: syms.intern("/"),
             aref: syms.intern("[]"),
+            aset: syms.intern("[]="),
+            shl: syms.intern("<<"),
             lt: syms.intern("<"),
             le: syms.intern("<="),
             gt: syms.intern(">"),
@@ -2728,6 +2732,20 @@ impl Vm {
                 Some(v) => self.set_reg(f, a, v),
                 None => return self.send_op(f, a, self.s.aref, 1, false),
             },
+            Op::SetIdx(a) => {
+                let (x, k, v) = (self.reg(f, a), self.reg(f, a + 1), self.reg(f, a + 2));
+                if !self.set_idx(x, k, v)? {
+                    return self.send_op(f, a, self.s.aset, 2, false);
+                }
+                self.set_reg(f, a, v);
+            }
+            Op::Shl(a) => match self.kind(self.reg(f, a)) {
+                V::Array(h) if self.basic_ops_intact() && self.plain_array(h) && !self.heap.arrays.is_frozen(h) => {
+                    let v = self.reg(f, a + 1);
+                    self.heap[h].borrow_mut().push(v);
+                }
+                _ => return self.send_op(f, a, self.s.shl, 1, false),
+            },
             Op::Size(a, mid) => match self.kind(self.reg(f, a)) {
                 _ if !self.basic_ops_intact() => return self.send_op(f, a, mid, 0, false),
                 V::Array(h) if self.heap.arrays.extra(h).is_none() => {
@@ -3166,9 +3184,11 @@ impl Vm {
 
     /// `R[a] op R[a+1]`: numbers directly, anything else as a method call.
     fn record_basic_ops(&mut self) {
-        let (aref, size, length) = (self.s.aref, self.intern("size"), self.intern("length"));
-        for c in [self.c.array, self.c.hash] {
-            for m in [aref, size, length] {
+        let (size, length) = (self.intern("size"), self.intern("length"));
+        let (array, hash) = (self.c.array, self.c.hash);
+        let (aref, aset, shl) = (self.s.aref, self.s.aset, self.s.shl);
+        for (c, ms) in [(array, &[aref, aset, shl, size, length][..]), (hash, &[aref, aset, size, length])] {
+            for &m in ms {
                 if let Some((Method::Native(f), _)) = self.find_method(&c, m) {
                     self.basic.methods.push((c, m, f));
                 }
@@ -3196,6 +3216,40 @@ impl Vm {
         self.basic.epoch.set(epoch);
         self.basic.intact.set(intact);
         intact
+    }
+
+    /// A built-in Array: not a subclass' instance, no singleton.
+    #[inline]
+    fn plain_array(&self, h: ArrayRef) -> bool {
+        self.heap.arrays.extra(h).is_none()
+    }
+
+    /// `x[k] = v` done in place ([`Op::SetIdx`]), as for [`Vm::get_idx`],
+    /// on an Array or Hash that isn't frozen; false: call `[]=`.
+    fn set_idx(&mut self, x: Value, k: Value, v: Value) -> Result<bool, Unwind> {
+        if !self.basic_ops_intact() || self.is_frozen(&x) {
+            return Ok(false);
+        }
+        match self.kind(x) {
+            V::Array(h) if self.plain_array(h) => {
+                let Some(i) = k.as_inline_int() else {
+                    return Ok(false);
+                };
+                let mut a = self.heap[h].borrow_mut();
+                let i = if i < 0 { i + a.len() as i64 } else { i };
+                match usize::try_from(i) {
+                    Ok(i) if i < a.len() => a[i] = v,
+                    Ok(i) if i == a.len() => a.push(v),
+                    _ => return Ok(false),
+                }
+                Ok(true)
+            }
+            V::Hash(h) if self.heap.hashes.extra(h).is_none() && !self.custom_key(&k) => {
+                self.hash_set(h, k, v)?;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
     }
 
     /// `x[k]` read in place ([`Op::GetIdx`]): `x` a built-in Array (not a

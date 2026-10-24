@@ -148,6 +148,13 @@ pub enum Op {
     /// R[a] = R[a].size or .length (`mid`): a plain Array or Hash answers in
     /// place; anything else calls `mid`.
     Size(Reg, Sym),
+    /// R[a][R[a+1]] = R[a+2]: in place for a built-in Array (an Integer
+    /// index in it or just past its end) or Hash (a built-in key), not
+    /// frozen; anything else calls `[]=`.
+    SetIdx(Reg),
+    /// R[a] = R[a] << R[a+1]: appends to a built-in Array (not frozen) in
+    /// place; anything else calls `<<`.
+    Shl(Reg),
     Eq(Reg),
     Lt(Reg),
     Le(Reg),

@@ -1,6 +1,7 @@
-//! Instructions that answer built-in methods in place (`GetIdx` for `[]`,
-//! `Size` for `size`/`length`): the same results as the calls, and the
-//! calls themselves for subclasses, singletons and redefinitions.
+//! Instructions that answer built-in methods in place (`GetIdx`/`SetIdx`
+//! for `[]`/`[]=`, `Shl` for `<<`, `Size` for `size`/`length`): the same
+//! results as the calls, and the calls themselves for subclasses,
+//! singletons, frozen receivers and redefinitions.
 
 use ruruby::run_capture;
 
@@ -58,5 +59,75 @@ fn get_idx_and_size() {
     assert_eq!(
         out.split('\n').collect::<Vec<_>>().join(" "),
         r#"10 30 nil nil 20 [10, 20] 1 2 nil 7 "y" :found :sub :subsize :singleton :len 1 5 3 1 4 42 :redefined :resized 1 1 1 1 :hsize 5 :private_size :[] "#
+    );
+}
+
+#[test]
+fn set_idx_and_shl() {
+    let out = run_capture(r##"
+        a = [1, 2]
+        a[0] = :x; a[2] = :y; a[-1] = :z
+        a[5] = 5
+        p a
+        b = []
+        b << 1 << 2
+        p b, (1 << 4), ("s" << "t")
+        h = {}
+        h[:k] = 1
+        s = "key"
+        h[s] = 2
+        s << "!"
+        p h, h.keys[1].frozen?
+        f = [1].freeze
+        p (begin; f[0] = 2; rescue FrozenError => e; e.class; end)
+        p (begin; f << 2; rescue FrozenError => e; e.class; end)
+        p (begin; {}.freeze[:a] = 1; rescue FrozenError => e; e.class; end)
+        class Sub < Array
+          def []=(i, v) = super(i, v.to_s)
+          def <<(v) = super(v * 2)
+        end
+        s2 = Sub.new
+        s2[0] = 1
+        s2 << 3
+        p s2
+        class Array
+          alias_method :__orig_aset, :[]=
+          alias_method :__orig_shl, :<<
+          def []=(i, v) = nil
+          def <<(v) = self
+        end
+        c = [0]
+        c[0] = 1
+        c << 2
+        p c
+        class Array
+          alias_method :[]=, :__orig_aset
+          alias_method :<<, :__orig_shl
+        end
+        c[0] = 1
+        c << 2
+        p c
+        x = [1, 2, 3]
+        x[1..] = [9]
+        p x
+    "##)
+    .unwrap();
+    assert_eq!(
+        out.lines().collect::<Vec<_>>(),
+        [
+            r#"[:x, 2, :z, nil, nil, 5]"#,
+            r#"[1, 2]"#,
+            r#"16"#,
+            r#""st""#,
+            r#"{k: 1, "key" => 2}"#,
+            r#"true"#,
+            r#"FrozenError"#,
+            r#"FrozenError"#,
+            r#"FrozenError"#,
+            r#"["1", 6]"#,
+            r#"[0]"#,
+            r#"[1, 2]"#,
+            r#"[1, 9]"#,
+        ]
     );
 }
