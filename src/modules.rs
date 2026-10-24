@@ -131,8 +131,23 @@ fn prepare_uses(vm: &mut Vm, prog: &Program, stack: &mut Vec<String>) -> Result<
         Some(k) => format!("{k}.rb:{line}:"),
         None => format!("line {line}:"),
     };
+    // name → (where it comes from, line): one name, one meaning
+    let mut imported: HashMap<&str, (String, u32)> = HashMap::new();
     for (path, inner, items, line) in uses(prog) {
         let key = path.join("/");
+        let origin = path.iter().chain(inner).cloned().collect::<Vec<_>>().join("::");
+        for item in items.iter().flatten() {
+            match imported.get(item.as_str()) {
+                Some((from, first)) if *from != origin => {
+                    return Err(format!(
+                        "{} use {origin}::{item}: {item} is already imported from {from} (line {first})",
+                        at(line)
+                    ));
+                }
+                Some(_) => {}
+                None => _ = imported.insert(item, (origin.clone(), line)),
+            }
+        }
         let what = match items {
             Some(v) if v.len() == 1 => v[0].clone(),
             Some(v) => format!("{{{}}}", v.join(", ")),
