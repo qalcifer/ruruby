@@ -34,7 +34,7 @@ class Ok < Result
   def unwrap_err = panic("called unwrap_err on #{inspect}")
   # the value, or none for an Err
   def ok = @value
-  def err = nil
+  def err = none
   def map = Ok(yield(@value))
   def map_err = self
   # the block returns the next Result
@@ -60,7 +60,7 @@ class Err < Result
   def unwrap_or(default) = default
   def unwrap_or_else = yield(@error)
   def unwrap_err = @error
-  def ok = nil
+  def ok = none
   def err = @error
   def map = self
   def map_err = Err(yield(@error))

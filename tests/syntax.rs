@@ -29,7 +29,7 @@ fn parameters() {
     assert_eq!(
         run(src),
         // `c` (required, after the rest) is filled before the optional `b`;
-        // defaults run before destructuring, so `d = a` sees nil
+        // defaults run before destructuring, so `d = a` sees none
         "[1, 2, [], 9, 3, 5, {}, none]\n[1, 2, [3, 4], 5, 0, 5, {z: 1}, :b]\n[1, 2, 3, none]\n\
          [1, 2, [], 2, 7, 5, {}, none]\n[4, 8]\n\"missing keyword: :a\"\n\"unknown keyword: :x\"\n"
     );
@@ -307,7 +307,7 @@ fn operations_never_clobber_locals() {
         a = 5; a = (a > 0 ? a * 2 : a)
         b = 3; b = (b if b > 1)
         c = 2; c = (c == 2 && c + 1)
-        d = 1; d = (d.nil? || d + 1)
+        d = 1; d = (d.none? || d + 1)
         e = 2; e = (case e when 2 then e * 5 end)
         g = 2; g = (1; g)
         h = 6; h = (h > 0 and h)
@@ -373,11 +373,11 @@ fn jumps_to_returns_keep_their_results() {
             y = x * 2
             y
           else
-            unless x.nil? then :false else :nil end
+            unless x.none? then :false else :nil end
           end
         end
         def c(x) = while x > 0; x -= 1; break :broke if x == 2; end
-        p a(5), a(1), a(nil), b(3), b(false), b(nil), c(5), c(1)
+        p a(5), a(1), a(none), b(3), b(false), b(none), c(5), c(1)
         p [1, 2, 3].map { |v| v.odd? ? v : -v }
     "#);
     assert_eq!(out, ":big\n:one\n:none\n6\n:false\n:nil\n:broke\nnone\n[1, -2, 3]\n");

@@ -12,7 +12,7 @@ fn run(src: &str) -> String {
 #[test]
 fn hash_methods() {
     let out = run(r##"
-        h = {a: 1, b: nil, c: 3}
+        h = {a: 1, b: none, c: 3}
         p h.shift, h.size, {}.shift, h.assoc(:b), h.rassoc(3), h.has_value?(3), h.compact, h.except(:c)
         g = {a: 1, b: 2, c: 3}
         p g.select! { |k, v| v > 1 }.size, g.select! { true }, g.reject! { |k, v| v == 2 }.keys
@@ -94,7 +94,7 @@ fn array_methods() {
         p [1, 2].eql?([1, 2]), [1, 2].eql?([1.0, 2.0]), [1, 2] == [1.0, 2.0], {[1] => :a}[[1.0]]
         p catch_panic { [1].first(-1) }.err.message
         p (catch_panic { [1].last(1, 2) }.err && :argc), (catch_panic { [].[]() }.err && :argc)
-        p [3, 1, 2].sort { |x, y| (x - y).to_f }, catch_panic { [1, 2].sort { nil } }.err.message
+        p [3, 1, 2].sort { |x, y| (x - y).to_f }, catch_panic { [1, 2].sort { none } }.err.message
         p [1, 2, 1].rindex(1), [1, 2, 3].rindex { _1 < 3 }, [1, :a, "s", 2].grep(Integer), [1, :a].grep_v(Integer)
         p (1..6).find_all(&:even?), [1, 2].grep(Integer) { _1 * 10 }
         x = [1]
@@ -119,9 +119,9 @@ fn errors_ranges_and_numbers() {
         e = catch_panic { nosuch(3, 1, 4) }.err
         p e.name, e.args, e.instance_variables
         p NoMethodError.new("t", :t, [1, 2]).args
-        p Range.new(1, 10, true), Range.new(1, nil), Range.new(1, 3) == (1..3)
+        p Range.new(1, 10, true), Range.new(1, none), Range.new(1, 3) == (1..3)
         p catch_panic { Range.new(1, "a") }.err.message
-        p ~0, ~2, 7.quo(2), 5.75.quo(-2), nil.__id__ == nil.object_id
+        p ~0, ~2, 7.quo(2), 5.75.quo(-2), none.__id__ == none.object_id
     "##);
     assert_eq!(
         out,

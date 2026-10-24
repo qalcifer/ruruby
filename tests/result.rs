@@ -89,7 +89,7 @@ fn try_operator() {
         x = 5
         p x > 3 ? :big : :small, [1].empty?, x.even? ? 1 : 2
         def plain(v) = Ok(v?)
-        p plain(7), plain(nil)
+        p plain(7), plain(none)
     "##);
     assert_eq!(out.lines().collect::<Vec<_>>(), [
         r#"Ok(2)"#,

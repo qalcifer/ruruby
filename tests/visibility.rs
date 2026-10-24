@@ -83,7 +83,7 @@ fn scope_default_visibility() {
           def c = :c
           public
           def d = "#{b} #{c}"
-          def initialize = nil
+          def initialize = none
           private
           def self.cm = :cm
         end

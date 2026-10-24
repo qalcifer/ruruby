@@ -28,11 +28,11 @@ def classify(x)
   when Integer then "int"
   when 1.0..2.0 then "small float"
   when String, Symbol then "text"
-  when nil then "nothing"
+  when none then "nothing"
   else "other"
   end
 end
-[1, 1.5, "s", :t, nil, 9.9].each { |v| puts classify(v) }
+[1, 1.5, "s", :t, none, 9.9].each { |v| puts classify(v) }
 
 i = 0
 while i < 10

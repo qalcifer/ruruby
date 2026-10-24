@@ -1709,6 +1709,9 @@ impl Parser {
 
     fn ident_primary(&mut self, name: String, line: u32) -> PResult<Node> {
         let call_follows = self.at(&Tok::LParen) && !self.spc();
+        if name == "nil" {
+            return Err(self.err("`nil` was removed: use `none`"));
+        }
         if self.is_local(&name) && !call_follows {
             return Ok(Node::LVar(name));
         }

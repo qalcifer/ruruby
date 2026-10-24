@@ -20,14 +20,14 @@ fn run_err(src: &str) -> String {
 #[test]
 fn literals_and_inspect() {
     assert_eq!(
-        run(r##"p 1, -2, 3.5, 1e20, nil, true, :sym, "s\n""##),
+        run(r##"p 1, -2, 3.5, 1e20, none, true, :sym, "s\n""##),
         "1\n-2\n3.5\n1.0e+20\nnone\ntrue\n:sym\n\"s\\n\"\n"
     );
     assert_eq!(
         run(r##"p [1, [2, 3]], {a: 1, "b" => 2}, 1..3, 1...3"##),
         "[1, [2, 3]]\n{a: 1, \"b\" => 2}\n1..3\n1...3\n"
     );
-    assert_eq!(run("puts [1, [2, nil]]"), "1\n2\n\n");
+    assert_eq!(run("puts [1, [2, none]]"), "1\n2\n\n");
 }
 
 #[test]
@@ -229,7 +229,7 @@ fn errors_are_results_and_panics() {
     assert_eq!(run(src), "1\nfailed: bad 2\nErr(\"invalid value for Integer(): \\\"zz\\\"\")\n:saved\n");
     assert_eq!(run_err("panic 'boom'"), "boom (Panic)");
     assert_eq!(
-        run_err("nil.foo"),
+        run_err("none.foo"),
         "undefined method 'foo' for none (NoMethodError)"
     );
     assert_eq!(run_err("Nope"), "uninitialized constant Nope (NameError)");
@@ -328,7 +328,7 @@ fn yield_paths() {
         p two { |a, b| a + b }, one { |a, b| [a, b] }, one { |a| a }, no_args { |x = 5| x }
         r = [1, 2, 3].each { |x| break x * 10 if x == 2 }
         p r
-        def find; [1, 2, 3].each { |x| return x if x > 1 }; nil; end
+        def find; [1, 2, 3].each { |x| return x if x > 1 }; none; end
         p find
         p [1, 2, 3].map { |x| next 0 if x == 2; x }
         def lam; yield 7; end
@@ -356,7 +356,7 @@ fn method_call_paths() {
         def add(a, b) = a + b
         def with_blk(x, &b) = b ? b.call(x) : :none
         def each2(a, b); yield a; yield b; :done; end
-        def first_big(xs); xs.each { |x| return x if x > 2 }; nil; end
+        def first_big(xs); xs.each { |x| return x if x > 2 }; none; end
         def name = __method__
         def kw(h) = h
         class P

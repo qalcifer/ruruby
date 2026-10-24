@@ -68,8 +68,7 @@ const KEYWORDS: &[(&str, Kw)] = &[
     ("class", Kw::Class),
     ("module", Kw::Module),
     ("self", Kw::SelfKw),
-    ("nil", Kw::Nil),
-    // lang-fork: the spelling of nil
+    // lang-fork: the absent value (Ruby's nil, which is gone)
     ("none", Kw::Nil),
     ("true", Kw::True),
     ("false", Kw::False),

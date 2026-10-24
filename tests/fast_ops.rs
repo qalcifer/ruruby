@@ -53,7 +53,7 @@ fn get_idx_and_size() {
           private def size = :private_size
         end
         p C.new.go
-        p catch_panic { nil[0] }.err.name
+        p catch_panic { none[0] }.err.name
     "##)
     .unwrap();
     assert_eq!(
@@ -93,7 +93,7 @@ fn set_idx_and_shl() {
         class Array
           alias_method :__orig_aset, :[]=
           alias_method :__orig_shl, :<<
-          def []=(i, v) = nil
+          def []=(i, v) = none
           def <<(v) = self
         end
         c = [0]
@@ -132,7 +132,7 @@ fn set_idx_and_shl() {
     );
 }
 
-/// Interpolation writes Strings, numbers, Symbols, nil and booleans out
+/// Interpolation writes Strings, numbers, Symbols, none and booleans out
 /// itself (like mruby's `mrb_obj_as_string`, so a redefined Integer#to_s
 /// isn't used) and calls `to_s` on anything else; Hash literals freeze
 /// their String keys instead of copying them.
@@ -142,7 +142,7 @@ fn interpolation_and_string_keys() {
         class Foo; def to_s = "foo!"; end
         class Bad; def to_s = 42; end
         x = 5
-        p "a#{x}b#{nil}c#{true}#{1.5}#{:sym}#{"str"}#{Foo.new}#{[1, "x"]}#{{a: 1}}"
+        p "a#{x}b#{none}c#{true}#{1.5}#{:sym}#{"str"}#{Foo.new}#{[1, "x"]}#{{a: 1}}"
         p "#{x}", "#{x}#{x}", "lit", :"dyn#{x}", "#{1 << 60}", "#{2**70}", "#{-0.0}#{1e20}"
         s = "q"
         s = "#{s}#{s}!"

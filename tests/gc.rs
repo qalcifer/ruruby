@@ -26,7 +26,7 @@ fn cyclic_garbage_is_freed() {
           i += 1
         end
         GC.start
-        nil
+        none
         p GC.count > 0, GC.live < 5_000, keep.size, keep.last
     "#);
     assert_eq!(out, "true\ntrue\n30\n[29000]\n");
@@ -124,7 +124,7 @@ fn anonymous_classes_are_collected() {
           i += 1
         end
         GC.start
-        nil
+        none
         p GC.live < 20_000, Kept.new.hi, held[0].new.hi, held[0].ancestors.include?(StandardError)
         GC.stress = true
         k = Class.new(Kept) { def hi = super + "!" }

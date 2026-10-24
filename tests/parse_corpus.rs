@@ -65,7 +65,7 @@ fn compile_all() {
         };
         let result = Interpreter::new().compile_file(&src, &rel, 1);
         let known = KNOWN_FAILURES.iter().any(|(k, _)| *k == rel);
-        // lang-fork: Ruby code using exception handling is meant to fail
+        // lang-fork: Ruby code using removed syntax (exceptions, nil) is meant to fail
         let result = match result {
             Err(e) if e.to_string().contains("` was removed:") => {
                 removed += 1;
@@ -79,7 +79,7 @@ fn compile_all() {
             _ => {}
         }
     }
-    eprintln!("{removed} files use removed exception syntax (lang-fork)");
+    eprintln!("{removed} files use syntax lang-fork removed (exceptions, nil)");
     assert!(
         problems.is_empty(),
         "{} of {} files:\n{}",

@@ -17,13 +17,13 @@ fn index_finds_what_a_scan_finds() {
     let out = run(r#"
         class Obj; end
         o = Obj.new
-        keys = [1, -1, 0, 2**50, -(2**60), 1.5, 0.0, nil, true, false, :sym, "str",
+        keys = [1, -1, 0, 2**50, -(2**60), 1.5, 0.0, none, true, false, :sym, "str",
                 "", [1, [2, "x"]], [], 1..3, o, {a: 1}]
         probes = keys + [1.0, -0.0, 2.0**50, "st" + "r", [1, [2, "x"]], (1..3), Obj.new,
                          [1.0, [2, "x"]], {a: 1}, :other, "other", 2, 2**50 + 1]
         smalls = [{}, {}, {}]   # 6 keys each: scanned
         keys.each_with_index { |k, i| smalls[i / 6][k] = i }
-        scan = ->(k) { s = smalls.find { |h| h.key?(k) }; s ? s[k] : nil }
+        scan = ->(k) { s = smalls.find { |h| h.key?(k) }; s ? s[k] : none }
         big = {}
         100.times { |i| big["filler#{i}"] = -i }
         keys.each_with_index { |k, i| big[k] = i }
