@@ -1,0 +1,201 @@
+//! lang-fork: `interface` and `impl` (src/core/interface.rs).
+
+use ruruby::run_capture;
+
+fn run(src: &str) -> String {
+    match run_capture(src) {
+        Ok(out) => out,
+        Err(e) => panic!("error running {src:?}: {e}"),
+    }
+}
+
+const SHAPES: &str = r##"
+    interface Shape {
+      fn area()
+      fn name() = self.class.name
+      fn describe() = "#{name}: area #{area}"
+    }
+
+    interface Solid: Shape {
+      fn volume()
+    }
+"##;
+
+/// Required methods, defaults, overriding a default, both impl forms,
+/// super-interfaces, `super` into a default, built-in classes, reflection.
+#[test]
+fn implementing_interfaces() {
+    let out = run(&format!("{SHAPES}{}", r##"
+        class Circle {
+          fn initialize(r) = @r = r
+        }
+        impl Shape for Circle {
+          fn area() = 3 * @r * @r
+        }
+        class Square {
+          fn initialize(side) = @side = side
+          impl Shape {
+            fn area() = @side * @side
+            fn name() = "square"
+          }
+        }
+        impl Shape for Integer {
+          fn area() = self * self
+        }
+        class Cube {
+          fn initialize(s) = @s = s
+          impl Solid {
+            fn area() = 6 * @s * @s
+            fn volume() = @s * @s * @s
+            fn describe() = "cube: #{super}"
+          }
+        }
+        p Circle.new(1).describe, Square.new(2).describe, 4.describe, Cube.new(1).describe
+        p Square.new(1).is_a?(Shape), Cube.new(1).is_a?(Shape), Cube.implements?(Shape), Circle.implements?(Solid)
+        p Shape.interface?, Circle.interface?, Cube.ancestors.take(3), [Circle.new(1), 2].sum(&:area)
+    "##));
+    assert_eq!(out.lines().collect::<Vec<_>>(), [
+        r#""Circle: area 3""#,
+        r#""square: area 4""#,
+        r#""Integer: area 16""#,
+        r#""cube: Cube: area 6""#,
+        "true",
+        "true",
+        "true",
+        "false",
+        "true",
+        "false",
+        "[Cube, Solid, Shape]",
+        "7",
+    ]);
+}
+
+/// A requirement can be met by the class body, a superclass, an accessor
+/// or another impl; required class methods; constants in interfaces; a
+/// method defined in two interfaces is fine when the class defines it.
+#[test]
+fn meeting_requirements() {
+    let out = run(&format!("{SHAPES}{}", r##"
+        interface Named {
+          fn name()
+          fn greet() = "hi #{name}"
+        }
+        class Person {
+          fn initialize(name) = @name = name
+          impl Named { attr_reader :name }
+        }
+        class Base { fn area() = 9 }
+        class Tile < Base { impl Shape {} }
+        interface Parse {
+          LIMIT = 3
+          fn self.parse(s)
+          fn twice() = [self, self]
+        }
+        class Num {
+          fn initialize(n) = @n = n
+          attr_reader :n
+          impl Parse {
+            fn self.parse(s) = new(s.to_i)
+          }
+        }
+        interface Labeled { fn name() = "labeled" }
+        class Both {
+          fn area() = 1
+          fn name() = "both"
+          impl Shape {}
+          impl Labeled {}
+        }
+        p Person.new("ann").greet, Tile.new.describe, Num.parse("5").n, Parse::LIMIT, Num.new(1).twice.size
+        p Both.new.describe, Both.implements?(Labeled)
+    "##));
+    assert_eq!(out.lines().collect::<Vec<_>>(), [
+        r#""hi ann""#,
+        r#""Tile: area 9""#,
+        "5",
+        "3",
+        "2",
+        r#""both: area 1""#,
+        "true",
+    ]);
+}
+
+/// `impl I by @field`: the required methods go to the field; the
+/// defaults come from the interface and use them; the class can still
+/// define some itself.
+#[test]
+fn delegation() {
+    let out = run(r##"
+        interface Stack {
+          fn push(x)
+          fn size()
+          fn last()
+          fn empty() = size == 0
+          fn top_or(d) = if empty { d } else { last }
+        }
+        class History {
+          fn initialize() = @items = []
+          impl Stack by @items {
+            fn size() = @items.size * 10
+          }
+        }
+        h = History.new
+        p h.top_or(:none), h.empty
+        h.push(1)
+        h.push(2)
+        p h.top_or(:none), h.size, h.empty, h.respond_to?(:pop)
+    "##);
+    assert_eq!(out.lines().collect::<Vec<_>>(), [":none", "true", "2", "20", "false", "false"]);
+}
+
+/// Broken contracts stop the program when the impl block ends, with the
+/// line of the `impl`.
+#[test]
+fn contract_errors() {
+    let cases = [
+        ("impl Shape for C { }", "line 14: C doesn't implement Shape: missing area()"),
+        ("impl Shape for C { fn area(x) = 1 }", "C#area takes 1 argument, Shape declares area()"),
+        ("impl Shape for C {\n fn area() = 1\n fn draw() = 2\n}", "draw() is not part of Shape: define it in the class"),
+        ("impl Solid for C { fn volume() = 1 }", "C doesn't implement Shape: missing area()"),
+        ("impl Shape, Named for C { fn area() = 1 }", "C gets name() from both Shape and Named: define it in the class"),
+        ("impl Shape for C { fn area() = 1 }\nimpl Shape for C {}", "line 15: C already implements Shape"),
+        ("impl Shape { fn area() = 1 }", "impl without `for` belongs in a class body"),
+        ("impl Shape for Kernel {}", "Kernel is a module; impl is for classes"),
+        ("impl C for C {}", "impl C: C is not an interface"),
+        ("interface Bad: C {}", "interface Bad: C is not an interface"),
+        ("interface Shape {}", "interface Shape is already defined"),
+        ("interface Display { fn to_s() }\nimpl Display for C {}", "C doesn't implement Display: missing to_s()"),
+        ("interface P { fn self.make(a, b) }\nimpl P for C {}", "C doesn't implement P: missing self.make(a, b)"),
+        ("interface Q { fn f(a, *r, k:, &b) }\nimpl Q for C {}", "missing f(a, *r, k:, &b)"),
+        ("impl Shape for C {\n fn area() = 1\n fn self.x() = 1\n}", "self.x() is not part of Shape"),
+    ];
+    let head = format!("{SHAPES}{}", "
+        interface Named { fn name() = \"n\" }
+        class C { fn initialize() = none }
+");
+    for (src, want) in cases {
+        let err = run_capture(&format!("{head}{src}")).unwrap_err().to_string();
+        assert!(err.contains(want), "{src}:\n  {err}\n  wanted: {want}");
+    }
+}
+
+/// What an interface or impl block may contain is checked when parsing.
+#[test]
+fn syntax_errors() {
+    let cases = [
+        ("interface Bad { @x = 1 }", "`@x` in an interface: interfaces have no state"),
+        ("interface Bad { fn f() = @x + 1 }", "`@x` in an interface"),
+        ("interface Bad { fn initialize() }", "interfaces have no `initialize`"),
+        ("interface Bad { fn initialize(a) = a }", "interfaces have no `initialize`"),
+        ("interface Bad { p 1 }", "an interface holds `fn` declarations and constants"),
+        ("interface Bad { fn self.f() = 1 }", "default class methods aren't supported yet"),
+        ("interface bad {}", "interface name must be a CONSTANT"),
+        ("class C {}\nimpl Shape for C { p 1 }", "an impl block holds the interface's `fn`s"),
+        ("impl Shape for C by x", "expected an instance variable"),
+        ("impl Shape for C", "impl: expected `{` to start the body"),
+        ("fn f()", "fn: expected `(parameters)`"),
+    ];
+    for (src, want) in cases {
+        let err = run_capture(src).unwrap_err().to_string();
+        assert!(err.contains(want), "{src}:\n  {err}\n  wanted: {want}");
+    }
+}

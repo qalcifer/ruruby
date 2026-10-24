@@ -36,6 +36,9 @@ pub enum Method {
     ProcCall,
     /// `undef_method` marker: stops the lookup.
     Undefined,
+    /// lang-fork `impl I by @field`: calls the method of the same name on
+    /// the object in the instance variable.
+    Forward(Sym),
 }
 
 /// Instance-variable table (mruby: `iv_tbl`). Small and ordered.
@@ -182,6 +185,26 @@ pub struct RClass {
     /// The namespace of a file loaded with `use`: its top-level `def`s go to
     /// Object.
     pub file_module: Cell<bool>,
+    /// lang-fork: set on an `interface` (a module with required methods).
+    pub interface: RefCell<Option<InterfaceInfo>>,
+}
+
+/// lang-fork: what an `interface` requires. Its defaults are ordinary
+/// methods of the module; its super-interfaces are included modules.
+#[derive(Default, Clone)]
+pub struct InterfaceInfo {
+    pub required: Vec<Required>,
+}
+
+/// A required method: `fn area()` / `fn self.parse(s)` without a body.
+#[derive(Clone)]
+pub struct Required {
+    pub name: Sym,
+    /// Like `Method#arity`.
+    pub arity: i64,
+    pub class_method: bool,
+    /// As declared, for messages: `area()`, `self.parse(s)`.
+    pub sig: String,
 }
 
 impl RClass {
@@ -203,6 +226,7 @@ impl RClass {
             outer: Default::default(),
             frozen: Default::default(),
             file_module: Default::default(),
+            interface: Default::default(),
         }
     }
 

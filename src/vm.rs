@@ -1525,6 +1525,14 @@ impl Vm {
             }
             Method::ProcCall => return self.start_proc(&recv, args, block, ProcCall::default()),
             Method::Undefined => return Err(self.no_method(&recv, mid)),
+            Method::Forward(iv) => {
+                let to = self.ivar_get(&recv, iv);
+                let cls = self.class_of(&to);
+                return match self.find_method_vis(&cls, mid) {
+                    Some((m, owner, Vis::Public)) => self.start_invoke(m, owner, to, mid, args, block),
+                    _ => Err(self.no_method(&to, mid)),
+                };
+            }
             Method::Ruby(irep) => {
                 let bound = self.bind_args(&irep, &recv, args, &block, true)?;
                 let mut f = Frame::new(irep, bound.base, recv, owner);

@@ -94,6 +94,9 @@ pub enum Node {
     },
     /// `class << obj; body; end`
     SClass(Box<Node>, Box<Node>, Vec<String>),
+    /// lang-fork `impl I for C { body }`: runs the body with the class the
+    /// first node evaluates to as self and method target.
+    ClassBody(Box<Node>, Box<Node>, Vec<String>),
     Return(Option<Box<Node>>),
     /// `expr?` (lang-fork): `Err(e)` and `none` return from the method,
     /// `Ok(v)` gives `v`, anything else itself.

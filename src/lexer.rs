@@ -30,6 +30,8 @@ pub enum Kw {
     Retry,
     Class,
     Module,
+    Interface,
+    Impl,
     SelfKw,
     Nil,
     True,
@@ -70,6 +72,8 @@ const KEYWORDS: &[(&str, Kw)] = &[
     ("retry", Kw::Retry),
     ("class", Kw::Class),
     ("module", Kw::Module),
+    ("interface", Kw::Interface),
+    ("impl", Kw::Impl),
     ("self", Kw::SelfKw),
     // lang-fork: the absent value (Ruby's nil, which is gone)
     ("none", Kw::Nil),

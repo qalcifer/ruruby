@@ -46,6 +46,11 @@ pub struct Parser {
     /// Nesting of statement lists: `use` is only allowed at 1 (a file's own
     /// statements).
     stmts_level: usize,
+    /// lang-fork: inside an `interface` body (`@ivars` are errors).
+    in_interface: bool,
+    /// Directly in an `interface` body: a `fn` without a body declares a
+    /// required method.
+    interface_top: bool,
 }
 
 /// Deepest nesting accepted, by the parser and by the lexer for `#{}`.
@@ -80,6 +85,8 @@ pub fn parse_file(src: &str, file: &str, line: u32) -> PResult<Program> {
         tmp: 0,
         depth: 0,
         stmts_level: 0,
+        in_interface: false,
+        interface_top: false,
     };
     let body = p.parse_stmts()?;
     if !p.at(&Tok::Eof) {
@@ -1110,6 +1117,8 @@ impl Parser {
                     | Kw::Begin
                     | Kw::Class
                     | Kw::Module
+                    | Kw::Interface
+                    | Kw::Impl
             ),
             Tok::Minus
             | Tok::Plus
@@ -1688,6 +1697,12 @@ impl Parser {
                 Ok(Node::Colon3(name))
             }
             Tok::IVar(name) => {
+                if self.in_interface {
+                    return Err(self.err(&format!(
+                        "`{name}` in an interface: interfaces have no state; require an accessor (`fn {}()`) and let the class store it",
+                        name.trim_start_matches('@')
+                    )));
+                }
                 self.advance();
                 Ok(Node::IVar(name))
             }
@@ -1851,6 +1866,8 @@ impl Parser {
             Kw::Fn => self.parse_def(),
             Kw::Class => self.parse_class(false),
             Kw::Module => self.parse_class(true),
+            Kw::Interface => self.parse_interface(),
+            Kw::Impl => self.parse_impl(),
             Kw::Begin => Err(self.gone("begin", "group with parentheses `( ... )`")),
             Kw::End => Err(self.gone("end", "close the block with `}`")),
             Kw::Then => Err(self.gone("then", "put the body in `{ ... }`")),
@@ -2096,10 +2113,17 @@ impl Parser {
         self.parse_ternary()
     }
 
-    #[inline(never)]
     /// `fn name(params) { ... }` / `fn name(params) = expr` (parameters only
-    /// in parentheses, or none).
+    /// in parentheses, or none); in an interface also `fn name(params)`.
     fn parse_def(&mut self) -> PResult<Node> {
+        let top = std::mem::replace(&mut self.interface_top, false);
+        let r = self.parse_fn(top);
+        self.interface_top = top;
+        r
+    }
+
+    #[inline(never)]
+    fn parse_fn(&mut self, in_interface: bool) -> PResult<Node> {
         // singleton target: `def self.x`, `def obj.x`, `def Const.x`, `def (expr).x`
         let mut recv = None;
         if matches!(self.peek2(), Tok::Dot) {
@@ -2175,6 +2199,20 @@ impl Parser {
         };
         let body = if self.at(&Tok::LBrace) {
             self.parse_code_body()?
+        } else if in_interface && !self.at(&Tok::Assign) {
+            // a required method: `__require(:name, arity, class_method, "signature")`
+            self.pop_scope();
+            let class_method = match recv.as_deref() {
+                None => false,
+                Some(Node::SelfRef) => true,
+                Some(_) => return Err(self.err("an interface can require `fn self.name(...)`, not methods of other objects")),
+            };
+            let sig = format!("{}{name}({})", if class_method { "self." } else { "" }, signature(&params));
+            return Ok(call(
+                None,
+                "__require",
+                vec![Node::Sym(name), Node::Int(params_arity(&params)), bool_node(class_method), Node::Str(sig)],
+            ));
         } else if !self.at(&Tok::Assign) {
             return Err(self.err("fn: expected `(parameters)`, then `{ body }` or `= expression`"));
         } else {
@@ -2228,6 +2266,186 @@ impl Parser {
             locals,
             is_module,
         })
+    }
+
+    /// lang-fork: `interface Name[: Super, ...] { ... }` — a module whose
+    /// body starts with `__interface(supers...)`. A `fn` without a body is a
+    /// required method (`__require`), one with a body a default; constants
+    /// are allowed; no state (`@x`) and no `initialize`.
+    #[inline(never)]
+    fn parse_interface(&mut self) -> PResult<Node> {
+        let line = self.line();
+        // `Solid: Shape` lexes as the label `Solid:`
+        let mut path: Option<Node> = None;
+        let mut has_supers = false;
+        loop {
+            let name = match self.advance() {
+                Tok::Const(c) => c,
+                Tok::Label(c) if c.starts_with(char::is_uppercase) => {
+                    has_supers = true;
+                    c
+                }
+                _ => {
+                    self.pos -= 1;
+                    return Err(self.err("interface name must be a CONSTANT"));
+                }
+            };
+            path = Some(match path {
+                None => Node::Const(name),
+                Some(p) => Node::Colon2(b(p), name),
+            });
+            if has_supers || !self.eat(&Tok::Colon2) {
+                break;
+            }
+        }
+        let path = path.unwrap();
+        let mut supers = vec![];
+        if has_supers {
+            loop {
+                supers.push(self.header(|p| p.parse_cpath())?);
+                if !self.eat(&Tok::Comma) {
+                    break;
+                }
+            }
+        }
+        self.need_brace("interface")?;
+        self.push_scope(true);
+        let saved = (self.in_interface, self.interface_top);
+        (self.in_interface, self.interface_top) = (true, true);
+        let body = self.parse_brace_body();
+        (self.in_interface, self.interface_top) = saved;
+        let body = body?;
+        let locals = self.pop_scope();
+        let iface_err = |msg: &str| format!("syntax error, line {line}: interface: {msg}");
+        let mut iface_args = vec![Node::Int(line as i64)];
+        iface_args.extend(supers);
+        let mut stmts = vec![call(None, "__interface", iface_args)];
+        for st in stmts_of(body) {
+            match &st {
+                Node::Def { name, .. } if name == "initialize" => {
+                    return Err(iface_err("interfaces have no `initialize`: state and construction belong in the class"));
+                }
+                Node::Call { name, args, .. } if name == "__require" && matches!(&args[0], Node::Sym(s) if s == "initialize") => {
+                    return Err(iface_err("interfaces have no `initialize`: state and construction belong in the class"));
+                }
+                Node::Def { recv: Some(_), .. } => {
+                    return Err(iface_err(
+                        "default class methods aren't supported yet: declare `fn self.name(...)` without a body",
+                    ));
+                }
+                Node::Def { .. } | Node::CAsgn(..) => {}
+                Node::Call { name, .. } if name == "__require" => {}
+                _ => return Err(iface_err("an interface holds `fn` declarations and constants")),
+            }
+            stmts.push(st);
+        }
+        Ok(Node::Class {
+            path: b(path),
+            superclass: None,
+            body: b(Node::Seq(stmts)),
+            locals,
+            is_module: true,
+        })
+    }
+
+    /// lang-fork: `impl I, J for Target { fn ... }`, `impl I { ... }` in a
+    /// class body, and `impl I by @field [{ ... }]`. The block's methods are
+    /// defined on the class, then `__impl` attaches the interfaces and checks
+    /// the contract (missing methods, arity, methods foreign to the
+    /// interfaces, conflicting defaults).
+    #[inline(never)]
+    fn parse_impl(&mut self) -> PResult<Node> {
+        let line = self.line();
+        let mut ifaces = vec![];
+        loop {
+            ifaces.push(self.header(|p| p.parse_cpath())?);
+            if !self.eat(&Tok::Comma) {
+                break;
+            }
+        }
+        let target = if self.eat(&Tok::Kw(Kw::For)) {
+            Some(self.header(|p| p.parse_cpath())?)
+        } else {
+            None
+        };
+        let by = if matches!(self.peek(), Tok::Ident(s) if s == "by") {
+            self.advance();
+            match self.advance() {
+                Tok::IVar(n) => Some(n),
+                _ => {
+                    self.pos -= 1;
+                    return Err(self.err("impl ... by: expected an instance variable (`by @field`)"));
+                }
+            }
+        } else {
+            None
+        };
+        let has_body = self.at(&Tok::LBrace);
+        if !has_body && by.is_none() {
+            self.need_brace("impl")?;
+        }
+        let in_class = target.is_none();
+        if !in_class {
+            self.push_scope(true);
+        }
+        let body = if has_body { self.parse_brace_body() } else { Ok(Node::Nil) };
+        let locals = if in_class { vec![] } else { self.pop_scope() };
+        let body = stmts_of(body?);
+        // the methods the block defines, for the strictness check
+        let (mut names, mut class_names) = (vec![], vec![]);
+        for st in &body {
+            match st {
+                Node::Def { recv: None, name, .. } => names.push(Node::Sym(name.clone())),
+                Node::Def { recv: Some(r), name, .. } if matches!(**r, Node::SelfRef) => {
+                    class_names.push(Node::Sym(name.clone()))
+                }
+                Node::Call { recv: None, name, args, .. }
+                    if matches!(name.as_str(), "attr_reader" | "attr_writer" | "attr_accessor") =>
+                {
+                    for a in args {
+                        let Node::Sym(s) = a else {
+                            return Err(format!("syntax error, line {line}: impl: `{name}` takes symbols here"));
+                        };
+                        if name != "attr_writer" {
+                            names.push(Node::Sym(s.clone()));
+                        }
+                        if name != "attr_reader" {
+                            names.push(Node::Sym(format!("{s}=")));
+                        }
+                    }
+                }
+                Node::CAsgn(..) => {}
+                _ => {
+                    return Err(format!(
+                        "syntax error, line {line}: impl: an impl block holds the interface's `fn`s (other code goes in the class)"
+                    ));
+                }
+            }
+        }
+        let target_node = target.clone().unwrap_or(Node::SelfRef);
+        let mut check_args = vec![target_node.clone(), Node::Int(line as i64)];
+        check_args.extend(ifaces.iter().cloned());
+        let check = call(None, "__impl_target", check_args);
+        let finish = call(
+            None,
+            "__impl",
+            vec![
+                target_node,
+                Node::Int(line as i64),
+                Node::Array(ifaces),
+                Node::Array(names),
+                Node::Array(class_names),
+                by.map(Node::Sym).unwrap_or(Node::Nil),
+            ],
+        );
+        Ok(Node::Seq(if in_class {
+            let mut v = vec![check];
+            v.extend(body);
+            v.push(finish);
+            v
+        } else {
+            vec![Node::ClassBody(b(check), b(Node::Seq(body)), locals), finish]
+        }))
     }
 
     /// `Name`, `::Name`, `Outer::Name`, `expr::Name`
@@ -2536,6 +2754,42 @@ fn any_matches(list: Node, subject: Node, w: String) -> Node {
 }
 
 /// Names bound by destructuring parameters, in order.
+fn bool_node(v: bool) -> Node {
+    if v { Node::True } else { Node::False }
+}
+
+/// `Method#arity` of a parameter list (see `ArgSpec::arity`).
+fn params_arity(p: &Params) -> i64 {
+    let required_kw = p.kw.iter().any(|(_, d)| d.is_none());
+    let m = (p.required.len() + p.post.len()) as i64 + required_kw as i64;
+    if p.rest.is_some() || !p.optional.is_empty() || (!required_kw && (!p.kw.is_empty() || p.kwrest.is_some())) {
+        -(m + 1)
+    } else {
+        m
+    }
+}
+
+/// A parameter list as written, for messages: `a, b = ..., *rest, k:, &blk`.
+fn signature(p: &Params) -> String {
+    let mut v: Vec<String> = p.required.iter().map(|t| t.name().to_string()).collect();
+    v.extend(p.optional.iter().map(|(n, _)| format!("{n} = ...")));
+    v.extend(p.rest.iter().map(|n| format!("*{n}")));
+    v.extend(p.post.iter().map(|t| t.name().to_string()));
+    v.extend(p.kw.iter().map(|(n, d)| if d.is_some() { format!("{n}: ...") } else { format!("{n}:") }));
+    v.extend(p.kwrest.iter().map(|n| format!("**{n}")));
+    v.extend(p.block.iter().map(|n| format!("&{n}")));
+    v.join(", ")
+}
+
+/// The statements of a parsed body.
+fn stmts_of(body: Node) -> Vec<Node> {
+    match body {
+        Node::Seq(v) => v,
+        Node::Nil => vec![],
+        n => vec![n],
+    }
+}
+
 fn destructured_names(p: &Params) -> Vec<String> {
     fn walk(m: &MLhs, out: &mut Vec<String>) {
         let mut all: Vec<&MTarget> = m.pre.iter().collect();

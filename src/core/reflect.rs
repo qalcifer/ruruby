@@ -797,7 +797,7 @@ fn find_for_module(vm: &mut Vm, s: &Value, a: &[Value], public_only: bool) -> Vm
 
 /// Like `Proc#arity` for a lambda: required count, or -(required + 1)
 /// with optional or rest parameters; natives say -1.
-fn method_arity(vm: &Vm, owner: ClassRef, name: Sym) -> i64 {
+pub fn method_arity(vm: &Vm, owner: ClassRef, name: Sym) -> i64 {
     match vm.find_method(&owner, name).map(|(m, _)| m) {
         Some(Method::Ruby(irep)) => irep.spec.arity(),
         Some(Method::AttrReader(_)) => 0,

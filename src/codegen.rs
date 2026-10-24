@@ -667,6 +667,14 @@ impl Codegen<'_> {
                 self.emit(Op::Move(dst, a));
                 self.free_to(a);
             }
+            Node::ClassBody(target, body, locals) => {
+                let a = self.alloc();
+                self.expr(target, a)?;
+                let idx = self.class_body("impl", body, locals)?;
+                self.emit(Op::Exec(a, idx as u32));
+                self.emit(Op::Move(dst, a));
+                self.free_to(a);
+            }
             Node::Try(inner) => {
                 self.expr(inner, dst)?;
                 let pass = self.emit(Op::TryOk(dst, 0));
