@@ -73,3 +73,98 @@ fn fn_definitions() {
         assert!(err(src).contains("fn: expected `(parameters)`, then `{ body }` or `= expression`"), "{src}");
     }
 }
+
+/// Braces for every construct: if / else if / else, unless, while, until,
+/// for, case/when and case/in (with guards), class (with a superclass, and
+/// reopened), module, class << self. In a header (condition, subject,
+/// superclass) a `{` starts the body; a block there needs parentheses.
+#[test]
+fn braces_for_every_construct() {
+    let out = run(r##"
+        fn sign(x) {
+          if x > 0 {
+            :pos
+          } else if x < 0 {
+            :neg
+          } else {
+            :zero
+          }
+        }
+        p sign(3), sign(-1), sign(0)
+        p(if true { 1 })
+        p(if false { 1 })
+        unless false { p :unless_ran } else { p :no }
+        i = 0
+        while i < 3 { i += 1 }
+        until i == 0 { i -= 1 }
+        p i
+        out = []
+        for x in [1, 2, 3] { out << x * 2 }
+        p out, x
+        fn kind(v) {
+          case v {
+            when 1, 2 { :small }
+            when Integer { :int }
+            else { :other }
+          }
+        }
+        p kind(1), kind(10), kind("s")
+        fn show(r) {
+          case r {
+            in Ok(n) if n > 10 { "big #{n}" }
+            in Ok(n) { "ok #{n}" }
+            in Err(e) { "err #{e}" }
+          }
+        }
+        p show(Ok(50)), show(Ok(1)), show(Err(:x))
+        class Animal {
+          fn initialize(name) { @name = name }
+          fn speak = "..."
+          fn to_s { "#{self.class.name}(#{@name}): #{speak}" }
+        }
+        class Dog < Animal {
+          fn speak = "woof"
+        }
+        module Greeting {
+          fn self.hello(who) = "hello #{who}"
+          VERSION = 1
+        }
+        class Dog {
+          class << self { fn create(n) = new(n) }
+        }
+        puts Dog.create("rex"), Animal.new("a"), Greeting.hello("you"), Greeting::VERSION
+        list = [1, 5, 9]
+        if (list.any? { |v| v > 8 }) { p :parens }
+        while list.size > 2 { list.pop }
+        p list
+        h = {a: 1}
+        if h[:a] { p :hash_index }
+        if h == {a: 1} { p :hash_literal }
+    "##);
+    assert_eq!(out.lines().collect::<Vec<_>>(), [
+        r#":pos"#,
+        r#":neg"#,
+        r#":zero"#,
+        r#"1"#,
+        r#"none"#,
+        r#":unless_ran"#,
+        r#"0"#,
+        r#"[2, 4, 6]"#,
+        r#"3"#,
+        r#":small"#,
+        r#":int"#,
+        r#":other"#,
+        r#""big 50""#,
+        r#""ok 1""#,
+        r#""err x""#,
+        r#"Dog(rex): woof"#,
+        r#"Animal(a): ..."#,
+        r#"hello you"#,
+        r#"1"#,
+        r#":parens"#,
+        r#"[1, 5]"#,
+        r#":hash_index"#,
+        r#":hash_literal"#,
+    ]);
+    assert!(err("if [1].any? { |v| v > 0 } { p 1 }").contains("a block in a condition needs parentheses"));
+}

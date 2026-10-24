@@ -65,14 +65,14 @@ fn call(recv: Node, name: &str, args: Vec<Node>) -> Node {
 impl Parser {
     /// `case subject; in pat [if guard] then body ... else ... end`
     #[inline(never)]
-    pub(super) fn parse_case_in(&mut self, subject: Node) -> PResult<Node> {
+    pub(super) fn parse_case_in(&mut self, subject: Node, braced: bool) -> PResult<Node> {
         let tmp = self.fresh("pm");
         self.declare_here(&tmp);
         let (cache, flag) = (self.fresh("pmd"), self.fresh("pmf"));
         self.declare_here(&cache);
         self.declare_here(&flag);
         let saved = self.pm_cache.replace((tmp.clone(), cache, flag.clone()));
-        let r = self.case_in_clauses(&tmp);
+        let r = self.case_in_clauses(&tmp, braced);
         self.pm_cache = saved;
         let chain = r?;
         Ok(Node::Seq(vec![
@@ -82,26 +82,26 @@ impl Parser {
         ]))
     }
 
-    fn case_in_clauses(&mut self, tmp: &str) -> PResult<Node> {
+    fn case_in_clauses(&mut self, tmp: &str, braced: bool) -> PResult<Node> {
         let tmp = tmp.to_string();
         let mut clauses = Vec::new();
         while self.eat_kw(Kw::In) {
             let pat = self.parse_top_pattern()?;
             let mut test = self.pattern_test(&pat, lvar(&tmp));
             if self.eat_kw(Kw::If) {
-                test = Node::And(b(test), b(self.parse_expr()?));
+                test = Node::And(b(test), b(self.header(|p| p.parse_expr())?));
             } else if self.eat_kw(Kw::Unless) {
-                test = Node::And(b(test), b(Node::Not(b(self.parse_expr()?))));
+                test = Node::And(b(test), b(Node::Not(b(self.header(|p| p.parse_expr())?))));
             }
-            self.eat_then();
-            clauses.push((test, self.parse_stmts()?));
+            let body = self.clause_body(braced)?;
+            clauses.push((test, body));
         }
         let mut chain = if self.eat_kw(Kw::Else) {
-            self.parse_stmts()?
+            self.clause_body(braced)?
         } else {
             no_match(&tmp)
         };
-        self.expect_kw(Kw::End)?;
+        self.end_clauses(braced)?;
         for (test, body) in clauses.into_iter().rev() {
             chain = Node::If(b(test), b(body), b(chain));
         }

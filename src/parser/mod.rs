@@ -31,6 +31,9 @@ pub struct Parser {
     scopes: Vec<Scope>,
     /// Set while parsing command args / `while` conditions so `do` binds to the outer construct.
     no_do: bool,
+    /// lang-fork: set while parsing a condition (`if x {`), a superclass, a
+    /// `case` subject...: a `{` there starts the body, not a block.
+    no_brace: bool,
     /// Set while parsing a `for` header so `in` isn't read as a pattern test.
     no_in: bool,
     tmp: usize,
@@ -72,6 +75,7 @@ pub fn parse_file(src: &str, file: &str, line: u32) -> PResult<Program> {
         pos: 0,
         scopes: vec![Scope::new(true)],
         no_do: false,
+        no_brace: false,
         no_in: false,
         tmp: 0,
         depth: 0,
@@ -300,11 +304,52 @@ impl Parser {
         )
     }
 
+    /// `with_no_do(false, ..)` is how nested contexts (parentheses, brackets,
+    /// bodies) start: there a `{` is a block again too.
     fn with_no_do<T>(&mut self, v: bool, f: impl FnOnce(&mut Self) -> PResult<T>) -> PResult<T> {
         let old = std::mem::replace(&mut self.no_do, v);
+        let old_brace = if v { self.no_brace } else { std::mem::replace(&mut self.no_brace, false) };
         let r = f(self);
         self.no_do = old;
+        self.no_brace = old_brace;
         r
+    }
+
+    /// Parses a header expression (condition, superclass, case subject,
+    /// guard) after which a `{` starts a body.
+    fn header<T>(&mut self, f: impl FnOnce(&mut Self) -> PResult<T>) -> PResult<T> {
+        let old = std::mem::replace(&mut self.no_brace, true);
+        let r = f(self);
+        self.no_brace = old;
+        r
+    }
+
+    /// After a `}`: whether `kw` comes next (newlines skipped if so).
+    fn brace_followed_by(&mut self, kw: Kw) -> bool {
+        let save = self.pos;
+        self.skip_nl();
+        if self.at_kw(kw) {
+            return true;
+        }
+        self.pos = save;
+        false
+    }
+
+    /// The rest of `if cond { ... }`: `else if cond { ... }` / `else { ... }`.
+    fn parse_brace_if(&mut self, cond: Node) -> PResult<Node> {
+        let then = self.parse_brace_body()?;
+        let els = if self.brace_followed_by(Kw::Else) {
+            self.advance();
+            if self.eat_kw(Kw::If) {
+                let cond = self.header(|p| p.parse_expr())?;
+                self.parse_brace_if(cond)?
+            } else {
+                self.parse_brace_body()?
+            }
+        } else {
+            Node::Nil
+        };
+        Ok(Node::If(b(cond), b(then), b(els)))
     }
 
     /// Consumes the current token, then runs `f`.
@@ -1244,7 +1289,7 @@ impl Parser {
     }
 
     fn parse_block_opt(&mut self, allow_brace: bool) -> PResult<Option<Box<Block>>> {
-        if allow_brace && self.eat(&Tok::LBrace) {
+        if allow_brace && !self.no_brace && self.eat(&Tok::LBrace) {
             return Ok(Some(Box::new(self.parse_block_body(true)?)));
         }
         if !self.no_do && self.eat_kw(Kw::Do) {
@@ -1787,14 +1832,27 @@ impl Parser {
             Kw::False => Ok(Node::False),
             Kw::SelfKw => Ok(Node::SelfRef),
             Kw::If => {
-                let cond = self.with_no_do(false, |p| p.parse_expr())?;
+                let cond = self.with_no_do(false, |p| p.header(|p| p.parse_expr()))?;
+                if self.at(&Tok::LBrace) {
+                    return self.parse_brace_if(cond);
+                }
                 self.eat_then();
                 let then = self.parse_stmts()?;
                 let els = self.parse_else_chain()?;
                 Ok(Node::If(b(cond), b(then), b(els)))
             }
             Kw::Unless => {
-                let cond = self.parse_expr()?;
+                let cond = self.header(|p| p.parse_expr())?;
+                if self.at(&Tok::LBrace) {
+                    let then = self.parse_brace_body()?;
+                    let els = if self.brace_followed_by(Kw::Else) {
+                        self.advance();
+                        self.parse_brace_body()?
+                    } else {
+                        Node::Nil
+                    };
+                    return Ok(Node::If(b(cond), b(els), b(then)));
+                }
                 self.eat_then();
                 let then = self.parse_stmts()?;
                 let els = if self.eat_kw(Kw::Else) {
@@ -1806,10 +1864,15 @@ impl Parser {
                 Ok(Node::If(b(cond), b(els), b(then)))
             }
             Kw::While | Kw::Until => {
-                let cond = self.with_no_do(true, |p| p.parse_expr())?;
-                self.eat_kw(Kw::Do);
-                let body = self.parse_stmts()?;
-                self.expect_kw(Kw::End)?;
+                let cond = self.with_no_do(true, |p| p.header(|p| p.parse_expr()))?;
+                let body = if self.at(&Tok::LBrace) {
+                    self.parse_brace_body()?
+                } else {
+                    self.eat_kw(Kw::Do);
+                    let body = self.parse_stmts()?;
+                    self.expect_kw(Kw::End)?;
+                    body
+                };
                 Ok(Node::While {
                     cond: b(cond),
                     body: b(body),
@@ -1976,10 +2039,15 @@ impl Parser {
         let lhs = lhs?;
         self.expect_kw(Kw::In)?;
         self.declare_mlhs(&lhs);
-        let iter = self.with_no_do(true, |p| p.parse_expr())?;
-        self.eat_kw(Kw::Do);
-        let body = self.parse_stmts()?;
-        self.expect_kw(Kw::End)?;
+        let iter = self.with_no_do(true, |p| p.header(|p| p.parse_expr()))?;
+        let body = if self.at(&Tok::LBrace) {
+            self.parse_brace_body()?
+        } else {
+            self.eat_kw(Kw::Do);
+            let body = self.parse_stmts()?;
+            self.expect_kw(Kw::End)?;
+            body
+        };
         let param = self.fresh("for");
         let assign = match (&lhs.pre[..], &lhs.splat, &lhs.post[..]) {
             ([MTarget::Var(v)], None, []) => make_assign(v.clone(), Node::LVar(param.clone())),
@@ -2007,15 +2075,17 @@ impl Parser {
     /// `case/when` is desugared into an `if` chain using `===`, as Ruby defines it.
     #[inline(never)]
     fn parse_case(&mut self) -> PResult<Node> {
-        let subject = if matches!(self.peek(), Tok::Newline | Tok::Semi) {
+        let subject = if matches!(self.peek(), Tok::Newline | Tok::Semi | Tok::LBrace) {
             None
         } else {
-            Some(self.parse_expr()?)
+            Some(self.header(|p| p.parse_expr())?)
         };
+        // lang-fork: `case x { when 1 { ... } else { ... } }`
+        let braced = self.eat(&Tok::LBrace);
         self.skip_terms();
         if self.at_kw(Kw::In) {
             let subject = subject.ok_or_else(|| self.err("case/in needs a subject"))?;
-            return self.parse_case_in(subject);
+            return self.parse_case_in(subject, braced);
         }
         let tmp = self.fresh("case");
         if subject.is_some() {
@@ -2023,20 +2093,20 @@ impl Parser {
         }
         let mut whens = Vec::new();
         while self.eat_kw(Kw::When) {
-            let mut conds = vec![self.parse_when_cond()?];
+            let mut conds = vec![self.header(|p| p.parse_when_cond())?];
             while self.eat(&Tok::Comma) {
                 self.skip_nl();
-                conds.push(self.parse_when_cond()?);
+                conds.push(self.header(|p| p.parse_when_cond())?);
             }
-            self.eat_then();
-            whens.push((conds, self.parse_stmts()?));
+            let body = self.clause_body(braced)?;
+            whens.push((conds, body));
         }
         let mut chain = if self.eat_kw(Kw::Else) {
-            self.parse_stmts()?
+            self.clause_body(braced)?
         } else {
             Node::Nil
         };
-        self.expect_kw(Kw::End)?;
+        self.end_clauses(braced)?;
         for (conds, body) in whens.into_iter().rev() {
             let mut test: Option<Node> = None;
             for c in conds {
@@ -2059,6 +2129,28 @@ impl Parser {
             Some(s) => Node::Seq(vec![Node::LAsgn(tmp, b(s)), chain]),
             None => chain,
         })
+    }
+
+    /// A `when`/`in`/`else` clause's body: `{ ... }` in a braced case.
+    pub(super) fn clause_body(&mut self, braced: bool) -> PResult<Node> {
+        if braced {
+            let body = self.parse_brace_body()?;
+            self.skip_terms();
+            Ok(body)
+        } else {
+            self.eat_then();
+            self.parse_stmts()
+        }
+    }
+
+    /// The end of a case's clauses: `}` or `end`.
+    pub(super) fn end_clauses(&mut self, braced: bool) -> PResult<()> {
+        if braced {
+            self.skip_terms();
+            self.expect(&Tok::RBrace)
+        } else {
+            self.expect_kw(Kw::End)
+        }
     }
 
     fn parse_when_cond(&mut self) -> PResult<Node> {
@@ -2185,20 +2277,20 @@ impl Parser {
     fn parse_class(&mut self, is_module: bool) -> PResult<Node> {
         if !is_module && self.eat(&Tok::Shl) {
             // `class << obj`
-            let target = self.parse_expr()?;
+            let target = self.header(|p| p.parse_expr())?;
             self.push_scope(true);
-            let body = self.parse_body_rescue()?;
+            let body = if self.at(&Tok::LBrace) { self.parse_brace_body()? } else { self.parse_body_rescue()? };
             let locals = self.pop_scope();
             return Ok(Node::SClass(b(target), b(body), locals));
         }
         let path = self.parse_cpath()?;
         let superclass = if !is_module && self.eat(&Tok::Lt) {
-            Some(b(self.parse_expr()?))
+            Some(b(self.header(|p| p.parse_expr())?))
         } else {
             None
         };
         self.push_scope(true);
-        let body = self.parse_body_rescue()?;
+        let body = if self.at(&Tok::LBrace) { self.parse_brace_body()? } else { self.parse_body_rescue()? };
         let locals = self.pop_scope();
         Ok(Node::Class {
             path: b(path),
@@ -2244,7 +2336,13 @@ impl Parser {
     /// `{ statements }` (lang-fork bodies), the braces included.
     fn parse_brace_body(&mut self) -> PResult<Node> {
         self.expect(&Tok::LBrace)?;
-        let body = self.parse_stmts()?;
+        if matches!(self.peek(), Tok::Pipe | Tok::OrOr) {
+            // `if list.any? { |x| ... } {`: the block's `{` started the body
+            return Err(self.err(
+                "a block in a condition needs parentheses: `if (list.any? { |x| x > 1 }) { ... }` or `if list.any?(|x| x > 1) { ... }`",
+            ));
+        }
+        let body = self.with_no_do(false, |p| p.parse_stmts())?;
         self.skip_nl();
         self.expect(&Tok::RBrace)?;
         Ok(body)
