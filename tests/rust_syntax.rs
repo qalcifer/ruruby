@@ -168,3 +168,78 @@ fn braces_for_every_construct() {
     ]);
     assert!(err("if [1].any? { |v| v > 0 } { p 1 }").contains("a block in a condition needs parentheses"));
 }
+
+/// Closures: `|a, b| expr`, `|x| { stmts }`, `|| expr` are lambdas (strict
+/// arity, `return` leaves the closure). As a call's last argument a closure
+/// literal is the call's block (`map(|x| ..)`, `if xs.any?(|x| ..) {`), so
+/// iterators see it as they see `{ |x| }`; calling a closure (`f.(g, |x| ..)`)
+/// passes it as a value. `|` stays bitwise or after an operand.
+#[test]
+fn closures() {
+    let out = run(r##"
+        add = |a, b| a + b
+        inc = |x| x + 1
+        hello = || "hi"
+        multi = |x| {
+          y = x * 2
+          y + 1
+        }
+        p add.(1, 2), inc.call(4), hello.(), multi[5], add.lambda?, add.arity
+        p [1, 2, 3].map(|x| x * 10), [1, 2, 3].select(|x| x.odd?), [3, 1, 2].sort(|a, b| b <=> a)
+        p({a: 1, b: 2}.map(|k, v| "#{k}=#{v}"), [[1, 2], [3, 4]].map(|(a, b)| a + b))
+        total = 0
+        [1, 2, 3].each(|x| total += x)
+        p total
+        fn find_big(xs) {
+          xs.each(|x| { return x if x > 1 })
+          none
+        }
+        p find_big([1, 5, 9]), find_big([0])
+        p [1, 2, 3].inject(0, |s, x| s + x), [1, 2].reduce(|a, b| a * b)
+        if [1, 9].any?(|x| x > 8) { p :closure_in_condition }
+        p((1..3).map(|x| x * x))
+        compose = |f, g| |x| f.(g.(x))
+        p compose.(inc, |x| x * 3).(2)
+        counter = 0
+        bump = || counter += 1
+        bump.(); bump.()
+        p counter
+        early = |x| { return :neg if x < 0; :pos }
+        p early.(-1), early.(1)
+        p catch_panic { add.(1) }.err.class
+        p 5 | 3, true || false, [1].map(|v| v | 2)
+        fn run(x, &f) = f.(x)
+        fn twice(x) = yield(yield(x))
+        p run(1, |x| x + 1), twice(3, |x| x * 2)
+    "##);
+    assert_eq!(out.lines().collect::<Vec<_>>(), [
+        r#"3"#,
+        r#"5"#,
+        r#""hi""#,
+        r#"11"#,
+        r#"true"#,
+        r#"2"#,
+        r#"[10, 20, 30]"#,
+        r#"[1, 3]"#,
+        r#"[3, 2, 1]"#,
+        r#"["a=1", "b=2"]"#,
+        r#"[3, 7]"#,
+        r#"6"#,
+        r#"5"#,
+        r#"none"#,
+        r#"6"#,
+        r#"2"#,
+        r#":closure_in_condition"#,
+        r#"[1, 4, 9]"#,
+        r#"7"#,
+        r#"2"#,
+        r#":neg"#,
+        r#":pos"#,
+        r#"ArgumentError"#,
+        r#"7"#,
+        r#"true"#,
+        r#"[3]"#,
+        r#"2"#,
+        r#"12"#,
+    ]);
+}

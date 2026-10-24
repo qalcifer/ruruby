@@ -109,6 +109,9 @@ pub enum Node {
         ensure: Option<Box<Node>>,
     },
     Lambda(Box<Block>),
+    /// lang-fork: `|x| x + 1`, `|x| { ... }`, `|| ...`: a lambda; as the last
+    /// argument of a call it is the call's block instead.
+    Closure(Box<Block>),
     Defined(Box<Node>),
     Alias(String, String),
     /// `use models::user::User`, `use shapes::{Circle, Square}`, `use util::*`

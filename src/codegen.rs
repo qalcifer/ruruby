@@ -116,6 +116,7 @@ fn fills_dst_last(node: &Node) -> bool {
             | Node::Super { .. }
             | Node::Yield(_)
             | Node::Lambda(_)
+            | Node::Closure(_)
     )
 }
 
@@ -735,7 +736,7 @@ impl Codegen<'_> {
                 else_body,
                 ensure,
             } => self.begin(body, rescues, else_body.as_deref(), ensure.as_deref(), dst)?,
-            Node::Lambda(blk) => {
+            Node::Lambda(blk) | Node::Closure(blk) => {
                 let idx = self.block(blk)?;
                 self.emit(Op::Lambda(dst, idx as u32));
             }

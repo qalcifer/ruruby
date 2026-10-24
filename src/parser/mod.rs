@@ -1152,11 +1152,20 @@ impl Parser {
         } else if self.can_start_command_arg() {
             (args, block_arg) = self.with_no_do(true, |p| p.parse_arg_list(None))?;
         }
-        let block = if block_arg.is_none() {
-            self.parse_block_opt(parens || args.is_empty())?
-        } else {
-            None
-        };
+        // `list.map(|x| x * 2)`: a closure literal last is the block (but
+        // not for calling a closure, `f.(g, |x| x)`: closures take values)
+        let mut block = None;
+        if parens
+            && name != "call"
+            && block_arg.is_none()
+            && let Some(Node::Closure(_)) = args.last()
+            && let Some(Node::Closure(blk)) = args.pop()
+        {
+            block = Some(blk);
+        }
+        if block.is_none() && block_arg.is_none() {
+            block = self.parse_block_opt(parens || args.is_empty())?;
+        }
         if recv.is_none() && args.is_empty() && block.is_none() && block_arg.is_none() {
             match name.as_str() {
                 "block_given?" | "iterator?" => return Ok(Node::BlockGiven),
@@ -1737,6 +1746,7 @@ impl Parser {
                 self.advance();
                 self.parse_lambda()
             }
+            Tok::Pipe | Tok::OrOr => self.parse_closure(),
             Tok::Dot2 | Tok::Dot3 => self.parse_range(),
             Tok::Kw(kw) => {
                 self.advance();
@@ -2401,6 +2411,28 @@ impl Parser {
         };
         let block = self.finish_block(params, body)?;
         Ok(Node::Lambda(Box::new(block)))
+    }
+
+    /// lang-fork closures: `|a, b| expr`, `|x| { stmts }`, `|| expr`. The body
+    /// is one argument-level expression (it ends at `,` and `)`) or braces.
+    #[inline(never)]
+    fn parse_closure(&mut self) -> PResult<Node> {
+        self.push_scope(false);
+        let params = if self.eat(&Tok::OrOr) {
+            Params::default()
+        } else {
+            self.expect(&Tok::Pipe)?;
+            let p = self.parse_params(Some(Tok::Pipe), true)?;
+            self.expect(&Tok::Pipe)?;
+            p
+        };
+        let body = if self.at(&Tok::LBrace) {
+            self.parse_brace_body()?
+        } else {
+            self.with_no_do(false, |p| p.parse_arg())?
+        };
+        let block = self.finish_block(params, body)?;
+        Ok(Node::Closure(Box::new(block)))
     }
 
     #[inline(never)]
