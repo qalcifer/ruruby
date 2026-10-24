@@ -14,7 +14,7 @@ use std::cell::RefCell;
 use std::fmt::Write;
 use std::rc::Rc;
 
-pub type Reg = usize;
+pub type Reg = u32;
 
 /// What the `defined?` check in `Op::Defined` looks at.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -62,7 +62,7 @@ pub enum Op {
     /// R[a] = integer (mruby: LOADI8/LOADI16/LOADI32/LOADI_n)
     LoadI(Reg, i64),
     /// R[a] = Pool[b]
-    LoadL(Reg, usize),
+    LoadL(Reg, u32),
     LoadSym(Reg, Sym),
     LoadNil(Reg),
     LoadSelf(Reg),
@@ -83,10 +83,10 @@ pub enum Op {
     /// R[a] = Object (for `::Name`)
     OClass(Reg),
     /// R[a] = uvget(idx, depth)
-    GetUpVar(Reg, usize, usize),
+    GetUpVar(Reg, u32, u32),
     /// uvset(idx, depth, R[a])
-    SetUpVar(Reg, usize, usize),
-    Jmp(usize),
+    SetUpVar(Reg, u32, u32),
+    Jmp(u32),
     /// `if a < 2`, `while i < n` with inline Integers: compare R[a] with an
     /// immediate (JmpCmpI) or R[b] (JmpCmpR); jump to `target` when the
     /// result is `jump_if`, else continue at `cont` (past the generic code).
@@ -94,13 +94,13 @@ pub enum Op {
     /// comparison and conditional jump.
     JmpCmpI { cmp: Cmp, jump_if: bool, a: u32, imm: i64, target: u32, cont: u32 },
     JmpCmpR { cmp: Cmp, jump_if: bool, a: u32, b: u32, target: u32, cont: u32 },
-    JmpIf(Reg, usize),
-    JmpNot(Reg, usize),
-    JmpNil(Reg, usize),
+    JmpIf(Reg, u32),
+    JmpNot(Reg, u32),
+    JmpNil(Reg, u32),
     /// Jump if optional argument #n was supplied (mruby encodes this in ENTER + a jump table).
-    OptArg(usize, usize),
+    OptArg(u32, u32),
     /// Jump if keyword argument #n was supplied (mruby: KEY_P).
-    KwArg(usize, usize),
+    KwArg(u32, u32),
     /// R[a] = current exception
     Except(Reg),
     /// R[b] = R[a].is_a?(R[b])  (mruby: RESCUE); an Array in R[b] means any of its classes
@@ -108,16 +108,16 @@ pub enum Op {
     /// raise R[a]
     Raise(Reg),
     /// R[a] = R[a].send(sym, R[a+1]..R[a+n]) with block R[a+n+1] if flag
-    Send(Reg, Sym, usize, bool),
+    Send(Reg, Sym, u32, bool),
     /// Send with self as the receiver (`foo(x)`): R[a] = self first
-    SendSelf(Reg, Sym, usize, bool),
+    SendSelf(Reg, Sym, u32, bool),
     /// R[a] = yield R[a+1]..R[a+n]: runs the frame's block directly (no
     /// lookup of `call`); LocalJumpError without one
-    Yield(Reg, usize),
+    Yield(Reg, u32),
     /// R[a] = R[a].send(sym, *R[a+1]) with block R[a+2] if flag
     SendV(Reg, Sym, bool),
     /// R[a] = super(R[a+1]..R[a+n]) with block R[a+n+1]
-    Super(Reg, usize),
+    Super(Reg, u32),
     /// R[a] = super(*R[a+1]) with block R[a+2]
     SuperV(Reg),
     /// R[a] = block of the current method (raise LocalJumpError if missing and flag set)
@@ -163,7 +163,7 @@ pub enum Op {
     Ge(Reg),
     Not(Reg),
     /// R[a] = [R[b], ..., R[b+n-1]]  (mruby: ARRAY2)
-    Array(Reg, Reg, usize),
+    Array(Reg, Reg, u32),
     /// R[a].concat(splat(R[b]))  (mruby: ARYCAT)
     ArrayCat(Reg, Reg),
     /// R[a] << R[b]  (mruby: ARYPUSH)
@@ -171,13 +171,13 @@ pub enum Op {
     /// R[a] = R[b] if it's an Array, else [R[b]] (or R[b].to_ary)
     ToAry(Reg, Reg),
     /// R[a] = R[b][c] (for multiple assignment)
-    ARef(Reg, Reg, usize),
+    ARef(Reg, Reg, u32),
     /// R[a] = R[b][pre...len-post]  (the splat of `a, *b, c = ...`; mruby: APOST)
-    ASplat(Reg, Reg, usize, usize),
+    ASplat(Reg, Reg, u32, u32),
     /// R[a] = the j-th of the `post` trailing elements of R[b] after `pre` leading ones
-    APost(Reg, Reg, usize, usize, usize),
+    APost(Reg, Reg, u32, u32, u32),
     /// R[a] = {R[b] => R[b+1], ...} with n pairs
-    Hash(Reg, Reg, usize),
+    Hash(Reg, Reg, u32),
     /// R[a][R[b]] = R[b+1]
     HashAdd(Reg, Reg),
     /// R[a].merge!(R[b])  (`**h`)
@@ -185,11 +185,11 @@ pub enum Op {
     /// marks the Hash in R[a] as keyword arguments
     KwHash(Reg),
     /// R[a] = str_dup(Pool[b])
-    String(Reg, usize),
+    String(Reg, u32),
     /// R[a] << R[a+1]
     StrCat(Reg),
     /// R[a] << pool[idx] (a literal piece of an interpolated string).
-    StrCatLit(Reg, usize),
+    StrCatLit(Reg, u32),
     /// R[a] = R[a].to_s for interpolation: Strings, numbers, Symbols, nil,
     /// true and false stay as they are (StrCat writes them out), anything
     /// else calls `to_s`.
@@ -199,11 +199,11 @@ pub enum Op {
     /// R[a] = R[a]..R[a+1]  (exclusive flag)
     Range(Reg, bool),
     /// R[a] = closure(Irep[b])
-    Block(Reg, usize),
+    Block(Reg, u32),
     /// R[a] = lambda(Irep[b])
-    Lambda(Reg, usize),
+    Lambda(Reg, u32),
     /// target_class.define_method(sym, Irep[b]), with the frame's default visibility
-    TDef(Sym, usize),
+    TDef(Sym, u32),
     /// The default visibility of the methods `def` defines from here on in
     /// this frame (`private`, `public`, `protected`, `module_function` with
     /// no arguments).
@@ -211,13 +211,13 @@ pub enum Op {
     /// R[a].freeze (what `defined?` answers is a frozen string)
     Freeze(Reg),
     /// R[a].singleton_class.define_method(sym, Irep[b])
-    SDef(Reg, Sym, usize),
+    SDef(Reg, Sym, u32),
     /// R[a] = class/module `sym` under R[a] (nil = current), superclass R[a+1]
     Class(Reg, Sym, bool),
     /// R[a] = R[a].singleton_class
     SClass(Reg),
     /// R[a] = run Irep[b] with self = R[a] (class body)
-    Exec(Reg, usize),
+    Exec(Reg, u32),
     /// alias_method(target_class, new, old)
     Alias(Sym, Sym),
     /// global variable alias
@@ -406,7 +406,7 @@ impl Irep {
                 let _ = write!(out, "\t; :{}", syms.name(s));
             }
             if let Op::LoadL(_, p) | Op::String(_, p) = op {
-                let _ = write!(out, "\t; {:?}", self.pool[*p]);
+                let _ = write!(out, "\t; {:?}", self.pool[*p as usize]);
             }
             out.push('\n');
         }

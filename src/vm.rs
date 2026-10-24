@@ -847,12 +847,12 @@ impl Vm {
 
     #[inline]
     fn reg(&self, f: &Frame, i: Reg) -> Value {
-        self.stack[f.base as usize + i]
+        self.stack[f.base as usize + i as usize]
     }
 
     #[inline]
     fn set_reg(&mut self, f: &Frame, i: Reg, v: Value) {
-        self.stack[f.base as usize + i] = v;
+        self.stack[f.base as usize + i as usize] = v;
     }
 
     // ---- small helpers -------------------------------------------------
@@ -2263,7 +2263,7 @@ impl Vm {
         }
         match r {
             Ok(Call::Frame(mut callee)) => {
-                callee.ret = a as u32;
+                callee.ret = a;
                 callee.break_tag = tag;
                 Ok(Flow::Call(callee))
             }
@@ -2311,27 +2311,27 @@ impl Vm {
             Op::LoadSelf(a) => self.set_reg(f, a, f.self_),
             Op::LoadTrue(a) => self.set_reg(f, a, Value::TRUE),
             Op::LoadFalse(a) => self.set_reg(f, a, Value::FALSE),
-            Op::Jmp(t) => *pc = t,
+            Op::Jmp(t) => *pc = t as usize,
             Op::JmpIf(a, t) => {
                 if self.reg(f, a).truthy() {
-                    *pc = t;
+                    *pc = t as usize;
                 }
             }
             Op::JmpNot(a, t) => {
                 if !self.reg(f, a).truthy() {
-                    *pc = t;
+                    *pc = t as usize;
                 }
             }
             Op::Return(a) => return Ok(Flow::Return(self.reg(f, a))),
             Op::GetUpVar(a, idx, depth) => {
-                let env = self.upvar_env(f, depth);
-                let v = self.env_get(env, idx);
+                let env = self.upvar_env(f, depth as usize);
+                let v = self.env_get(env, idx as usize);
                 self.set_reg(f, a, v);
             }
             Op::SetUpVar(a, idx, depth) => {
-                let env = self.upvar_env(f, depth);
+                let env = self.upvar_env(f, depth as usize);
                 let v = self.reg(f, a);
-                self.env_set(env, idx, v);
+                self.env_set(env, idx as usize, v);
             }
             Op::BlkPush(a, _) if f.block.is_some() => self.set_reg(f, a, f.block.unwrap()),
             Op::Send(a, mid, argc, has_block) => out_of_line!(self.send_op(f, a, mid, argc, has_block)),
@@ -2343,7 +2343,7 @@ impl Vm {
                 let Some(b) = f.block else {
                     out_of_line!(Err(self.err(&self.c.local_jump_error, "no block given (yield)")))
                 };
-                let args = Args::Stack { at: f.base as usize + a + 1, n: argc };
+                let args = Args::Stack { at: f.base as usize + a as usize + 1, n: argc as usize };
                 out_of_line!(self.call_flow(f, a, 0, |vm| vm.start_proc(&b, args, None, ProcCall::default())))
             }
             Op::AddI(a, i) | Op::SubI(a, i) => {
@@ -2415,7 +2415,7 @@ impl Vm {
         f: &mut Frame,
         a: Reg,
         mid: Sym,
-        argc: usize,
+        argc: u32,
         has_block: bool,
     ) -> Result<Flow, Unwind> {
         let recv = self.reg(f, a);
@@ -2424,8 +2424,9 @@ impl Vm {
         } else {
             None
         };
+        let argc = argc as usize;
         let tag = proc_tag(&blk);
-        let args = Args::Stack { at: f.base as usize + a + 1, n: argc };
+        let args = Args::Stack { at: f.base as usize + a as usize + 1, n: argc };
         let Some((m, owner, vis)) = self.cached_lookup(f, &recv, mid) else {
             let scope = self.scope_of(f);
             return self.with_scope(scope, |vm| {
@@ -2445,7 +2446,7 @@ impl Vm {
             // natives take their arguments as a slice: no Vec for the common case
             if argc <= MAX_INLINE_ARGS {
                 let mut buf: [Value; MAX_INLINE_ARGS] = Default::default();
-                let at = f.base as usize + a + 1;
+                let at = f.base as usize + a as usize + 1;
                 buf[..argc].clone_from_slice(&self.stack[at..at + argc]);
                 let args = &buf[..argc];
                 return self.call_flow(f, a, tag, |vm| {
@@ -2524,7 +2525,7 @@ impl Vm {
             Op::Move(a, b) => self.set_reg(f, a, self.reg(f, b)),
             Op::LoadI(a, i) => { let v = self.int(i); self.set_reg(f, a, v) },
             Op::LoadL(a, i) => {
-                let v = match &f.irep.pool[i] {
+                let v = match &f.irep.pool[i as usize] {
                     Literal::Float(x) => Value::float(*x),
                     Literal::Str(s) => self.str(s.to_string()),
                 };
@@ -2585,39 +2586,39 @@ impl Vm {
             }
             Op::OClass(a) => self.set_reg(f, a, Value::from(self.c.object)),
             Op::GetUpVar(a, idx, depth) => {
-                let env = self.upvar_env(f, depth);
-                let v = self.env_get(env, idx);
+                let env = self.upvar_env(f, depth as usize);
+                let v = self.env_get(env, idx as usize);
                 self.set_reg(f, a, v);
             }
             Op::SetUpVar(a, idx, depth) => {
-                let env = self.upvar_env(f, depth);
+                let env = self.upvar_env(f, depth as usize);
                 let v = self.reg(f, a);
-                self.env_set(env, idx, v);
+                self.env_set(env, idx as usize, v);
             }
-            Op::Jmp(t) => f.pc = t,
+            Op::Jmp(t) => f.pc = t as usize,
             Op::JmpIf(a, t) => {
                 if self.reg(f, a).truthy() {
-                    f.pc = t;
+                    f.pc = t as usize;
                 }
             }
             Op::JmpNot(a, t) => {
                 if !self.reg(f, a).truthy() {
-                    f.pc = t;
+                    f.pc = t as usize;
                 }
             }
             Op::JmpNil(a, t) => {
                 if self.reg(f, a).is_nil() {
-                    f.pc = t;
+                    f.pc = t as usize;
                 }
             }
             Op::OptArg(n, t) => {
-                if n < f.opt_filled as usize {
-                    f.pc = t;
+                if n < f.opt_filled {
+                    f.pc = t as usize;
                 }
             }
             Op::KwArg(n, t) => {
                 if f.kw_mask & (1 << n.min(63)) != 0 {
-                    f.pc = t;
+                    f.pc = t as usize;
                 }
             }
             Op::Except(a) => {
@@ -2661,7 +2662,7 @@ impl Vm {
                 let Some(b) = f.block else {
                     return Err(self.err(&self.c.local_jump_error, "no block given (yield)"));
                 };
-                let args = Args::Stack { at: f.base as usize + a + 1, n: argc };
+                let args = Args::Stack { at: f.base as usize + a as usize + 1, n: argc as usize };
                 return self.call_flow(f, a, 0, |vm| vm.start_proc(&b, args, None, ProcCall::default()));
             }
             Op::SendV(a, mid, has_block) => {
@@ -2808,13 +2809,14 @@ impl Vm {
             }
             Op::ARef(a, b, i) => {
                 let v = match self.kind(self.reg(f, b)) {
-                    V::Array(arr) => self.heap[arr].borrow().get(i).cloned().unwrap_or(Value::NIL),
+                    V::Array(arr) => self.heap[arr].borrow().get(i as usize).cloned().unwrap_or(Value::NIL),
                     _ if i == 0 => self.reg(f, b),
                     _ => Value::NIL,
                 };
                 self.set_reg(f, a, v);
             }
             Op::ASplat(a, b, pre, post) => {
+                let (pre, post) = (pre as usize, post as usize);
                 let items = self.args_from_array(self.reg(f, b));
                 let start = pre.min(items.len());
                 let end = items.len().saturating_sub(post).max(start);
@@ -2822,6 +2824,7 @@ impl Vm {
                 self.set_reg(f, a, v);
             }
             Op::APost(a, b, pre, post, j) => {
+                let (pre, post, j) = (pre as usize, post as usize, j as usize);
                 let items = self.args_from_array(self.reg(f, b));
                 let idx = pre.max(items.len().saturating_sub(post)) + j;
                 self.set_reg(f, a, items.get(idx).cloned().unwrap_or(Value::NIL));
@@ -2829,7 +2832,7 @@ impl Vm {
             Op::Hash(a, b, n) if (0..n).all(|i| self.reg(f, b + 2 * i).is_unique()) => {
                 // keys equal only to themselves (Symbols, Integers): no
                 // copies of String keys, no `hash`/`eql?` calls
-                let mut h = RHash::with_capacity(n);
+                let mut h = RHash::with_capacity(n as usize);
                 for i in 0..n {
                     let (k, v) = (self.reg(f, b + 2 * i), self.reg(f, b + 2 * i + 1));
                     h.set(&self.heap, k, v);
@@ -2877,7 +2880,7 @@ impl Vm {
                 }
             }
             Op::String(a, i) => {
-                let Literal::Str(s) = &f.irep.pool[i] else {
+                let Literal::Str(s) = &f.irep.pool[i as usize] else {
                     unreachable!()
                 };
                 let v = self.str(s.to_string());
@@ -2908,7 +2911,7 @@ impl Vm {
                 *self.heap[acc].borrow_mut() = buf;
             }
             Op::StrCatLit(a, i) => {
-                let Literal::Str(lit) = &f.irep.pool[i] else {
+                let Literal::Str(lit) = &f.irep.pool[i as usize] else {
                     unreachable!()
                 };
                 if let V::Str(s) = self.kind(self.reg(f, a)) {
@@ -2935,7 +2938,7 @@ impl Vm {
                 self.set_reg(f, a, v);
             }
             Op::Block(a, idx) | Op::Lambda(a, idx) => {
-                let irep = f.irep.reps[idx].clone();
+                let irep = f.irep.reps[idx as usize].clone();
                 // a block that touches neither the frame's locals nor its
                 // default visibility doesn't make the frame keep an env
                 let env = if irep.needs_env || f.env.is_some() || f.irep.sets_vis || self.frame_vis(f) != Vis::Public {
@@ -2957,7 +2960,7 @@ impl Vm {
             }
             Op::TDef(s, idx) => {
                 self.check_frozen(&Value::from(f.target))?;
-                let irep = f.irep.reps[idx].clone();
+                let irep = f.irep.reps[idx as usize].clone();
                 let scope_vis = self.frame_vis(f);
                 let vis = if self.always_private(s) { Vis::Private } else { scope_vis };
                 if scope_vis == Vis::ModuleFunction {
@@ -2976,7 +2979,7 @@ impl Vm {
             Op::SDef(a, s, idx) => {
                 let cls = self.singleton_class(&self.reg(f, a))?;
                 self.check_frozen(&Value::from(cls))?;
-                self.heap[cls].methods.insert(s, Method::Ruby(f.irep.reps[idx].clone()));
+                self.heap[cls].methods.insert(s, Method::Ruby(f.irep.reps[idx as usize].clone()));
             }
             Op::Class(a, name, is_module) => {
                 let cls = self.define_class(f, a, name, is_module)?;
@@ -2991,8 +2994,8 @@ impl Vm {
                     unreachable!()
                 };
                 let target = cls;
-                let mut body = self.body_frame(f.irep.reps[idx].clone(), Value::from(cls), target);
-                body.ret = a as u32;
+                let mut body = self.body_frame(f.irep.reps[idx as usize].clone(), Value::from(cls), target);
+                body.ret = a;
                 return Ok(Flow::Call(body));
             }
             Op::Alias(new, old) => {
@@ -3332,7 +3335,7 @@ impl Vm {
             self.set_reg(f, a, v);
             return Ok(Flow::Next);
         }
-        let args = Args::Stack { at: f.base as usize + a + 1, n: 1 };
+        let args = Args::Stack { at: f.base as usize + a as usize + 1, n: 1 };
         self.call_flow(f, a, 0, |vm| vm.start_call(x, mid, args, None))
     }
 
@@ -3348,7 +3351,7 @@ impl Vm {
             self.set_reg(f, a, Value::bool(num_cmp(&self.heap, &x, &y).is_some_and(pred)));
             return Ok(Flow::Next);
         }
-        let args = Args::Stack { at: f.base as usize + a + 1, n: 1 };
+        let args = Args::Stack { at: f.base as usize + a as usize + 1, n: 1 };
         self.call_flow(f, a, 0, |vm| vm.start_call(x, mid, args, None))
     }
 

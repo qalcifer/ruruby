@@ -155,8 +155,8 @@ impl Codegen<'_> {
             irep,
             locals: locals.to_vec(),
             kind,
-            sp: nlocals,
-            first_temp: nlocals,
+            sp: nlocals as Reg,
+            first_temp: nlocals as Reg,
             loops: vec![],
             params,
             ensures: vec![],
@@ -206,7 +206,7 @@ impl Codegen<'_> {
         let s = self.cur();
         let r = s.sp;
         s.sp += 1;
-        s.irep.nregs = s.irep.nregs.max(s.sp);
+        s.irep.nregs = s.irep.nregs.max(s.sp as usize);
         r
     }
 
@@ -261,7 +261,7 @@ impl Codegen<'_> {
             | Op::JmpNot(_, t)
             | Op::JmpNil(_, t)
             | Op::OptArg(_, t)
-            | Op::KwArg(_, t) => *t = target,
+            | Op::KwArg(_, t) => *t = target as u32,
             Op::JmpCmpI { target: t, .. } | Op::JmpCmpR { target: t, .. } => *t = target as u32,
             op => unreachable!("not a jump: {op:?}"),
         }
@@ -320,7 +320,7 @@ impl Codegen<'_> {
         }
         let t = self.alloc(); // r + 1
         self.expr(rhs, t)?;
-        let fused = self.emit(Op::JmpCmpR { cmp, jump_if, a: x as u32, b: t as u32, target: 0, cont: 0 });
+        let fused = self.emit(Op::JmpCmpR { cmp, jump_if, a: x, b: t, target: 0, cont: 0 });
         self.emit(Op::Move(r, x));
         self.emit(op(r));
         let generic = self.emit(if jump_if { Op::JmpIf(r, 0) } else { Op::JmpNot(r, 0) });
@@ -347,7 +347,7 @@ impl Codegen<'_> {
         };
         let local = |cg: &Self, n: &Node| match n {
             Node::LVar(v) => match cg.lookup(v) {
-                Some((0, r)) => Some(r as u32),
+                Some((0, r)) => Some(r),
                 _ => None,
             },
             _ => None,
@@ -380,10 +380,10 @@ impl Codegen<'_> {
         self.syms.intern(s)
     }
 
-    fn pool(&mut self, lit: Literal) -> usize {
+    fn pool(&mut self, lit: Literal) -> u32 {
         let pool = &mut self.cur().irep.pool;
         pool.push(lit);
-        pool.len() - 1
+        (pool.len() - 1) as u32
     }
 
     fn load_str(&mut self, dst: Reg, s: &str) {
@@ -398,10 +398,10 @@ impl Codegen<'_> {
     }
 
     /// Finds a local: (scope depth, register).
-    fn lookup(&self, name: &str) -> Option<(usize, Reg)> {
+    fn lookup(&self, name: &str) -> Option<(u32, Reg)> {
         for (depth, s) in self.scopes.iter().rev().enumerate() {
             if let Some(i) = s.locals.iter().position(|l| l == name) {
-                return Some((depth, i + 1));
+                return Some((depth as u32, i as Reg + 1));
             }
             if s.kind != Kind::Block {
                 break;
@@ -553,7 +553,7 @@ impl Codegen<'_> {
                     self.emit(Op::SendV(a, call, false));
                 } else {
                     let n = self.args(args)?.expect("no splat");
-                    self.emit(Op::Yield(a, n));
+                    self.emit(Op::Yield(a, n as u32));
                 }
                 self.op_done(a, dst);
             }
@@ -612,9 +612,9 @@ impl Codegen<'_> {
                 match recv {
                     Some(r) => {
                         self.expr(r, dst)?;
-                        self.emit(Op::SDef(dst, s, idx));
+                        self.emit(Op::SDef(dst, s, idx as u32));
                     }
-                    None => _ = self.emit(Op::TDef(s, idx)),
+                    None => _ = self.emit(Op::TDef(s, idx as u32)),
                 }
                 self.emit(Op::LoadSym(dst, s));
             }
@@ -649,7 +649,7 @@ impl Codegen<'_> {
                 let s = self.sym(name);
                 self.emit(Op::Class(a, s, *is_module));
                 let idx = self.class_body(name, body, locals)?;
-                self.emit(Op::Exec(a, idx));
+                self.emit(Op::Exec(a, idx as u32));
                 self.emit(Op::Move(dst, a));
                 self.free_to(a);
             }
@@ -658,7 +658,7 @@ impl Codegen<'_> {
                 self.expr(target, a)?;
                 self.emit(Op::SClass(a));
                 let idx = self.class_body("singleton class", body, locals)?;
-                self.emit(Op::Exec(a, idx));
+                self.emit(Op::Exec(a, idx as u32));
                 self.emit(Op::Move(dst, a));
                 self.free_to(a);
             }
@@ -707,10 +707,10 @@ impl Codegen<'_> {
                     _ => return Err("Invalid redo".into()),
                 };
                 self.inline_ensures(base, dst)?;
-                self.emit(Op::Jmp(target));
+                self.emit(Op::Jmp(target as u32));
             }
             Node::Retry => match self.cur().retry.last() {
-                Some(&target) => _ = self.emit(Op::Jmp(target)),
+                Some(&target) => _ = self.emit(Op::Jmp(target as u32)),
                 None => return Err("Invalid retry".into()),
             },
             Node::Begin {
@@ -721,7 +721,7 @@ impl Codegen<'_> {
             } => self.begin(body, rescues, else_body.as_deref(), ensure.as_deref(), dst)?,
             Node::Lambda(blk) => {
                 let idx = self.block(blk)?;
-                self.emit(Op::Lambda(dst, idx));
+                self.emit(Op::Lambda(dst, idx as u32));
             }
             Node::Defined(e) => self.defined(e, dst)?,
             Node::Alias(new, old) => {
@@ -787,7 +787,7 @@ impl Codegen<'_> {
                 let r = self.alloc();
                 self.expr(e, r)?;
             }
-            self.emit(Op::Array(dst, base, elems.len()));
+            self.emit(Op::Array(dst, base, elems.len() as u32));
             self.free_to(base);
             return Ok(());
         }
@@ -802,7 +802,7 @@ impl Codegen<'_> {
             let r = self.alloc();
             self.expr(e, r)?;
         }
-        self.emit(Op::Array(t, base, lead));
+        self.emit(Op::Array(t, base, lead as u32));
         self.free_to(base);
         for e in &elems[lead..] {
             let r = self.alloc();
@@ -846,7 +846,7 @@ impl Codegen<'_> {
                 self.expr(v, r)?;
             }
         }
-        self.emit(Op::Hash(t, base, lead));
+        self.emit(Op::Hash(t, base, lead as u32));
         self.free_to(base);
         for item in &items[lead..] {
             let r = self.alloc();
@@ -948,7 +948,7 @@ impl Codegen<'_> {
         if let Some(blk) = block {
             let r = self.alloc();
             let idx = self.block(blk)?;
-            self.emit(Op::Block(r, idx));
+            self.emit(Op::Block(r, idx as u32));
             Ok(true)
         } else if let Some(ba) = block_arg {
             let r = self.alloc();
@@ -1071,8 +1071,8 @@ impl Codegen<'_> {
         let mid = self.sym(name);
         match argc {
             Some(2) if name == "[]=" && recv.is_some() && !has_block => self.emit(Op::SetIdx(a)),
-            Some(n) if self_send => self.emit(Op::SendSelf(a, mid, n, has_block)),
-            Some(n) => self.emit(Op::Send(a, mid, n, has_block)),
+            Some(n) if self_send => self.emit(Op::SendSelf(a, mid, n as u32, has_block)),
+            Some(n) => self.emit(Op::Send(a, mid, n as u32, has_block)),
             None => self.emit(Op::SendV(a, mid, has_block)),
         };
         if let Some(j) = skip {
@@ -1102,7 +1102,7 @@ impl Codegen<'_> {
             self.emit(Op::BlkPush(r, false));
         }
         match argc {
-            Some(n) => self.emit(Op::Super(a, n)),
+            Some(n) => self.emit(Op::Super(a, n as u32)),
             None => self.emit(Op::SuperV(a)),
         };
         self.op_done(a, dst);
@@ -1210,17 +1210,17 @@ impl Codegen<'_> {
     fn destructure(&mut self, m: &MLhs, src: Reg) -> CResult<()> {
         let r = self.alloc();
         for (i, target) in m.pre.iter().enumerate() {
-            self.emit(Op::ARef(r, src, i));
+            self.emit(Op::ARef(r, src, i as u32));
             self.assign_target(target, r)?;
         }
         if let Some(splat) = &m.splat {
-            self.emit(Op::ASplat(r, src, m.pre.len(), m.post.len()));
+            self.emit(Op::ASplat(r, src, m.pre.len() as u32, m.post.len() as u32));
             if let Some(target) = splat {
                 self.assign_target(target, r)?;
             }
         }
         for (j, target) in m.post.iter().enumerate() {
-            self.emit(Op::APost(r, src, m.pre.len(), m.post.len(), j));
+            self.emit(Op::APost(r, src, m.pre.len() as u32, m.post.len() as u32, j as u32));
             self.assign_target(target, r)?;
         }
         self.free_to(r);
@@ -1289,7 +1289,7 @@ impl Codegen<'_> {
                 {
                     self.emit(Op::SetIdx(a));
                 } else {
-                    self.emit(Op::Send(a, mid, args.len() + 1, false));
+                    self.emit(Op::Send(a, mid, args.len() as u32 + 1, false));
                 }
                 if let Some(j) = skip {
                     self.patch(j);
@@ -1328,9 +1328,9 @@ impl Codegen<'_> {
             cond_pc = self.pc();
             self.expr(cond, t)?;
             self.emit(if until {
-                Op::JmpNot(t, start)
+                Op::JmpNot(t, start as u32)
             } else {
-                Op::JmpIf(t, start)
+                Op::JmpIf(t, start as u32)
             });
             jexit = None;
         } else {
@@ -1409,14 +1409,14 @@ impl Codegen<'_> {
     fn prologue(&mut self, params: &Params) -> CResult<()> {
         for (i, (pname, default)) in params.optional.iter().enumerate() {
             let reg = self.lookup(pname).unwrap().1;
-            let skip = self.emit(Op::OptArg(i, 0));
+            let skip = self.emit(Op::OptArg(i as u32, 0));
             self.expr(default, reg)?;
             self.patch(skip);
         }
         for (i, (pname, default)) in params.kw.iter().enumerate() {
             if let Some(default) = default {
                 let reg = self.lookup(pname).unwrap().1;
-                let skip = self.emit(Op::KwArg(i, 0));
+                let skip = self.emit(Op::KwArg(i as u32, 0));
                 self.expr(default, reg)?;
                 self.patch(skip);
             }
@@ -1786,7 +1786,7 @@ fn reach(irep: &Irep) -> usize {
         .code
         .iter()
         .filter_map(|op| match op {
-            Op::GetUpVar(_, _, d) | Op::SetUpVar(_, _, d) => Some(d + 1),
+            Op::GetUpVar(_, _, d) | Op::SetUpVar(_, _, d) => Some(*d as usize + 1),
             _ => None,
         })
         .max()
@@ -1810,14 +1810,14 @@ fn peephole(code: &mut [Op]) {
     for i in 0..code.len() {
         if let Op::Jmp(mut t) = code[i] {
             let mut hops = 0;
-            while let Some(Op::Jmp(next)) = code.get(t) {
+            while let Some(Op::Jmp(next)) = code.get(t as usize) {
                 if hops == code.len() {
                     break;
                 }
                 t = *next;
                 hops += 1;
             }
-            code[i] = match code.get(t) {
+            code[i] = match code.get(t as usize) {
                 Some(Op::Return(r)) => Op::Return(*r),
                 _ => Op::Jmp(t),
             };
