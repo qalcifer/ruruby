@@ -35,13 +35,16 @@ pub fn init(vm: &mut Vm) {
     load::init(vm);
 }
 
-/// Core methods written in Ruby (`prelude.rb`), compiled into every VM.
+/// Core methods written in Ruby (`prelude.rb`, then the lang-fork's
+/// `result.rb`), compiled into every VM.
 pub fn load_prelude(vm: &mut Vm) {
-    const PRELUDE: &str = include_str!("prelude.rb");
-    let prog = crate::parser::parse_file(PRELUDE, "prelude.rb", 1).expect("prelude parses");
-    let irep = crate::codegen::compile(&prog, &mut vm.syms).expect("prelude compiles");
-    if let Err(e) = vm.run_main(irep) {
-        panic!("prelude failed: {}", vm.exc_message(&e));
+    const PRELUDES: [(&str, &str); 2] = [("prelude.rb", include_str!("prelude.rb")), ("result.rb", include_str!("result.rb"))];
+    for (name, src) in PRELUDES {
+        let prog = crate::parser::parse_file(src, name, 1).unwrap_or_else(|e| panic!("{name} parses: {e}"));
+        let irep = crate::codegen::compile(&prog, &mut vm.syms).unwrap_or_else(|e| panic!("{name} compiles: {e}"));
+        if let Err(e) = vm.run_main(irep) {
+            panic!("{name} failed: {}", vm.exc_message(&e));
+        }
     }
 }
 
