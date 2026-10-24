@@ -2729,10 +2729,17 @@ impl Vm {
             Op::Sub(a) => return self.arith_flow(f, a, Arith::Sub, self.s.sub),
             Op::Mul(a) => return self.arith_flow(f, a, Arith::Mul, self.s.mul),
             Op::Div(a) => return self.arith_flow(f, a, Arith::Div, self.s.div),
-            Op::GetIdx(a) => match self.get_idx(self.reg(f, a), self.reg(f, a + 1)) {
-                Some(v) => self.set_reg(f, a, v),
-                None => return self.send_op(f, a, self.s.aref, 1, false),
-            },
+            Op::GetIdx(a, b, c) => {
+                let (x, k) = (self.reg(f, b), self.reg(f, c));
+                match self.get_idx(x, k) {
+                    Some(v) => self.set_reg(f, a, v),
+                    None => {
+                        self.set_reg(f, a, x);
+                        self.set_reg(f, a + 1, k);
+                        return self.send_op(f, a, self.s.aref, 1, false);
+                    }
+                }
+            }
             Op::SetIdx(a) => {
                 let (x, k, v) = (self.reg(f, a), self.reg(f, a + 1), self.reg(f, a + 2));
                 if !self.set_idx(x, k, v)? {
@@ -2747,8 +2754,11 @@ impl Vm {
                 }
                 _ => return self.send_op(f, a, self.s.shl, 1, false),
             },
-            Op::Size(a, mid) => match self.kind(self.reg(f, a)) {
-                _ if !self.basic_ops_intact() => return self.send_op(f, a, mid, 0, false),
+            Op::Size(a, b, mid) => match self.kind(self.reg(f, b)) {
+                _ if !self.basic_ops_intact() => {
+                    self.set_reg(f, a, self.reg(f, b));
+                    return self.send_op(f, a, mid, 0, false);
+                }
                 V::Array(h) if self.heap.arrays.extra(h).is_none() => {
                     let n = self.heap[h].borrow().len();
                     let v = self.int(n as i64);
@@ -2759,7 +2769,10 @@ impl Vm {
                     let v = self.int(n as i64);
                     self.set_reg(f, a, v);
                 }
-                _ => return self.send_op(f, a, mid, 0, false),
+                _ => {
+                    self.set_reg(f, a, self.reg(f, b));
+                    return self.send_op(f, a, mid, 0, false);
+                }
             },
             Op::Eq(a) => {
                 let (x, y) = (self.reg(f, a), self.reg(f, a + 1));

@@ -182,3 +182,54 @@ fn interpolation_and_string_keys() {
         ]
     );
 }
+
+/// GetIdx and Size read self and locals in place, and `while i < size`
+/// fuses the compare: the receiver is still read before a key that
+/// reassigns it, and the condition's call runs once per test.
+#[test]
+fn operands_in_place() {
+    let out = run_capture(r##"
+        a = [10, 20, 30]
+        i = 1
+        k = :b
+        h = {b: 2}
+        p a[i], h[k], a[i + 1], a[a.size - 1]
+        x = [5, 6]
+        p x[(x = [7, 8]; 1)], x
+        class Counter
+          attr_reader :calls
+          def initialize = @calls = 0
+          def size
+            @calls += 1
+            2.5
+          end
+        end
+        c = Counter.new
+        n = 0
+        n += 1 while n < c.size
+        p n, c.calls
+        class Grow < Array
+          def walk
+            i = 0
+            out = []
+            while i < size
+              out << self[i]
+              push(i) if size < 4
+              i += 1
+            end
+            out
+          end
+        end
+        g = Grow.new
+        g.push(:a)
+        p g.walk
+        s = "abc"
+        j = 0
+        j += 1 while j < s.length
+        p j
+        def m(arr) = arr.size
+        p m([1, 2]), m({a: 1}), m("xyz")
+    "##)
+    .unwrap();
+    assert_eq!(out.lines().collect::<Vec<_>>().join(" "), "20 2 30 30 6 [7, 8] 3 4 [:a, 0, 1, 2] 3 2 1 3");
+}

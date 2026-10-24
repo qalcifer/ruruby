@@ -142,12 +142,13 @@ pub enum Op {
     Sub(Reg),
     Mul(Reg),
     Div(Reg),
-    /// R[a] = R[a][R[a+1]]: a plain Array (Integer index) or Hash (a key it
-    /// holds) is read in place, like mruby's OP_GETIDX; anything else calls `[]`.
-    GetIdx(Reg),
-    /// R[a] = R[a].size or .length (`mid`): a plain Array or Hash answers in
-    /// place; anything else calls `mid`.
-    Size(Reg, Sym),
+    /// R[a] = R[b][R[c]]: a plain Array (Integer index) or Hash (a key it
+    /// holds) is read in place, like mruby's OP_GETIDX; anything else calls
+    /// `[]` with R[a], R[a+1] (a scratch register) as receiver and argument.
+    GetIdx(Reg, Reg, Reg),
+    /// R[a] = R[b].size or .length (`mid`): a plain Array or Hash answers in
+    /// place; anything else calls `mid` on it from R[a].
+    Size(Reg, Reg, Sym),
     /// R[a][R[a+1]] = R[a+2]: in place for a built-in Array (an Integer
     /// index in it or just past its end) or Hash (a built-in key), not
     /// frozen; anything else calls `[]=`.

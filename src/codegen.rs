@@ -73,7 +73,6 @@ fn binop(name: &str) -> Option<fn(Reg) -> Op> {
         "-" => Op::Sub,
         "*" => Op::Mul,
         "/" => Op::Div,
-        "[]" => Op::GetIdx,
         "<<" => Op::Shl,
         "==" => Op::Eq,
         "<" => Op::Lt,
@@ -114,6 +113,26 @@ fn fills_dst_last(node: &Node) -> bool {
             | Node::Super { .. }
             | Node::Yield(_)
             | Node::Lambda(_)
+    )
+}
+
+/// An expression that can't assign a variable: reading a register before
+/// evaluating it gives the same value as after.
+fn is_leaf(node: &Node) -> bool {
+    matches!(
+        node,
+        Node::Nil
+            | Node::True
+            | Node::False
+            | Node::SelfRef
+            | Node::Int(_)
+            | Node::Float(_)
+            | Node::Str(_)
+            | Node::Sym(_)
+            | Node::LVar(_)
+            | Node::IVar(_)
+            | Node::GVar(_)
+            | Node::Const(_)
     )
 }
 
@@ -295,6 +314,19 @@ impl Codegen<'_> {
                 let b = local(self, other)?;
                 Some(Op::JmpCmpR { cmp, jump_if, a, b, target: 0, cont: 0 })
             }
+            _ => None,
+        }
+    }
+
+    /// The register already holding `node`'s value: R0 for self, a local's
+    /// own register.
+    fn reg_of(&self, node: &Node) -> Option<Reg> {
+        match node {
+            Node::SelfRef => Some(0),
+            Node::LVar(v) => match self.lookup(v) {
+                Some((0, r)) => Some(r),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -907,6 +939,31 @@ impl Codegen<'_> {
                 return Ok(());
             }
         }
+        if let (Some(recv), [arg], None, None, false, "[]") = (recv, args, block, block_arg, safe, name)
+            && !matches!(arg, Node::Splat(_))
+        {
+            // `x[k]`: receiver and key read where they are when they're
+            // self or locals (unless the key could assign the receiver)
+            let a = self.op_reg(dst);
+            let b = match self.reg_of(recv) {
+                Some(r) if is_leaf(arg) => r,
+                _ => {
+                    self.expr(recv, a)?;
+                    a
+                }
+            };
+            let t = self.alloc(); // a+1: the argument if `[]` is called
+            let c = match self.reg_of(arg) {
+                Some(r) => r,
+                None => {
+                    self.expr(arg, t)?;
+                    t
+                }
+            };
+            self.emit(Op::GetIdx(a, b, c));
+            self.op_done(a, dst);
+            return Ok(());
+        }
         if let (Some(recv), [arg], None, None, false, Some(op)) =
             (recv, args, block, block_arg, safe, binop(name))
             && !matches!(arg, Node::Splat(_))
@@ -936,12 +993,18 @@ impl Codegen<'_> {
         }
         let a = self.op_reg(dst);
         if let ([], None, None, false, "size" | "length") = (args, block, block_arg, safe, name) {
-            match recv {
-                Some(r) => self.expr(r, a)?,
-                None => _ = self.emit(Op::LoadSelf(a)),
-            }
+            let b = match recv {
+                None => 0, // self
+                Some(r) => match self.reg_of(r) {
+                    Some(b) => b,
+                    None => {
+                        self.expr(r, a)?;
+                        a
+                    }
+                },
+            };
             let mid = self.sym(name);
-            self.emit(Op::Size(a, mid));
+            self.emit(Op::Size(a, b, mid));
             self.op_done(a, dst);
             return Ok(());
         }
