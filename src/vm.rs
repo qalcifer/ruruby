@@ -19,6 +19,7 @@ use crate::opcode::{ArgSpec, CallCache, DefinedKind, Irep, Literal, Op, Reg};
 use crate::symbol::{Sym, SymMap, SymbolTable};
 use crate::value::*;
 use std::cell::{Cell, RefCell};
+use std::fmt::Write as _;
 use std::cmp::Ordering;
 use std::rc::Rc;
 
@@ -2870,14 +2871,41 @@ impl Vm {
                 self.set_reg(f, a, v);
             }
             Op::StrCat(a) => {
-                let piece = match self.kind(self.reg(f, a + 1)) {
-                    V::Str(s) => self.heap[s].borrow().clone(),
-                    _ => self.inspect(&self.reg(f, a + 1))?,
+                let V::Str(acc) = self.kind(self.reg(f, a)) else {
+                    unreachable!("StrCat into a non-String");
+                };
+                // the pieces ToS left unconverted are written out in place
+                let piece = self.reg(f, a + 1);
+                let mut buf = std::mem::take(&mut *self.heap[acc].borrow_mut());
+                match self.kind(piece) {
+                    V::Str(s) => buf.push_str(&self.heap[s].borrow()),
+                    V::Nil => {}
+                    V::Bool(b) => buf.push_str(if b { "true" } else { "false" }),
+                    V::Int(i) => _ = write!(buf, "{i}"),
+                    V::Float(x) => buf.push_str(&fmt_float(x)),
+                    V::Sym(s) => buf.push_str(self.syms.name(s)),
+                    _ => match self.inspect(&piece) {
+                        Ok(s) => buf.push_str(&s),
+                        Err(e) => {
+                            *self.heap[acc].borrow_mut() = buf;
+                            return Err(e);
+                        }
+                    },
+                }
+                *self.heap[acc].borrow_mut() = buf;
+            }
+            Op::StrCatLit(a, i) => {
+                let Literal::Str(lit) = &f.irep.pool[i] else {
+                    unreachable!()
                 };
                 if let V::Str(s) = self.kind(self.reg(f, a)) {
-                    self.heap[s].borrow_mut().push_str(&piece);
+                    self.heap[s].borrow_mut().push_str(lit);
                 }
             }
+            Op::ToS(a) => match self.kind(self.reg(f, a)) {
+                V::Str(_) | V::Nil | V::Bool(_) | V::Int(_) | V::Float(_) | V::Sym(_) => {}
+                _ => return self.send_op(f, a, self.s.to_s, 0, false),
+            },
             Op::Intern(a) => {
                 let v = match self.kind(self.reg(f, a)) {
                     V::Str(s) => {

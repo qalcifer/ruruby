@@ -131,3 +131,54 @@ fn set_idx_and_shl() {
         ]
     );
 }
+
+/// Interpolation writes Strings, numbers, Symbols, nil and booleans out
+/// itself (like mruby's `mrb_obj_as_string`, so a redefined Integer#to_s
+/// isn't used) and calls `to_s` on anything else; Hash literals freeze
+/// their String keys instead of copying them.
+#[test]
+fn interpolation_and_string_keys() {
+    let out = run_capture(r##"
+        class Foo; def to_s = "foo!"; end
+        class Bad; def to_s = 42; end
+        x = 5
+        p "a#{x}b#{nil}c#{true}#{1.5}#{:sym}#{"str"}#{Foo.new}#{[1, "x"]}#{{a: 1}}"
+        p "#{x}", "#{x}#{x}", "lit", :"dyn#{x}", "#{1 << 60}", "#{2**70}", "#{-0.0}#{1e20}"
+        s = "q"
+        s = "#{s}#{s}!"
+        p s, Bad.new.to_s.class
+        p "#{Bad.new}".start_with?("#<Bad")
+        class Integer; alias_method :__to_s, :to_s; def to_s(*) = "int"; end
+        p "#{7}"
+        class Integer; alias_method :to_s, :__to_s; end
+        h = {"x" => 1, "y" => [2]}
+        p h, h.keys.map(&:frozen?), "x".frozen?
+        k = "z"
+        h2 = {k => 1}
+        k << "!"
+        p h2, k
+    "##)
+    .unwrap();
+    assert_eq!(
+        out.lines().collect::<Vec<_>>(),
+        [
+            r#""a5bctrue1.5symstrfoo![1, \"x\"]{a: 1}""#,
+            r#""5""#,
+            r#""55""#,
+            r#""lit""#,
+            r#":dyn5"#,
+            r#""1152921504606846976""#,
+            r#""1.1805916207174113e+21""#,
+            r#""-0.01.0e+20""#,
+            r#""qq!""#,
+            r#"Integer"#,
+            r#"false"#,
+            r#""7""#,
+            r#"{"x" => 1, "y" => [2]}"#,
+            r#"[true, true]"#,
+            r#"false"#,
+            r#"{"z" => 1}"#,
+            r#""z!""#,
+        ]
+    );
+}

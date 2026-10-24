@@ -674,14 +674,26 @@ impl Codegen<'_> {
 
     fn dstr(&mut self, parts: &[Node], dst: Reg) -> CResult<()> {
         let a = self.alloc();
-        self.load_str(a, "");
-        for part in parts {
+        // the string starts as its first literal piece
+        let rest = match parts.split_first() {
+            Some((Node::Str(s), rest)) => {
+                self.load_str(a, s);
+                rest
+            }
+            _ => {
+                self.load_str(a, "");
+                parts
+            }
+        };
+        for part in rest {
+            if let Node::Str(s) = part {
+                let i = self.pool(Literal::Str(Rc::from(s.as_str())));
+                self.emit(Op::StrCatLit(a, i));
+                continue;
+            }
             let r = self.alloc();
             self.expr(part, r)?;
-            if !matches!(part, Node::Str(_)) {
-                let to_s = self.sym("to_s");
-                self.emit(Op::Send(r, to_s, 0, false));
-            }
+            self.emit(Op::ToS(r));
             self.emit(Op::StrCat(a));
             self.free_to(r);
         }

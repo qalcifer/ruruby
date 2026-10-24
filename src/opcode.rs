@@ -187,6 +187,12 @@ pub enum Op {
     String(Reg, usize),
     /// R[a] << R[a+1]
     StrCat(Reg),
+    /// R[a] << pool[idx] (a literal piece of an interpolated string).
+    StrCatLit(Reg, usize),
+    /// R[a] = R[a].to_s for interpolation: Strings, numbers, Symbols, nil,
+    /// true and false stay as they are (StrCat writes them out), anything
+    /// else calls `to_s`.
+    ToS(Reg),
     /// R[a] = R[a].to_sym
     Intern(Reg),
     /// R[a] = R[a]..R[a+1]  (exclusive flag)
