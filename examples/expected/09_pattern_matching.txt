@@ -1,0 +1,20 @@
+"a big number (500)"
+"an integer"
+"the text \"hi\""
+"an empty list"
+"a list with just 9"
+"a list starting with 1, 2 more"
+"Ada, 36"
+"a circle of radius 2"
+"nothing"
+"something else"
+"200: hello"
+"ok: 3"
+"failed: timeout"
+["x", [7]]
+"admin"
+5432
+true
+true
+false
+NoMatchingPatternError

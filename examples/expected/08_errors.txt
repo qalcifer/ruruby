@@ -1,0 +1,28 @@
+Ok(36)
+Err("age can't be negative: -1")
+Err("invalid value for Integer(): \"abc\"")
+Ok(1990)
+Err("invalid value for Integer(): \"old\"")
+20: adult
+7: minor
+error: invalid value for Integer(): "x"
+true
+12
+Ok(13)
+0
+Err("INVALID VALUE FOR INTEGER(): \"X\"")
+Ok(:teen)
+Ok("8080")
+Err("key not found: :host")
+Ok("localhost")
+Err("index 5 outside of array bounds: -2...2")
+Ok(20)
+Ok(8080)
+Err("key not found: :port")
+Err("invalid value for Integer(): \"eighty\"")
+4
+none
+"undefined method 'upcase' for none"
+"called unwrap on Err(\"invalid value for Integer(): \\\"x\\\"\")"
+"invariant broken"
+Ok(2)

@@ -1,0 +1,47 @@
+12
+"HELLO, WORLD"
+"hello, world"
+"hELLO, wORLD"
+"dlroW ,olleH"
+"H"
+"d"
+"Hello"
+"World"
+4
+3
+true
+true
+false
+false
+true
+"Hello, there"
+"Hell0, W0rld"
+"He001, W1r0d"
+"Heo, Word"
+["Hello", "World"]
+["a", "b", "", "c"]
+"padded"
+"x.."
+"007"
+["H", "e", "l"]
+[72, 101]
+12
+"ababab"
+-1
+"ab"
+"003.1|ab  |ff"
+"SnakeCaseName"
+"title_case"
+"concat"
+false
+false
+FrozenError
+It is 21°C with 7 clouds and none wind
+Dear Ada,
+  thank you!
+"name"
+:name
+true
+[:x, :y, :z]
+5
+[6, 5]

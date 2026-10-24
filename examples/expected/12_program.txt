@@ -1,0 +1,11 @@
+apples: 5
+pears: 2
+apples: 2 left
+  ! no plums in stock
+  ! "many" is not a number
+  ! only 2 pears left
+  ! unknown command: "launch rockets"
+plums: 4
+apples     2
+pears      2
+plums      4

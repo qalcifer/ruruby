@@ -1,0 +1,50 @@
+Hello, world!
+"Hello, world!"
+Ada was born in 1815
+3
+1
+3.5
+1024
+1000000
+5
+[3, 1]
+3.14
+"11111111"
+43
+"HELLO"
+5
+"olleh"
+"h"
+"ell"
+"hello world"
+"hellohello"
+true
+true
+"heLlo"
+"***hello***"
+:ok
+true
+"ok"
+false
+true
+false
+none
+true
+false
+:truthy
+:truthy
+:falsy
+[1, 2, 3]
+1
+3
+3
+[1, 2, 3, 4]
+6
+36
+[:ada, :grace]
+2
+none
+[1, 2, 3, 4, 5]
+[1, 2, 3, 4]
+true
+[2, 1]

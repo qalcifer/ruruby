@@ -1,0 +1,8 @@
+12.57
+9
+2.54
+"shapes::Shapes::Circle"
+"Ada <ada@example.org>"
+false
+none
+none

@@ -1,0 +1,20 @@
+mild
+"warm"
+no frost
+warm day
+:odd
+while 0
+while 1
+while 2
+for apple
+for pear
+8
+[2, 4, 6, 8, 10]
+"zero"
+"digit"
+"number"
+"text"
+"text"
+"something else"
+a long word
+all longer than 2

@@ -7,10 +7,15 @@ will diverge. The implementation is structured after
 register bytecode → VM), the same opcode vocabulary, and modules that map onto
 mruby's source files.
 
+On the `lang-fork` branch the language has its own syntax (`fn`, braces,
+closures `|x| ...`, files as modules with `use`, `Ok`/`Err` and `?` instead of
+exceptions, `none` instead of nil); **[examples/](examples/README.md)** is a
+guided tour of it.
+
 ```sh
-cargo run --release -- examples/classes.rb
-cargo run -- -e 'puts (1..10).select(&:even?).map { |x| x * x }.sum'
-cargo run -- --dump -e 'p [1, 2].map { |x| x + 1 }'   # print bytecode, like `mruby -v`
+cargo run --release -- examples/01_basics.rb
+cargo run -- -e 'puts (1..10).select(&:even?).map(|x| x * x).sum'
+cargo run -- --dump -e 'p [1, 2].map(|x| x + 1)'     # print bytecode, like `mruby -v`
 cargo run -- -c file.rb                            # check syntax only
 cargo run                                          # REPL
 cargo test

@@ -1,0 +1,12 @@
+"Book: a book called Dune"
+"Song: Blue, 2:05"
+true
+true
+3.14159
+12.57
+9
+[3, 5, 8]
+[10, 6, 16]
+3
+true
+[5, 8]
