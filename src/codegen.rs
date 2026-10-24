@@ -73,6 +73,7 @@ fn binop(name: &str) -> Option<fn(Reg) -> Op> {
         "-" => Op::Sub,
         "*" => Op::Mul,
         "/" => Op::Div,
+        "[]" => Op::GetIdx,
         "==" => Op::Eq,
         "<" => Op::Lt,
         "<=" => Op::Le,
@@ -910,6 +911,16 @@ impl Codegen<'_> {
             return Ok(());
         }
         let a = self.op_reg(dst);
+        if let ([], None, None, false, "size" | "length") = (args, block, block_arg, safe, name) {
+            match recv {
+                Some(r) => self.expr(r, a)?,
+                None => _ = self.emit(Op::LoadSelf(a)),
+            }
+            let mid = self.sym(name);
+            self.emit(Op::Size(a, mid));
+            self.op_done(a, dst);
+            return Ok(());
+        }
         // `foo(x)`: SendSelf puts self in R[a] itself (a splat needs it
         // there before the arguments, which SendV doesn't do)
         let self_send = recv.is_none() && !has_splat(args);

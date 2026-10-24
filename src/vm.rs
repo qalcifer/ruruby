@@ -173,6 +173,7 @@ pub struct CommonSyms {
     pub sub: Sym,
     pub mul: Sym,
     pub div: Sym,
+    pub aref: Sym,
     pub lt: Sym,
     pub le: Sym,
     pub gt: Sym,
@@ -237,6 +238,19 @@ pub struct Vm {
     live_breaks: Vec<u64>,
     /// Method (and lambda) frames still running: `return` targets of their blocks.
     live_homes: Vec<usize>,
+    /// The built-ins [`Op::GetIdx`] and [`Op::Size`] stand for.
+    basic: BasicOps,
+}
+
+/// The built-in methods [`Op::GetIdx`] and [`Op::Size`] answer in place
+/// (mruby: `idx_class`): only while each class still finds its startup
+/// definition, checked again when methods change.
+#[derive(Default)]
+struct BasicOps {
+    methods: Vec<(ClassRef, Sym, NativeFn)>,
+    /// The method epoch `intact` was found at.
+    epoch: Cell<u64>,
+    intact: Cell<bool>,
 }
 
 struct Frame {
@@ -494,6 +508,7 @@ impl Vm {
             sub: syms.intern("-"),
             mul: syms.intern("*"),
             div: syms.intern("/"),
+            aref: syms.intern("[]"),
             lt: syms.intern("<"),
             le: syms.intern("<="),
             gt: syms.intern(">"),
@@ -535,9 +550,11 @@ impl Vm {
             inspecting: Vec::new(),
             live_breaks: Vec::new(),
             live_homes: Vec::new(),
+            basic: BasicOps::default(),
         };
         crate::core::init(&mut vm);
         crate::core::load_prelude(&mut vm);
+        vm.record_basic_ops();
         vm
     }
 
@@ -2707,6 +2724,24 @@ impl Vm {
             Op::Sub(a) => return self.arith_flow(f, a, Arith::Sub, self.s.sub),
             Op::Mul(a) => return self.arith_flow(f, a, Arith::Mul, self.s.mul),
             Op::Div(a) => return self.arith_flow(f, a, Arith::Div, self.s.div),
+            Op::GetIdx(a) => match self.get_idx(self.reg(f, a), self.reg(f, a + 1)) {
+                Some(v) => self.set_reg(f, a, v),
+                None => return self.send_op(f, a, self.s.aref, 1, false),
+            },
+            Op::Size(a, mid) => match self.kind(self.reg(f, a)) {
+                _ if !self.basic_ops_intact() => return self.send_op(f, a, mid, 0, false),
+                V::Array(h) if self.heap.arrays.extra(h).is_none() => {
+                    let n = self.heap[h].borrow().len();
+                    let v = self.int(n as i64);
+                    self.set_reg(f, a, v);
+                }
+                V::Hash(h) if self.heap.hashes.extra(h).is_none() => {
+                    let n = self.heap[h].borrow().len();
+                    let v = self.int(n as i64);
+                    self.set_reg(f, a, v);
+                }
+                _ => return self.send_op(f, a, mid, 0, false),
+            },
             Op::Eq(a) => {
                 let (x, y) = (self.reg(f, a), self.reg(f, a + 1));
                 let v = self.equal(&x, &y)?;
@@ -3130,6 +3165,60 @@ impl Vm {
     }
 
     /// `R[a] op R[a+1]`: numbers directly, anything else as a method call.
+    fn record_basic_ops(&mut self) {
+        let (aref, size, length) = (self.s.aref, self.intern("size"), self.intern("length"));
+        for c in [self.c.array, self.c.hash] {
+            for m in [aref, size, length] {
+                if let Some((Method::Native(f), _)) = self.find_method(&c, m) {
+                    self.basic.methods.push((c, m, f));
+                }
+            }
+        }
+        self.basic.epoch.set(method_epoch().wrapping_sub(1)); // not checked yet
+    }
+
+    /// Whether Array and Hash still have their built-in `[]`, `size` and `length`.
+    #[inline]
+    fn basic_ops_intact(&self) -> bool {
+        let epoch = method_epoch();
+        if self.basic.epoch.get() == epoch {
+            return self.basic.intact.get();
+        }
+        self.check_basic_ops(epoch)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn check_basic_ops(&self, epoch: u64) -> bool {
+        let intact = self.basic.methods.iter().all(|(c, m, f)| {
+            matches!(self.find_method(c, *m), Some((Method::Native(g), _)) if std::ptr::fn_addr_eq(*f, g))
+        });
+        self.basic.epoch.set(epoch);
+        self.basic.intact.set(intact);
+        intact
+    }
+
+    /// `x[k]` read in place ([`Op::GetIdx`]): `x` a built-in Array (not a
+    /// subclass', no singleton) with an Integer index, or such a Hash that
+    /// holds `k` (a built-in key); `None` means calling `[]`.
+    fn get_idx(&self, x: Value, k: Value) -> Option<Value> {
+        if !self.basic_ops_intact() {
+            return None;
+        }
+        match self.kind(x) {
+            V::Array(h) if self.heap.arrays.extra(h).is_none() => {
+                let i = k.as_inline_int()?;
+                let v = self.heap[h].borrow();
+                let i = if i < 0 { i + v.len() as i64 } else { i };
+                Some(usize::try_from(i).ok().and_then(|i| v.get(i).copied()).unwrap_or(Value::NIL))
+            }
+            V::Hash(h) if self.heap.hashes.extra(h).is_none() && !self.custom_key(&k) => {
+                self.heap[h].borrow().get(&self.heap, &k)
+            }
+            _ => None,
+        }
+    }
+
     fn arith_flow(&mut self, f: &Frame, a: Reg, op: Arith, mid: Sym) -> Result<Flow, Unwind> {
         let (x, y) = (self.reg(f, a), self.reg(f, a + 1));
         if x.is_numeric() && y.is_numeric() {
