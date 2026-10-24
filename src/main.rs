@@ -8,6 +8,7 @@ const USAGE: &str = "\
 Usage: ruruby [options] [programfile] [arguments]
   -e 'code'    run one line of script
   -c           check syntax only (compile without running)
+  -r file      require file before running the program
   --dump       print the compiled bytecode before running (like `mruby -v`)
   --gc-stress  collect garbage at every safe point (slow; finds GC bugs)
   --version    print the version
@@ -34,6 +35,7 @@ fn run(args: Vec<String>) -> ExitCode {
     let mut gc_stress = false;
     let mut code: Option<String> = None;
     let mut file: Option<String> = None;
+    let mut requires: Vec<String> = Vec::new();
     let mut it = args.into_iter();
     let mut script_args = Vec::new();
     while let Some(a) = it.next() {
@@ -47,6 +49,13 @@ fn run(args: Vec<String>) -> ExitCode {
             },
             "--dump" | "-v" => dump = true,
             "-c" => check = true,
+            "-r" => match it.next() {
+                Some(r) => requires.push(r),
+                None => {
+                    eprintln!("ruruby: no file specified for -r");
+                    return ExitCode::FAILURE;
+                }
+            },
             "--gc-stress" => gc_stress = true,
             "--version" => {
                 println!(
@@ -73,6 +82,14 @@ fn run(args: Vec<String>) -> ExitCode {
     let args = script_args.into_iter().map(|a| interp.vm.str(a)).collect();
     let argv = interp.vm.array(args);
     interp.vm.set_const("ARGV", argv);
+    for r in &requires {
+        // a file path loads as given, anything else goes through $LOAD_PATH
+        let name = std::fs::canonicalize(r).map(|p| p.to_string_lossy().into_owned()).unwrap_or(r.clone());
+        if let Err(e) = interp.eval(&format!("require {name:?}")) {
+            eprintln!("ruruby: -r {r}: {e}");
+            return ExitCode::FAILURE;
+        }
+    }
 
     let (name, src) = match (code, file) {
         (Some(c), _) => ("-e".to_string(), c),
