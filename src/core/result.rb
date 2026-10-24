@@ -77,3 +77,41 @@ end
 
 def Ok(value) = Ok.new(value)
 def Err(error) = Err.new(error)
+
+# Lookups that can miss and conversions that can fail give a Result instead
+# of panicking (a default or a block can't miss: Ok of it).
+class Hash
+  def fetch(key, *default)
+    return Ok(self[key]) if key?(key)
+    return Ok(yield(key)) if block_given?
+    return Ok(default[0]) unless default.empty?
+    Err("key not found: #{key.inspect}")
+  end
+end
+
+class Array
+  def fetch(index, *default)
+    i = index < 0 ? index + size : index
+    return Ok(self[i]) if i >= 0 && i < size
+    return Ok(yield(index)) if block_given?
+    return Ok(default[0]) unless default.empty?
+    Err("index #{index} outside of array bounds: #{-size}...#{size}")
+  end
+end
+
+class Object
+  alias_method :__integer, :Integer
+  alias_method :__float, :Float
+  private :__integer, :__float
+
+  # Ok(n), or Err("invalid value for Integer(): \"x\"")
+  def Integer(value)
+    r = catch_panic { __integer(value) }
+    r.ok? ? r : Err(r.err.message)
+  end
+
+  def Float(value)
+    r = catch_panic { __float(value) }
+    r.ok? ? r : Err(r.err.message)
+  end
+end

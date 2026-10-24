@@ -222,11 +222,11 @@ fn errors_are_results_and_panics() {
           in Err(e) then puts "failed: #{e}"
           end
         end
-        p catch_panic { Integer("zz") }.err.class
+        p Integer("zz")
         def m = catch_panic { yield }.unwrap_or(:saved)
         p(m { 1 / 0 })
     "##;
-    assert_eq!(run(src), "1\nfailed: bad 2\nArgumentError\n:saved\n");
+    assert_eq!(run(src), "1\nfailed: bad 2\nErr(\"invalid value for Integer(): \\\"zz\\\"\")\n:saved\n");
     assert_eq!(run_err("panic 'boom'"), "boom (Panic)");
     assert_eq!(
         run_err("nil.foo"),

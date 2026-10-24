@@ -123,3 +123,56 @@ fn catch_panic_boundary() {
     "#);
     assert_eq!(out, "Ok(2)\nNoMethodError\n\"divided by 0\"\n[Ok(10), Ok(20)]\n:returned\nOk(:b)\n");
 }
+
+/// Lookups that can miss (Hash#fetch, Array#fetch) and conversions that can
+/// fail (Integer(), Float()) give Ok/Err; a default or block can't miss.
+#[test]
+fn fallible_core_methods() {
+    let out = run(r##"
+        h = {a: 1, b: none}
+        p h.fetch(:a), h.fetch(:b), h.fetch(:zz), h.fetch(:zz, 0), h.fetch(:zz) { |k| k.to_s }
+        d = Hash.new(5)
+        p d.fetch(:x), d[:x]
+        a = [10, 20, 30]
+        p a.fetch(0), a.fetch(-1), a.fetch(3), a.fetch(-4), a.fetch(9, :d), a.fetch(9) { |i| i * 2 }
+        p Integer("42"), Integer(" 1_000 "), Integer("4x"), Integer(3.9), Integer(none)
+        p Float("2.5"), Float("x"), Float(3)
+        def port(cfg)
+          raw = cfg.fetch(:port)?
+          n = Integer(raw)?
+          Ok(n + 1)
+        end
+        p port({port: "8080"}), port({}), port({port: "eighty"})
+        p catch_panic { h.fetch(:zz) { |k| none.boom } }.err.class
+        p h.fetch(:a).unwrap + 1, a.fetch(5).unwrap_or(0)
+    "##);
+    assert_eq!(out.lines().collect::<Vec<_>>(), [
+        r#"Ok(1)"#,
+        r#"Ok(none)"#,
+        r#"Err("key not found: :zz")"#,
+        r#"Ok(0)"#,
+        r#"Ok("zz")"#,
+        r#"Err("key not found: :x")"#,
+        r#"5"#,
+        r#"Ok(10)"#,
+        r#"Ok(30)"#,
+        r#"Err("index 3 outside of array bounds: -3...3")"#,
+        r#"Err("index -4 outside of array bounds: -3...3")"#,
+        r#"Ok(:d)"#,
+        r#"Ok(18)"#,
+        r#"Ok(42)"#,
+        r#"Ok(1000)"#,
+        r#"Err("invalid value for Integer(): \"4x\"")"#,
+        r#"Ok(3)"#,
+        r#"Err("no implicit conversion of none into Integer")"#,
+        r#"Ok(2.5)"#,
+        r#"Err("invalid value for Float(): \"x\"")"#,
+        r#"Ok(3.0)"#,
+        r#"Ok(8081)"#,
+        r#"Err("key not found: :port")"#,
+        r#"Err("invalid value for Integer(): \"eighty\"")"#,
+        r#"NoMethodError"#,
+        r#"2"#,
+        r#"0"#,
+    ]);
+}

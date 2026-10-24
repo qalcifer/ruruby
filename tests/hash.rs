@@ -149,7 +149,7 @@ fn keys_with_their_own_hash_and_eql() {
     "#));
     assert_eq!(
         out,
-        ":b\nfalse\n2\n1\n42\n3\nnone\n7\nfalse\n99\n99\n:x\n[0, 9]\n[2, 1]\nnone\n1\n"
+        ":b\nfalse\n2\n1\n42\nOk(3)\nnone\n7\nfalse\n99\n99\n:x\n[0, 9]\n[2, 1]\nnone\n1\n"
     );
 }
 
