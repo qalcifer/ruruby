@@ -240,7 +240,7 @@ pub struct Vm {
 struct Frame {
     irep: Rc<Irep>,
     /// Stack index of the frame's register 0 (`self`).
-    base: usize,
+    base: u32,
     /// The env of this frame's own locals, made when a block captures them.
     env: Option<EnvRef>,
     /// For a block: the env of the scope it was created in (upvars).
@@ -252,19 +252,20 @@ struct Frame {
     /// (owner, name) of the running method, for `super` and `__method__`.
     method: Option<(ClassRef, Sym)>,
     /// How many optional parameters received an argument.
-    opt_filled: usize,
+    opt_filled: u32,
     /// Which keyword parameters received an argument.
     kw_mask: u64,
     home: usize,
     /// Identity of the running block's proc (0 for methods), the tag for `break`.
     proc_tag: u64,
-    exc: Option<Value>,
+    /// The exception a `rescue` clause is handling (nil: none).
+    exc: Value,
     /// A `break`/`return` paused while an `ensure` clause runs; `Raise` of nil resumes it.
     pending: Option<Box<Unwind>>,
     /// Next instruction.
     pc: usize,
     /// The caller's register that receives this frame's value.
-    ret: Reg,
+    ret: u32,
     /// Tag of the block passed at the call site: a `break` from it ends this call.
     break_tag: u64,
     /// Catches `return` from its blocks: methods, lambdas and the main script.
@@ -283,7 +284,7 @@ impl Frame {
     fn new(irep: Rc<Irep>, base: usize, self_: Value, target: ClassRef) -> Frame {
         Frame {
             irep,
-            base,
+            base: base as u32,
             env: None,
             upper: None,
             self_,
@@ -294,7 +295,7 @@ impl Frame {
             kw_mask: 0,
             home: 0,
             proc_tag: 0,
-            exc: None,
+            exc: Value::NIL,
             pending: None,
             pc: 0,
             ret: 0,
@@ -750,7 +751,7 @@ impl Vm {
         }
         let len = f.irep.nregs.max(1 + f.irep.spec.nparams());
         let e = self.heap.alloc(Env {
-            regs: RefCell::new(EnvRegs::Stack { base: f.base, len }),
+            regs: RefCell::new(EnvRegs::Stack { base: f.base as usize, len }),
             upper: f.upper,
             vis: Cell::new(f.vis),
             scope: if f.own_scope { None } else { self.scope_env(f) },
@@ -788,17 +789,17 @@ impl Vm {
                 *regs = EnvRegs::Heap(self.stack[base..base + len].to_vec());
             }
         }
-        self.stack.truncate(f.base);
+        self.stack.truncate(f.base as usize);
     }
 
     #[inline]
     fn reg(&self, f: &Frame, i: Reg) -> Value {
-        self.stack[f.base + i]
+        self.stack[f.base as usize + i]
     }
 
     #[inline]
     fn set_reg(&mut self, f: &Frame, i: Reg, v: Value) {
-        self.stack[f.base + i] = v;
+        self.stack[f.base as usize + i] = v;
     }
 
     // ---- small helpers -------------------------------------------------
@@ -1449,7 +1450,7 @@ impl Vm {
                 let mut f = Frame::new(irep, bound.base, recv, owner);
                 f.block = block;
                 f.method = Some((owner, mid));
-                f.opt_filled = bound.opt_filled;
+                f.opt_filled = bound.opt_filled as u32;
                 f.kw_mask = bound.kw_mask;
                 f.home = self.new_id();
                 f.is_home = true;
@@ -1702,7 +1703,7 @@ impl Vm {
                 f.upper = env;
                 f.block = outer_block;
                 f.method = method;
-                f.opt_filled = bound.opt_filled;
+                f.opt_filled = bound.opt_filled as u32;
                 f.kw_mask = bound.kw_mask;
                 f.home = if lambda { self.new_id() } else { home };
                 f.proc_tag = p.id();
@@ -2082,7 +2083,7 @@ impl Vm {
                 pc = f.pc;
                 match result {
                     Ok(v) => {
-                        self.set_reg(&f, done.ret, v);
+                        self.set_reg(&f, done.ret as Reg, v);
                         break;
                     }
                     Err(e) => {
@@ -2135,7 +2136,7 @@ impl Vm {
             Unwind::Error(exc) => match f.irep.catch.iter().find(covers).map(|h| h.target) {
                 Some(target) => {
                     f.pc = target;
-                    f.exc = Some(exc);
+                    f.exc = exc;
                     None
                 }
                 None => Some(Unwind::Error(exc)),
@@ -2147,7 +2148,7 @@ impl Vm {
                     Some(target) => {
                         f.pc = target;
                         f.pending = Some(Box::new(e));
-                        f.exc = None;
+                        f.exc = Value::NIL;
                         None
                     }
                     None => Some(e),
@@ -2211,7 +2212,7 @@ impl Vm {
         }
         match r {
             Ok(Call::Frame(mut callee)) => {
-                callee.ret = a;
+                callee.ret = a as u32;
                 callee.break_tag = tag;
                 Ok(Flow::Call(callee))
             }
@@ -2291,7 +2292,7 @@ impl Vm {
                 let Some(b) = f.block else {
                     out_of_line!(Err(self.err(&self.c.local_jump_error, "no block given (yield)")))
                 };
-                let args = Args::Stack { at: f.base + a + 1, n: argc };
+                let args = Args::Stack { at: f.base as usize + a + 1, n: argc };
                 out_of_line!(self.call_flow(f, a, 0, |vm| vm.start_proc(&b, args, None, ProcCall::default())))
             }
             Op::AddI(a, i) | Op::SubI(a, i) => {
@@ -2373,7 +2374,7 @@ impl Vm {
             None
         };
         let tag = proc_tag(&blk);
-        let args = Args::Stack { at: f.base + a + 1, n: argc };
+        let args = Args::Stack { at: f.base as usize + a + 1, n: argc };
         let Some((m, owner, vis)) = self.cached_lookup(f, &recv, mid) else {
             let scope = self.scope_of(f);
             return self.with_scope(scope, |vm| {
@@ -2393,7 +2394,7 @@ impl Vm {
             // natives take their arguments as a slice: no Vec for the common case
             if argc <= MAX_INLINE_ARGS {
                 let mut buf: [Value; MAX_INLINE_ARGS] = Default::default();
-                let at = f.base + a + 1;
+                let at = f.base as usize + a + 1;
                 buf[..argc].clone_from_slice(&self.stack[at..at + argc]);
                 let args = &buf[..argc];
                 return self.call_flow(f, a, tag, |vm| {
@@ -2559,7 +2560,7 @@ impl Vm {
                 }
             }
             Op::OptArg(n, t) => {
-                if n < f.opt_filled {
+                if n < f.opt_filled as usize {
                     f.pc = t;
                 }
             }
@@ -2569,7 +2570,7 @@ impl Vm {
                 }
             }
             Op::Except(a) => {
-                let exc = f.exc.take().unwrap_or(Value::NIL);
+                let exc = std::mem::replace(&mut f.exc, Value::NIL);
                 self.set_reg(f, a, exc);
             }
             Op::Rescue(a, b) => {
@@ -2609,7 +2610,7 @@ impl Vm {
                 let Some(b) = f.block else {
                     return Err(self.err(&self.c.local_jump_error, "no block given (yield)"));
                 };
-                let args = Args::Stack { at: f.base + a + 1, n: argc };
+                let args = Args::Stack { at: f.base as usize + a + 1, n: argc };
                 return self.call_flow(f, a, 0, |vm| vm.start_proc(&b, args, None, ProcCall::default()));
             }
             Op::SendV(a, mid, has_block) => {
@@ -2857,7 +2858,7 @@ impl Vm {
                 };
                 let target = cls;
                 let mut body = self.body_frame(f.irep.reps[idx].clone(), Value::from(cls), target);
-                body.ret = a;
+                body.ret = a as u32;
                 return Ok(Flow::Call(body));
             }
             Op::Alias(new, old) => {
@@ -3107,7 +3108,7 @@ impl Vm {
             self.set_reg(f, a, v);
             return Ok(Flow::Next);
         }
-        let args = Args::Stack { at: f.base + a + 1, n: 1 };
+        let args = Args::Stack { at: f.base as usize + a + 1, n: 1 };
         self.call_flow(f, a, 0, |vm| vm.start_call(x, mid, args, None))
     }
 
@@ -3123,7 +3124,7 @@ impl Vm {
             self.set_reg(f, a, Value::bool(num_cmp(&self.heap, &x, &y).is_some_and(pred)));
             return Ok(Flow::Next);
         }
-        let args = Args::Stack { at: f.base + a + 1, n: 1 };
+        let args = Args::Stack { at: f.base as usize + a + 1, n: 1 };
         self.call_flow(f, a, 0, |vm| vm.start_call(x, mid, args, None))
     }
 
@@ -3231,7 +3232,7 @@ fn mark_frame(m: &mut Marker, f: &Frame) {
         m.env(*e);
     }
     m.value(&f.self_);
-    for v in f.block.iter().chain(&f.exc) {
+    for v in f.block.iter().chain([&f.exc]) {
         m.value(v);
     }
     m.class(f.target);
