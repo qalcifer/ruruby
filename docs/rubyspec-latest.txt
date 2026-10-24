@@ -1,0 +1,196 @@
+group                               total   pass   fail  error   lost   skip   pass%
+------------------------------------------------------------------------------------
+core/argf                             136      0      0    136      0      3    0.0%
+core/array                           1700    532    339    810     19      2   31.3%  (3/132 files broken)
+core/basicobject                      171     75     33     63      0      1   43.9%
+core/binding                           14      0      1     13      0      0    0.0%
+core/builtin_constants                 17      2      2     13      0      0   11.8%
+core/class                             46     27      8      8      3      0   58.7%  (1/8 files broken)
+core/comparable                        54     19      6     29      0      0   35.2%
+core/complex                          134      0     11    123      0      0    0.0%
+core/conditionvariable                 11      0      0     11      0      0    0.0%
+core/data                               1      0      0      1      0      1    0.0%
+core/dir                              143      0      0    143      0      0    0.0%
+core/encoding                         621      0      4    617      0      4    0.0%
+core/enumerable                         8      0      7      1      0      0    0.0%
+core/enumerator                       397      0      7    390      0      0    0.0%
+core/env                              170      0      2    168      0      0    0.0%
+core/exception                        216     49     35    132      0     12   22.7%
+core/false                             13      8      5      0      0      0   61.5%
+core/fiber                            162      1     36    125      0      2    0.6%
+core/file                             707      4     45    658      0      9    0.6%
+core/filetest                           2      0      0      2      0      3    0.0%
+core/float                            260    137     51     72      0      1   52.7%
+core/gc                                39      7      5     27      0      2   17.9%
+core/hash                             559    267     77    215      0      3   47.8%
+core/integer                          487    139    135    213      0      3   28.5%
+core/io                               321      0      6    315      0      2    0.0%
+core/kernel                           331     48     43    240      0      3   14.5%
+core/main                               1      0      0      1      0      0    0.0%
+core/marshal                           21      0      0     21      0      0    0.0%
+core/matchdata                        162      0      3    159      0      1    0.0%
+core/math                             226     63     35    128      0      0   27.9%
+core/method                           175     39     20    116      0      2   22.3%
+core/module                           229     34     38    157      0      2   14.8%
+core/mutex                             35      0      0     35      0      0    0.0%
+core/nil                               26     12      4     10      0      1   46.2%
+core/numeric                          142     34     19     73     16      0   23.9%  (7/46 files broken)
+core/objectspace                      104      0      8     96      0     14    0.0%
+core/proc                             144     49     32     63      0      2   34.0%
+core/process                          236      0     10    226      0     71    0.0%
+core/queue                             44      0      1     43      0      2    0.0%
+core/random                            33      0      2     31      0      0    0.0%
+core/range                            344     81     70    193      0      0   23.5%
+core/rational                         158      0     27    131      0      2    0.0%
+core/refinement                        25      0      0     25      0      0    0.0%
+core/regexp                           255      0     20    235      0      1    0.0%
+core/ruby                               0      0      0      0      0      0    0.0%
+core/set                              185      0      2    183      0      1    0.0%
+core/signal                            50      0      2     48      0      0    0.0%
+core/sizedqueue                        57      0      4     53      0      4    0.0%
+core/string                          3308    592    494   2195     27      3   17.9%  (1/151 files broken)
+core/struct                            26      0      0     26      0      0    0.0%
+core/symbol                           175     24     21    130      0      0   13.7%
+core/systemexit                         6      0      0      6      0      0    0.0%
+core/thread                           112      0     10    102      0      6    0.0%
+core/threadgroup                        8      0      0      8      0      0    0.0%
+core/time                             251      0     13    238      0      0    0.0%
+core/tracepoint                         0      0      0      0      0      0    0.0%
+core/true                              13      9      4      0      0      0   69.2%
+core/unboundmethod                     86     35     20     31      0      3   40.7%
+core/warning                           18      0      2     16      0     13    0.0%
+language/BEGIN                          6      0      1      5      0      1    0.0%
+language/END                            0      0      0      0      0     14    0.0%
+language/alias                          0      0      0      0      0      0    0.0%
+language/and                            0      0      0      0      0      0    0.0%
+language/array                         23     22      0      1      0      0   95.7%
+language/assignments                    0      0      0      0      0      0    0.0%
+language/block                          0      0      0      0      0      0    0.0%
+language/break                          0      0      0      0      0      0    0.0%
+language/case                          50     40      2      8      0      0   80.0%
+language/class                         43     10      7     26      0      2   23.3%
+language/class_variable                14      6      2      6      0      0   42.9%
+language/comment                        1      0      0      1      0      0    0.0%
+language/constants                      0      0      0      0      0      0    0.0%
+language/def                            0      0      0      0      0      0    0.0%
+language/defined                        0      0      0      0      0      0    0.0%
+language/delegation                    15      0      0     15      0      0    0.0%
+language/encoding                       6      0      1      5      0      0    0.0%
+language/ensure                        31     15      3     13      0      0   48.4%
+language/execution                      0      0      0      0      0      0    0.0%
+language/file                           6      0      1      5      0      0    0.0%
+language/for                           34     25      2      7      0      0   73.5%
+language/hash                           0      0      0      0      0      0    0.0%
+language/heredoc                       16      8      1      7      0      0   50.0%
+language/if                            52     36      7      9      0      0   69.2%
+language/it_parameter                   0      0      0      0      0      0    0.0%
+language/keyword_arguments             23     12      1     10      0      0   52.2%
+language/lambda                         0      0      0      0      0      0    0.0%
+language/line                           6      0      1      5      0      0    0.0%
+language/loop                           7      7      0      0      0      0  100.0%
+language/magic_comment                 54      0      0     54      0      0    0.0%
+language/match                          8      1      1      6      0      0   12.5%
+language/metaclass                     21     18      1      2      0      0   85.7%
+language/method                         0      0      0      0      0      0    0.0%
+language/module                        14      4      5      5      0      2   28.6%
+language/next                           0      0      0      0      0      0    0.0%
+language/not                           10      9      1      0      0      0   90.0%
+language/numbered_parameters           17      4      0     13      0      0   23.5%
+language/numbers                       22      8      1     13      0      0   36.4%
+language/optional_assignments          74     34     23     17      0      0   45.9%
+language/or                             0      0      0      0      0      0    0.0%
+language/order                          5      5      0      0      0      0  100.0%
+language/pattern_matching               0      0      0      0      0      0    0.0%
+language/precedence                     0      0      0      0      0      0    0.0%
+language/predefined                     0      0      0      0      0      0    0.0%
+language/predefined/data_spec.rb        1      0      0      1      0      8    0.0%
+language/predefined/toplevel_binding_spec.rb      0      0      0      0      0      5    0.0%
+language/private                        7      7      0      0      0      0  100.0%
+language/proc                          38     38      0      0      0      0  100.0%
+language/range                          5      4      1      0      0      0   80.0%
+language/redo                           5      4      1      0      0      0   80.0%
+language/regexp                        26      0      4     22      0      0    0.0%
+language/regexp/anchors_spec.rb        14      0      0     14      0      0    0.0%
+language/regexp/back-references_spec.rb     20      0      0     20      0      0    0.0%
+language/regexp/character_classes_spec.rb    128      0      0    128      0      0    0.0%
+language/regexp/empty_checks_spec.rb      4      0      0      4      0      0    0.0%
+language/regexp/encoding_spec.rb       32      0      0     32      0      0    0.0%
+language/regexp/escapes_spec.rb        13      0      0     13      0      0    0.0%
+language/regexp/grouping_spec.rb        7      0      1      6      0      0    0.0%
+language/regexp/interpolation_spec.rb      9      0      0      9      0      0    0.0%
+language/regexp/modifiers_spec.rb      12      0      0     12      0      0    0.0%
+language/regexp/repetition_spec.rb     14      0      0     14      0      0    0.0%
+language/regexp/subexpression_call_spec.rb      5      0      0      5      0      0    0.0%
+language/rescue                        60     40      7     13      0      0   66.7%
+language/retry                          3      2      1      0      0      0   66.7%
+language/return                         0      0      0      0      0      0    0.0%
+language/safe                           1      1      0      0      0      0  100.0%
+language/safe_navigator                13     10      3      0      0      0   76.9%
+language/send                           0      0      0      0      0      0    0.0%
+language/singleton_class               53     40     12      1      0      0   75.5%
+language/source_encoding                2      0      0      2      0      4    0.0%
+language/string                         0      0      0      0      0      0    0.0%
+language/super                         61     53      3      5      0      0   86.9%
+language/symbol                        14     11      0      3      0      1   78.6%
+language/throw                         10      0      2      8      0      0    0.0%
+language/undef                          0      0      0      0      0      0    0.0%
+language/unless                         6      6      0      0      0      0  100.0%
+language/until                          0      0      0      0      0      0    0.0%
+language/variables                      0      0      0      0      0      0    0.0%
+language/while                          0      0      0      0      0      0    0.0%
+language/yield                         39     36      0      3      0      0   92.3%
+------------------------------------------------------------------------------------
+TOTAL core                          13375   2287   1719   9304     65    179   17.1%  (12/2151 files broken)
+TOTAL language                       1160    516     96    548      0     37   44.5%
+TOTAL                               14535   2803   1815   9852     65    216   19.3%  (12/2231 files broken)
+
+2231 files in 11.9s
+
+Most common failures and errors (examples affected):
+   1188  NameError: uninitialized constant Regexp
+    948  NameError: uninitialized constant Encoding
+    925  NoMethodError: undefined method 'unpack' for an instance of String
+    732  (expectation) wrong value
+    610  NameError: uninitialized constant File
+    470  NoMethodError: undefined method 'pack' for an instance of Array
+    273  NameError: uninitialized constant ENV
+    263  (expectation) raised NoMethodError instead of TypeError
+    212  NameError: uninitialized constant Time
+    206  (expectation) raised NoMethodError instead of ArgumentError
+    203  NoMethodError: undefined method 'touch' for an instance of MSpecShim::Env
+    179  NameError: uninitialized constant Set
+    166  NameError: uninitialized constant IO
+    155  LocalJumpError: no block given (yield)
+    153  NoMethodError: undefined method 'Rational' for an instance of MSpecShim::Env
+    138  NoMethodError: undefined method 'to_enum' for an instance of EnumeratorLazySpecs::YieldsMixed
+    134  NameError: uninitialized constant Enumerator
+    134  NoMethodError: undefined method 'rm_r' for main:Object
+    124  NameError: uninitialized constant Process
+    116  NameError: uninitialized constant Fiber
+    114  NameError: uninitialized constant Thread
+    113  NoMethodError: undefined method 'encode' for an instance of String
+    110  NoMethodError: undefined method 'Complex' for an instance of MSpecShim::Env
+    105  NameError: uninitialized constant Errno
+    100  NoMethodError: undefined method 'eval' for an instance of MSpecShim::Env
+     91  NameError: uninitialized constant ObjectSpace
+     87  undefined method 'abort' for class 'KernelSpecs::Method' (NameError)
+     80  (expectation) raised NameError instead of TypeError
+     76  (expectation) raised NameError instead of ArgumentError
+     73  NoMethodError: undefined method 'force_encoding' for an instance of String
+     71  (expectation) ArgumentError not raised
+     65  NoMethodError: undefined method 'rm_r' for an instance of MSpecShim::Env
+     65  undefined method 'nesting' for class Module (NoMethodError)
+     62  NoMethodError: undefined method '+@' for an instance of String
+     60  TypeError: nil is not a symbol nor a string
+     57  NameError: uninitialized constant Dir
+     56  uninitialized constant IO (NameError)
+     55  uninitialized constant Set (NameError)
+     53  NameError: uninitialized constant SizedQueue
+     50  NameError: uninitialized constant Signal
+
+Skipped (not modelled by the shim):
+    125  ruby_exe
+     69  no body
+     12  raise_consistent_error
+      9  complain (warnings not captured)
+      1  output (stdout not captured)
