@@ -208,6 +208,9 @@ pub struct Rescue {
 pub struct Program {
     pub body: Node,
     pub locals: Vec<String>,
+    /// The file it was parsed from (`-` for stdin, `-e`): `require_relative`
+    /// resolves against it.
+    pub file: String,
 }
 
 pub fn call(recv: Option<Node>, name: &str, args: Vec<Node>) -> Node {

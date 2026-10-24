@@ -53,12 +53,15 @@ struct Scope {
 pub struct Codegen<'a> {
     syms: &'a mut SymbolTable,
     scopes: Vec<Scope>,
+    /// The source file (for `require_relative`).
+    file: &'a str,
 }
 
 pub fn compile(prog: &Program, syms: &mut SymbolTable) -> CResult<Rc<Irep>> {
     let mut g = Codegen {
         syms,
         scopes: Vec::new(),
+        file: &prog.file,
     };
     g.push_scope(Kind::Top, "<main>", &prog.locals, None);
     let r = g.alloc();
@@ -970,6 +973,15 @@ impl Codegen<'_> {
         safe: bool,
         dst: Reg,
     ) -> CResult<()> {
+        // `require_relative path`: the calling file goes along as a hidden
+        // second argument, so the native can resolve against it
+        let with_file;
+        let args = if let (None, "require_relative", [path], None, None) = (recv, name, args, block, block_arg) {
+            with_file = [path.clone(), Node::Str(self.file.to_string())];
+            &with_file[..]
+        } else {
+            args
+        };
         if let (None, [], None, None) = (recv, args, block, block_arg) {
             let vis = match name {
                 "private" => Some(Vis::Private),

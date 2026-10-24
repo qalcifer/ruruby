@@ -8,6 +8,7 @@ pub mod enumerable;
 pub mod gc;
 pub mod hash;
 pub mod kernel;
+pub mod load;
 pub mod numeric;
 pub mod range;
 pub mod reflect;
@@ -31,6 +32,7 @@ pub fn init(vm: &mut Vm) {
     enumerable::init(vm);
     reflect::init(vm);
     gc::init(vm);
+    load::init(vm);
 }
 
 /// Core methods written in Ruby (`prelude.rb`), compiled into every VM.

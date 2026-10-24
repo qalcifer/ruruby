@@ -78,7 +78,7 @@ pub fn parse_file(src: &str, file: &str, line: u32) -> PResult<Program> {
         return Err(p.err("unexpected token"));
     }
     let locals = p.scopes.pop().unwrap().locals;
-    Ok(Program { body, locals })
+    Ok(Program { body, locals, file: p.file.clone() })
 }
 
 impl Scope {
@@ -1629,6 +1629,15 @@ impl Parser {
         match name.as_str() {
             "__LINE__" => return Ok(Node::Int(line as i64)),
             "__FILE__" => return Ok(Node::Str(self.file.clone())),
+            "__dir__" if !call_follows => {
+                return Ok(match std::path::Path::new(&self.file).parent() {
+                    Some(d) if !matches!(self.file.as_str(), "-" | "-e") => {
+                        let d = d.to_string_lossy();
+                        Node::Str(if d.is_empty() { ".".into() } else { d.into_owned() })
+                    }
+                    _ => Node::Nil,
+                });
+            }
             "__ENCODING__" => return Ok(Node::Str("UTF-8".into())),
             _ => {}
         }
