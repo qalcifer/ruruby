@@ -272,6 +272,9 @@ impl Codegen<'_> {
     /// with an Integer literal or another local is first tried as a fused
     /// JmpCmp, with the generic code after it for other operands.
     fn cond_jump(&mut self, cond: &Node, r: Reg, jump_if: bool) -> CResult<Vec<usize>> {
+        if let Some(jumps) = self.compare_with_call(cond, r, jump_if)? {
+            return Ok(jumps);
+        }
         let mut jumps = Vec::new();
         if let Some(fused) = self.fused_compare(cond, jump_if) {
             jumps.push(self.emit(fused));
@@ -285,6 +288,48 @@ impl Codegen<'_> {
             *c = cont;
         }
         Ok(jumps)
+    }
+
+    /// `i < size`, `i < a.length`: a local compared with a call without
+    /// arguments or block, on self or a local (which can't assign `i`). The
+    /// call's value goes to R[r+1] once; a fused JmpCmpR tests it, and the
+    /// generic compare after it uses it too.
+    fn compare_with_call(&mut self, cond: &Node, r: Reg, jump_if: bool) -> CResult<Option<Vec<usize>>> {
+        let Node::Call { recv: Some(lhs), name, args, block: None, block_arg: None, safe: false } = cond else {
+            return Ok(None);
+        };
+        let (cmp, op): (Cmp, fn(Reg) -> Op) = match name.as_str() {
+            "<" => (Cmp::Lt, Op::Lt),
+            "<=" => (Cmp::Le, Op::Le),
+            ">" => (Cmp::Gt, Op::Gt),
+            ">=" => (Cmp::Ge, Op::Ge),
+            _ => return Ok(None),
+        };
+        let ([rhs], Some(x)) = (args.as_slice(), self.reg_of(lhs)) else {
+            return Ok(None);
+        };
+        let Node::Call { recv: call_recv, args: call_args, block: None, block_arg: None, .. } = rhs else {
+            return Ok(None);
+        };
+        if !call_args.is_empty()
+            || !call_recv.as_deref().is_none_or(|n| self.reg_of(n).is_some())
+            || self.sp() != r + 1
+            || x == 0
+        {
+            return Ok(None);
+        }
+        let t = self.alloc(); // r + 1
+        self.expr(rhs, t)?;
+        let fused = self.emit(Op::JmpCmpR { cmp, jump_if, a: x as u32, b: t as u32, target: 0, cont: 0 });
+        self.emit(Op::Move(r, x));
+        self.emit(op(r));
+        let generic = self.emit(if jump_if { Op::JmpIf(r, 0) } else { Op::JmpNot(r, 0) });
+        let cont = self.pc() as u32;
+        if let Op::JmpCmpR { cont: c, .. } = &mut self.cur().irep.code[fused] {
+            *c = cont;
+        }
+        self.free_to(t);
+        Ok(Some(vec![fused, generic]))
     }
 
     /// `x < 2`, `i < n`, … with x, i, n locals of this scope.
