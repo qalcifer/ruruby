@@ -2812,6 +2812,17 @@ impl Vm {
                 let idx = pre.max(items.len().saturating_sub(post)) + j;
                 self.set_reg(f, a, items.get(idx).cloned().unwrap_or(Value::NIL));
             }
+            Op::Hash(a, b, n) if (0..n).all(|i| self.reg(f, b + 2 * i).is_unique()) => {
+                // keys equal only to themselves (Symbols, Integers): no
+                // copies of String keys, no `hash`/`eql?` calls
+                let mut h = RHash::with_capacity(n);
+                for i in 0..n {
+                    let (k, v) = (self.reg(f, b + 2 * i), self.reg(f, b + 2 * i + 1));
+                    h.set(&self.heap, k, v);
+                }
+                let v = self.hash(h);
+                self.set_reg(f, a, v);
+            }
             Op::Hash(a, b, n) => {
                 let hv = self.hash(RHash::new());
                 let V::Hash(h) = self.kind(hv) else {

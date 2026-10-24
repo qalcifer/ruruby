@@ -489,7 +489,7 @@ impl Value {
     /// to itself (a boxed Integer is never in inline range), so comparing
     /// bits is enough.
     #[inline]
-    fn is_unique(self) -> bool {
+    pub(crate) fn is_unique(self) -> bool {
         matches!(self.0 >> 48, TAG_SPECIAL | TAG_INT | TAG_SYM)
     }
 

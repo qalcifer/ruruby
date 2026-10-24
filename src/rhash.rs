@@ -66,8 +66,12 @@ pub fn stored_hash(h: u64) -> u64 {
 
 impl RHash {
     pub fn new() -> Self {
+        Self::with_capacity(0)
+    }
+
+    pub fn with_capacity(n: usize) -> Self {
         RHash {
-            entries: Vec::new(),
+            entries: Vec::with_capacity(n),
             big: None,
             live: 0,
             version: 0,
