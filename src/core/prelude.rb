@@ -137,11 +137,10 @@ class Range
 end
 
 module Kernel
+  # lang-fork: no StopIteration to end it; `break` does
   def loop
     while true
       yield
     end
-  rescue StopIteration
-    nil
   end
 end

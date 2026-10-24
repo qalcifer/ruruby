@@ -989,6 +989,9 @@ impl Codegen<'_> {
         safe: bool,
         dst: Reg,
     ) -> CResult<()> {
+        if recv.is_none() && name == "raise" {
+            return Err("`raise` was removed: return Err(...) for expected failures, panic(...) for bugs".into());
+        }
         // `require_relative path`: the calling file goes along as a hidden
         // second argument, so the native can resolve against it
         let with_file;

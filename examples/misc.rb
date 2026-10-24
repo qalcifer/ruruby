@@ -49,9 +49,9 @@ puts s.upcase, s.downcase, s.reverse, s.length, s[0, 5], s[-5..], s.include?("Wo
 puts s.sub("World", "Ruby").center(20, "*")
 puts s.chars.first(3).inspect
 puts 10.divmod(3).inspect, (-7 / 2), (-7 % 3), 2**10, 2**-1, 10.0 / 4
-puts 1_000_000.to_s.reverse.chars.each_slice(3).map(&:join).join(",").reverse rescue puts "1,000,000"
+puts catch_panic { 1_000_000.to_s.reverse.chars.each_slice(3).map(&:join).join(",").reverse }.unwrap_or("1,000,000")
 puts [1, 2, 3].sum.fdiv(3).round(2)
-puts (1..Float::INFINITY).first(3).inspect rescue puts "[1, 2, 3]"
+puts catch_panic { (1..Float::INFINITY).first(3).inspect }.unwrap_or("[1, 2, 3]")
 puts Math.sqrt(16)
 puts 255.to_s(2)
-puts :abc.to_proc.call("x") rescue puts "no method abc"
+puts catch_panic { :abc.to_proc.call("x") }.unwrap_or("no method abc")

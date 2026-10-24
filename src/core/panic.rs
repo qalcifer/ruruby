@@ -18,6 +18,11 @@ pub fn init(vm: &mut Vm) {
     let panic = vm.new_class("Panic", Some(exception), false);
     vm.set_const("Panic", Value::from(panic));
     let o = vm.c.object;
+    // Kernel#raise for code the compiler generates (an unmatched `case/in`)
+    let (raise, internal) = (vm.intern("raise"), vm.intern("__raise"));
+    if let Some((m, _)) = vm.find_method(&o, raise) {
+        vm.heap[o].methods.insert(internal, m);
+    }
     vm.def(&o, "panic", |vm, _, a, _| {
         let msg = match a.first() {
             None => "explicit panic".to_string(),

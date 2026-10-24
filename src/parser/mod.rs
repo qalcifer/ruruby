@@ -455,7 +455,7 @@ impl Parser {
             node = match kw {
                 Kw::If => Node::If(b(rhs), b(node), b(Node::Nil)),
                 Kw::Unless => Node::If(b(rhs), b(Node::Nil), b(node)),
-                Kw::Rescue => rescue_modifier(node, rhs),
+                Kw::Rescue => return Err(self.removed("rescue")),
                 _ => {
                     let do_while = matches!(node, Node::Begin { .. });
                     Node::While {
@@ -550,11 +550,9 @@ impl Parser {
         } else {
             Node::Array(items)
         };
-        let rhs = if self.eat_kw(Kw::Rescue) {
-            rescue_modifier(rhs, self.parse_expr()?)
-        } else {
-            rhs
-        };
+        if self.at(&Tok::Kw(Kw::Rescue)) {
+            return Err(self.removed("rescue"));
+        }
         Ok(Some(Node::MAsgn(lhs, b(rhs))))
     }
 
@@ -1816,7 +1814,7 @@ impl Parser {
             Kw::Break => Ok(Node::Break(self.jump_value()?)),
             Kw::Next => Ok(Node::Next(self.jump_value()?)),
             Kw::Redo => Ok(Node::Redo),
-            Kw::Retry => Ok(Node::Retry),
+            Kw::Retry => Err(self.removed("retry")),
             Kw::Yield => {
                 let args = self.parse_bare_args()?.map(|(a, _)| a).unwrap_or_default();
                 Ok(Node::Yield(args))
@@ -2141,11 +2139,10 @@ impl Parser {
             self.advance();
             self.skip_nl();
             let e = self.parse_expr()?;
-            if self.eat_kw(Kw::Rescue) {
-                rescue_modifier(e, self.parse_expr()?)
-            } else {
-                e
+            if self.at(&Tok::Kw(Kw::Rescue)) {
+                return Err(self.removed("rescue"));
             }
+            e
         } else {
             self.parse_body_rescue()?
         };
@@ -2222,65 +2219,29 @@ impl Parser {
         Ok(node)
     }
 
-    /// Body with optional `rescue`/`else`/`ensure` clauses, up to and including `end`.
+    /// lang-fork: exception handling is gone; say what replaces it.
+    fn removed(&self, what: &str) -> String {
+        let instead = if what == "ensure" {
+            "there are no exceptions to clean up after: put the cleanup after the code"
+        } else {
+            "return Err(...) for expected failures, panic(...) for bugs (catch_panic { } at boundaries)"
+        };
+        self.err(&format!("`{what}` was removed: {instead}"))
+    }
+
+    /// A body up to and including `end`. lang-fork: `rescue`/`else`/`ensure`
+    /// clauses are errors (the code after this point parsed them before).
     #[inline(never)]
     fn parse_body_rescue(&mut self) -> PResult<Node> {
         let body = self.parse_stmts()?;
-        let mut rescues = Vec::new();
-        while self.eat_kw(Kw::Rescue) {
-            let mut classes = Vec::new();
-            if !matches!(
-                self.peek(),
-                Tok::Newline | Tok::Semi | Tok::Arrow | Tok::Kw(Kw::Then)
-            ) {
-                loop {
-                    classes.push(if self.eat(&Tok::Star) {
-                        Node::Splat(b(self.parse_ternary()?))
-                    } else {
-                        self.parse_ternary()?
-                    });
-                    if !self.eat(&Tok::Comma) {
-                        break;
-                    }
-                    self.skip_nl();
-                }
-            }
-            let mut var = None;
-            if self.eat(&Tok::Arrow) {
-                let target = self.parse_primary_postfix_no_call_args()?;
-                if !is_assignable(&target) {
-                    return Err(self.err("can't assign exception to this"));
-                }
-                self.declare_lhs(&target);
-                var = Some(b(read_of(&target)));
-            }
-            self.eat_then();
-            rescues.push(Rescue {
-                classes,
-                var,
-                body: self.parse_stmts()?,
-            });
+        match self.peek() {
+            Tok::Kw(Kw::Rescue) => return Err(self.removed("rescue")),
+            Tok::Kw(Kw::Ensure) => return Err(self.removed("ensure")),
+            Tok::Kw(Kw::Else) => return Err(self.removed("begin/else")),
+            _ => {}
         }
-        let else_body = if self.eat_kw(Kw::Else) {
-            Some(b(self.parse_stmts()?))
-        } else {
-            None
-        };
-        let ensure = if self.eat_kw(Kw::Ensure) {
-            Some(b(self.parse_stmts()?))
-        } else {
-            None
-        };
         self.expect_kw(Kw::End)?;
-        if rescues.is_empty() && ensure.is_none() && else_body.is_none() {
-            return Ok(body);
-        }
-        Ok(Node::Begin {
-            body: b(body),
-            rescues,
-            else_body,
-            ensure,
-        })
+        Ok(body)
     }
 
     #[inline(never)]
@@ -2463,27 +2424,6 @@ fn op_method_name(t: &Tok) -> Option<&'static str> {
         Tok::Bang => "!",
         _ => return None,
     })
-}
-
-fn rescue_modifier(body: Node, fallback: Node) -> Node {
-    let wrap = |body: Node| Node::Begin {
-        body: b(body),
-        rescues: vec![Rescue {
-            classes: vec![],
-            var: None,
-            body: fallback,
-        }],
-        else_body: None,
-        ensure: None,
-    };
-    // `x = expr rescue v` means `x = (expr rescue v)`
-    match body {
-        Node::LAsgn(n, rhs) => Node::LAsgn(n, b(wrap(*rhs))),
-        Node::IAsgn(n, rhs) => Node::IAsgn(n, b(wrap(*rhs))),
-        Node::GAsgn(n, rhs) => Node::GAsgn(n, b(wrap(*rhs))),
-        Node::CVAsgn(n, rhs) => Node::CVAsgn(n, b(wrap(*rhs))),
-        other => wrap(other),
-    }
 }
 
 fn is_single_assign(n: &Node) -> bool {

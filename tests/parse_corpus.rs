@@ -57,6 +57,7 @@ fn compile_all() {
     ruby_files(&root, &mut files);
     files.sort();
     let mut problems = Vec::new();
+    let mut removed = 0;
     for f in &files {
         let rel = f.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
         let Ok(src) = std::fs::read_to_string(f) else {
@@ -64,12 +65,21 @@ fn compile_all() {
         };
         let result = Interpreter::new().compile_file(&src, &rel, 1);
         let known = KNOWN_FAILURES.iter().any(|(k, _)| *k == rel);
+        // lang-fork: Ruby code using exception handling is meant to fail
+        let result = match result {
+            Err(e) if e.to_string().contains("` was removed:") => {
+                removed += 1;
+                continue;
+            }
+            r => r,
+        };
         match (result, known) {
             (Err(e), false) => problems.push(format!("{rel}: {e}")),
             (Ok(_), true) => problems.push(format!("{rel}: compiles now, remove it from KNOWN_FAILURES")),
             _ => {}
         }
     }
+    eprintln!("{removed} files use removed exception syntax (lang-fork)");
     assert!(
         problems.is_empty(),
         "{} of {} files:\n{}",

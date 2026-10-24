@@ -4,6 +4,7 @@
 use ruruby::Interpreter;
 
 #[test]
+#[ignore = "lang-fork: mruby's harness (assert.rb) is built on rescue"]
 fn harness_classifies_results() {
     let mut interp = Interpreter::new();
     interp.capture_output();

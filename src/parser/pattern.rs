@@ -648,7 +648,9 @@ impl Item {
 fn no_match(tmp: &str) -> Node {
     ast::call(
         None,
-        "raise",
+        // lang-fork: `raise` is gone from the language; a value no pattern
+        // matches is a panic of this kind (src/core/panic.rs)
+        "__raise",
         vec![
             Node::Const("NoMatchingPatternError".into()),
             call(lvar(tmp), "inspect", vec![]),
