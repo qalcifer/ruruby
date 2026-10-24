@@ -329,3 +329,34 @@ fn loop_conditions() {
     "#);
     assert_eq!(out, "[1, 3, 4]\n5\n3.5\n7\n4\nnil\n5\n\"a\"\n");
 }
+
+/// `yield` to blocks taking exactly the arguments given starts their frame
+/// directly; auto-splat, defaults, lambdas, keywords, block parameters,
+/// break/next/return and upvars behave as through the general path.
+#[test]
+fn yield_paths() {
+    let out = run(r#"
+        def two; yield 1, 2; end
+        def one; yield [3, 4]; end
+        def none; yield; end
+        p two { |a, b| a + b }, one { |a, b| [a, b] }, one { |a| a }, none { |x = 5| x }
+        r = [1, 2, 3].each { |x| break x * 10 if x == 2 }
+        p r
+        def find; [1, 2, 3].each { |x| return x if x > 1 }; nil; end
+        p find
+        p [1, 2, 3].map { |x| next 0 if x == 2; x }
+        def lam; yield 7; end
+        p lam(&->(x) { x + 1 })
+        p (begin; lam(&->(x, y) { x }); rescue ArgumentError => e; e.class; end)
+        def kw; yield a: 1; end
+        p kw { |a:| a }, kw { |h| h }
+        def blk; yield 1; end
+        p blk { |x, &b| [x, b] }
+        def deep(n) = n == 0 ? yield : deep(n - 1) { yield }
+        p deep(50) { :bottom }
+        x = 10
+        [1].each { |v| x += v }
+        p x
+    "#);
+    assert_eq!(out.lines().collect::<Vec<_>>().join(" "), "3 [3, 4] [3, 4] 5 20 2 [1, 0, 3] 8 ArgumentError 1 {a: 1} [1, nil] :bottom 11");
+}

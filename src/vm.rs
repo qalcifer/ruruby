@@ -2339,13 +2339,7 @@ impl Vm {
                 self.set_reg(f, a, f.self_);
                 out_of_line!(self.send_op(f, a, mid, argc, has_block))
             }
-            Op::Yield(a, argc) => {
-                let Some(b) = f.block else {
-                    out_of_line!(Err(self.err(&self.c.local_jump_error, "no block given (yield)")))
-                };
-                let args = Args::Stack { at: f.base as usize + a as usize + 1, n: argc as usize };
-                out_of_line!(self.call_flow(f, a, 0, |vm| vm.start_proc(&b, args, None, ProcCall::default())))
-            }
+            Op::Yield(a, argc) => out_of_line!(self.yield_op(f, a, argc)),
             Op::AddI(a, i) | Op::SubI(a, i) => {
                 let add = matches!(op, Op::AddI(..));
                 if let Some(x) = self.reg(f, a).as_inline_int()
@@ -2455,6 +2449,48 @@ impl Vm {
             }
         }
         self.call_flow(f, a, tag, |vm| vm.start_invoke(m, owner, recv, mid, args, blk))
+    }
+
+    /// `yield` (R[a] = the frame's block called with R[a+1..]): a Ruby
+    /// block (not a lambda) that takes exactly the arguments given becomes
+    /// its frame right here; anything else goes through [`Vm::start_proc`].
+    #[inline(never)]
+    fn yield_op(&mut self, f: &Frame, a: Reg, argc: u32) -> Result<Flow, Unwind> {
+        let Some(b) = f.block else {
+            return Err(self.err(&self.c.local_jump_error, "no block given (yield)"));
+        };
+        let (at, n) = (f.base as usize + a as usize + 1, argc as usize);
+        if let V::Proc(p) = self.kind(b)
+            && let rp = &self.heap[p]
+            && let ProcBody::Ruby { irep, env } = &rp.body
+            && !rp.lambda
+            && irep.simple_args
+            && irep.spec.req == n
+            // a trailing keyword Hash may bind to keywords
+            && !(n > 0 && self.stack[at + n - 1].is_hash())
+        {
+            let (irep, env) = (irep.clone(), *env);
+            let (self_, target, method, outer_block, home) = (rp.self_, rp.target, rp.method, rp.block, rp.home);
+            let base = self.open_window(irep.frame_size, 1 + n);
+            self.stack[base] = self_;
+            for i in 0..n {
+                self.stack[base + 1 + i] = self.stack[at + i];
+            }
+            if irep.spec.block {
+                self.stack[base + 1 + n] = Value::NIL;
+            }
+            let mut callee = Frame::new(irep, base, self_, target);
+            callee.own_scope = false;
+            callee.upper = env;
+            callee.block = outer_block;
+            callee.method = method;
+            callee.home = home;
+            callee.proc_tag = p.id();
+            callee.ret = a;
+            return Ok(Flow::Call(callee));
+        }
+        let args = Args::Stack { at, n };
+        self.call_flow(f, a, 0, |vm| vm.start_proc(&b, args, None, ProcCall::default()))
     }
 
     /// `f`'s (target, default visibility) when the visibility isn't public.
@@ -2658,13 +2694,7 @@ impl Vm {
                 self.set_reg(f, a, f.self_);
                 return self.send_op(f, a, mid, argc, has_block);
             }
-            Op::Yield(a, argc) => {
-                let Some(b) = f.block else {
-                    return Err(self.err(&self.c.local_jump_error, "no block given (yield)"));
-                };
-                let args = Args::Stack { at: f.base as usize + a as usize + 1, n: argc as usize };
-                return self.call_flow(f, a, 0, |vm| vm.start_proc(&b, args, None, ProcCall::default()));
-            }
+            Op::Yield(a, argc) => return self.yield_op(f, a, argc),
             Op::SendV(a, mid, has_block) => {
                 let recv = self.reg(f, a);
                 let args = self.args_from_array(self.reg(f, a + 1));
