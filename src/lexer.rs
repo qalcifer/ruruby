@@ -12,6 +12,8 @@ use crate::parser::MAX_DEPTH;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kw {
     Def,
+    /// lang-fork: `fn name(args) { ... }`
+    Fn,
     End,
     If,
     Elsif,
@@ -51,6 +53,7 @@ pub enum Kw {
 
 const KEYWORDS: &[(&str, Kw)] = &[
     ("def", Kw::Def),
+    ("fn", Kw::Fn),
     ("end", Kw::End),
     ("if", Kw::If),
     ("elsif", Kw::Elsif),
@@ -332,7 +335,7 @@ impl Lexer {
     fn literal_allowed(&self, spc: bool) -> bool {
         if matches!(
             self.last_tok(),
-            Some(Tok::Kw(Kw::Def) | Tok::Dot | Tok::AndDot)
+            Some(Tok::Kw(Kw::Def | Kw::Fn) | Tok::Dot | Tok::AndDot)
         ) {
             return false; // `def /(x)`, `a./(b)`
         }
@@ -402,7 +405,7 @@ impl Lexer {
                 self.bump();
                 if matches!(
                     self.last_tok(),
-                    Some(Tok::Kw(Kw::Def) | Tok::Dot | Tok::AndDot)
+                    Some(Tok::Kw(Kw::Def | Kw::Fn) | Tok::Dot | Tok::AndDot)
                 ) {
                     Tok::Ident("`".into()) // `def `(cmd)`
                 } else {
@@ -624,7 +627,7 @@ impl Lexer {
             s.push(self.bump()); // `a!==b`
         }
         let after_dot = matches!(self.last_tok(), Some(Tok::Dot | Tok::AndDot));
-        let after_def = matches!(self.last_tok(), Some(Tok::Kw(Kw::Def)));
+        let after_def = matches!(self.last_tok(), Some(Tok::Kw(Kw::Def | Kw::Fn)));
         if self.peek() == ':'
             && self.peek_at(1) != ':'
             && self.last_tok() != Some(&Tok::Question)
@@ -1172,7 +1175,7 @@ impl Lexer {
     fn heredoc_start(&self, spc: bool) -> bool {
         if matches!(
             self.last_tok(),
-            Some(Tok::Kw(Kw::Class | Kw::Def) | Tok::Dot | Tok::AndDot)
+            Some(Tok::Kw(Kw::Class | Kw::Def | Kw::Fn) | Tok::Dot | Tok::AndDot)
         ) {
             return false; // `class << obj`
         }

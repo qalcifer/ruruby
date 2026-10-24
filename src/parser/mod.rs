@@ -1074,6 +1074,7 @@ impl Parser {
                     | Kw::SelfKw
                     | Kw::Not
                     | Kw::Def
+                    | Kw::Fn
                     | Kw::Super
                     | Kw::Yield
                     | Kw::Case
@@ -1818,7 +1819,8 @@ impl Parser {
             }
             Kw::For => self.parse_for(),
             Kw::Case => self.parse_case(),
-            Kw::Def => self.parse_def(),
+            Kw::Def => self.parse_def(false),
+            Kw::Fn => self.parse_def(true),
             Kw::Class => self.parse_class(false),
             Kw::Module => self.parse_class(true),
             Kw::Begin => self.parse_begin(),
@@ -2067,7 +2069,9 @@ impl Parser {
     }
 
     #[inline(never)]
-    fn parse_def(&mut self) -> PResult<Node> {
+    /// `def name(params) ... end`, or with `fn` (lang-fork) `fn name(params)
+    /// { ... }` / `fn name(params) = expr` (parameters only in parentheses).
+    fn parse_def(&mut self, fn_style: bool) -> PResult<Node> {
         // singleton target: `def self.x`, `def obj.x`, `def Const.x`, `def (expr).x`
         let mut recv = None;
         if matches!(self.peek2(), Tok::Dot) {
@@ -2138,15 +2142,21 @@ impl Parser {
             let p = self.parse_params(Some(Tok::RParen), false)?;
             self.expect(&Tok::RParen)?;
             p
-        } else if matches!(
-            self.peek(),
-            Tok::Ident(_) | Tok::Star | Tok::Pow | Tok::Amp | Tok::Label(_) | Tok::Dot3
-        ) {
+        } else if !fn_style
+            && matches!(
+                self.peek(),
+                Tok::Ident(_) | Tok::Star | Tok::Pow | Tok::Amp | Tok::Label(_) | Tok::Dot3
+            )
+        {
             self.parse_params(None, false)?
         } else {
             Params::default()
         };
-        let body = if self.at(&Tok::Assign) {
+        let body = if fn_style && self.at(&Tok::LBrace) {
+            self.parse_brace_body()?
+        } else if fn_style && !self.at(&Tok::Assign) {
+            return Err(self.err("fn: expected `(parameters)`, then `{ body }` or `= expression`"));
+        } else if self.at(&Tok::Assign) {
             // endless def: `def m(a) = expr`
             self.advance();
             self.skip_nl();
@@ -2229,6 +2239,15 @@ impl Parser {
             node = Node::Colon2(b(node), c);
         }
         Ok(node)
+    }
+
+    /// `{ statements }` (lang-fork bodies), the braces included.
+    fn parse_brace_body(&mut self) -> PResult<Node> {
+        self.expect(&Tok::LBrace)?;
+        let body = self.parse_stmts()?;
+        self.skip_nl();
+        self.expect(&Tok::RBrace)?;
+        Ok(body)
     }
 
     /// lang-fork: exception handling is gone; say what replaces it.
