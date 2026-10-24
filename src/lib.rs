@@ -21,6 +21,7 @@ pub mod codegen;
 pub mod core;
 pub mod gc;
 pub mod lexer;
+pub mod modules;
 pub mod opcode;
 pub mod parser;
 pub mod rhash;
@@ -82,7 +83,7 @@ impl Interpreter {
     /// Compiles source from `file` that starts at `line` (used by `__FILE__`/`__LINE__`).
     pub fn compile_file(&mut self, src: &str, file: &str, line: u32) -> Result<Rc<Irep>, Error> {
         let prog = parser::parse_file(src, file, line).map_err(Error::Syntax)?;
-        codegen::compile(&prog, &mut self.vm.syms).map_err(Error::Compile)
+        modules::compile_program(&mut self.vm, &prog).map_err(Error::Compile)
     }
 
     pub fn run(&mut self, irep: Rc<Irep>) -> Result<Value, Error> {

@@ -220,6 +220,10 @@ pub enum Op {
     Exec(Reg, u32),
     /// alias_method(target_class, new, old)
     Alias(Sym, Sym),
+    /// `use`: runs the used file once (in a namespace of its own) and copies
+    /// the imported constants into the current namespace; pool[i] is a
+    /// [`Literal::Use`].
+    Use(u32),
     /// global variable alias
     GAlias(Sym, Sym),
     Undef(Sym),
@@ -260,6 +264,16 @@ impl Op {
 pub enum Literal {
     Str(Rc<str>),
     Float(f64),
+    Use(Rc<UseDecl>),
+}
+
+/// What a `use` statement imports.
+#[derive(Debug)]
+pub struct UseDecl {
+    /// The file's path under the program root, without `.rb` (`models/user`).
+    pub path: String,
+    /// The constants it imports; `None`: all of them (`use util::*`).
+    pub items: Option<Vec<Sym>>,
 }
 
 /// An entry of the rescue/ensure table (mruby: `mrb_irep_catch_handler`).

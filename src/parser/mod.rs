@@ -40,6 +40,9 @@ pub struct Parser {
     pm_cache: Option<(String, String, String)>,
     /// Current nesting level, see [`MAX_DEPTH`].
     depth: usize,
+    /// Nesting of statement lists: `use` is only allowed at 1 (a file's own
+    /// statements).
+    stmts_level: usize,
 }
 
 /// Deepest nesting accepted, by the parser and by the lexer for `#{}`.
@@ -72,6 +75,7 @@ pub fn parse_file(src: &str, file: &str, line: u32) -> PResult<Program> {
         no_in: false,
         tmp: 0,
         depth: 0,
+        stmts_level: 0,
     };
     let body = p.parse_stmts()?;
     if !p.at(&Tok::Eof) {
@@ -395,6 +399,13 @@ impl Parser {
     }
 
     fn parse_stmts(&mut self) -> PResult<Node> {
+        self.stmts_level += 1;
+        let r = self.parse_stmts_inner();
+        self.stmts_level -= 1;
+        r
+    }
+
+    fn parse_stmts_inner(&mut self) -> PResult<Node> {
         let mut v = Vec::new();
         self.skip_terms();
         while !self.at_stmts_end() {
@@ -412,6 +423,9 @@ impl Parser {
     }
 
     fn parse_stmt(&mut self) -> PResult<Node> {
+        if matches!(self.peek(), Tok::Ident(w) if w == "use") && matches!(self.peek2(), Tok::Ident(_)) {
+            return self.parse_use();
+        }
         let mut node = match self.try_masgn()? {
             Some(n) => n,
             None => self.parse_expr()?,
@@ -452,6 +466,57 @@ impl Parser {
                     }
                 }
             };
+        }
+    }
+
+    /// `use path::to::file::Item`, `::{A, B}`, `::*`.
+    fn parse_use(&mut self) -> PResult<Node> {
+        if self.stmts_level != 1 {
+            return Err(self.err("use is only allowed among a file's top-level statements"));
+        }
+        let line = self.line();
+        self.advance();
+        let mut path = Vec::new();
+        loop {
+            let Tok::Ident(seg) = self.peek().clone() else {
+                return Err(self.err("use: expected a file name"));
+            };
+            self.advance();
+            path.push(seg);
+            if !self.eat(&Tok::Colon2) {
+                return Err(self.err("use: expected `::` and what to import (file::Name, file::{A, B} or file::*)"));
+            }
+            let items = match self.peek().clone() {
+                Tok::Ident(_) => continue,
+                Tok::Const(c) => {
+                    self.advance();
+                    Some(vec![c])
+                }
+                Tok::Star => {
+                    self.advance();
+                    None
+                }
+                Tok::LBrace => {
+                    self.advance();
+                    let mut items = Vec::new();
+                    loop {
+                        self.skip_nl();
+                        let Tok::Const(c) = self.peek().clone() else {
+                            return Err(self.err("use: expected a constant name in { }"));
+                        };
+                        self.advance();
+                        items.push(c);
+                        self.skip_nl();
+                        if !self.eat(&Tok::Comma) {
+                            break;
+                        }
+                    }
+                    self.expect(&Tok::RBrace)?;
+                    Some(items)
+                }
+                _ => return Err(self.err("use: expected a constant, { } or * after `::`")),
+            };
+            return Ok(Node::Use { path, items, line });
         }
     }
 

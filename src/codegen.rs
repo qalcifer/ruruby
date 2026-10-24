@@ -6,7 +6,7 @@
 //! and leaves `sp` where it found it. `dst` is always below `sp`.
 
 use crate::ast::*;
-use crate::opcode::{ArgSpec, CatchHandler, Cmp, DefinedKind, Irep, Literal, Op, Reg};
+use crate::opcode::{ArgSpec, CatchHandler, Cmp, DefinedKind, Irep, Literal, Op, Reg, UseDecl};
 use crate::symbol::{Sym, SymbolTable};
 use crate::value::Vis;
 use std::cell::RefCell;
@@ -727,6 +727,13 @@ impl Codegen<'_> {
                 self.emit(Op::Lambda(dst, idx as u32));
             }
             Node::Defined(e) => self.defined(e, dst)?,
+            Node::Use { path, items, .. } => {
+                let items = items.as_ref().map(|v| v.iter().map(|n| self.sym(n)).collect());
+                let decl = UseDecl { path: path.join("/"), items };
+                let i = self.pool(Literal::Use(Rc::new(decl)));
+                self.emit(Op::Use(i));
+                self.emit(Op::LoadNil(dst));
+            }
             Node::Alias(new, old) => {
                 let (n, o) = (self.sym(new), self.sym(old));
                 self.emit(Op::Alias(n, o));

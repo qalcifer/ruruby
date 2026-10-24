@@ -118,7 +118,7 @@ fn run_file(vm: &mut Vm, path: &Path) -> Result<(), Unwind> {
     let src = std::fs::read_to_string(path).map_err(|_| load_error(vm, &name))?;
     let prog = crate::parser::parse_file(&src, &name, 1)
         .map_err(|e| vm.err(&vm.c.syntax_error, format!("{name}: {e}")))?;
-    let irep = crate::codegen::compile(&prog, &mut vm.syms).map_err(|e| vm.err(&vm.c.syntax_error, format!("{name}: {e}")))?;
+    let irep = crate::modules::compile_program(vm, &prog).map_err(|e| vm.err(&vm.c.syntax_error, format!("{name}: {e}")))?;
     vm.run_main(irep).map_err(Unwind::Error)?;
     Ok(())
 }

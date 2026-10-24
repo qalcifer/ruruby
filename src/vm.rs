@@ -19,6 +19,7 @@ use crate::opcode::{ArgSpec, CallCache, DefinedKind, Irep, Literal, Op, Reg};
 use crate::symbol::{Sym, SymMap, SymbolTable};
 use crate::value::*;
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::cmp::Ordering;
 use std::rc::Rc;
@@ -245,6 +246,19 @@ pub struct Vm {
     live_homes: Vec<usize>,
     /// The built-ins [`Op::GetIdx`] and [`Op::Size`] stand for.
     basic: BasicOps,
+    /// Files compiled for `use`, by path under `module_root` (see crate::modules).
+    pub units: HashMap<String, Unit>,
+    /// The directory `use` paths start from.
+    pub module_root: Option<std::path::PathBuf>,
+}
+
+/// A file compiled for `use`.
+pub struct Unit {
+    pub irep: Rc<Irep>,
+    /// Constants it defines or imports at its top level.
+    pub exports: Vec<String>,
+    /// Its namespace, once it ran.
+    pub module: Option<ClassRef>,
 }
 
 /// The built-in methods [`Op::GetIdx`] and [`Op::Size`] answer in place
@@ -559,6 +573,8 @@ impl Vm {
             live_breaks: Vec::new(),
             live_homes: Vec::new(),
             basic: BasicOps::default(),
+            units: HashMap::new(),
+            module_root: None,
         };
         crate::core::init(&mut vm);
         crate::core::load_prelude(&mut vm);
@@ -2026,8 +2042,15 @@ impl Vm {
 
     /// Runs a top-level irep with `self = main`.
     pub fn run_main(&mut self, irep: Rc<Irep>) -> Result<Value, Value> {
+        let object = self.c.object;
+        self.run_top(irep, object)
+    }
+
+    /// Runs a file's top level with `self = main`, defining into `target`
+    /// (Object, or the namespace of a used file).
+    fn run_top(&mut self, irep: Rc<Irep>, target: ClassRef) -> Result<Value, Value> {
         let main = self.main_obj;
-        let mut f = self.body_frame(irep, main, self.c.object);
+        let mut f = self.body_frame(irep, main, target);
         f.home = self.new_id();
         f.is_home = true;
         // the script's own loop is a safe point for collection; loops nested
@@ -2173,6 +2196,12 @@ impl Vm {
         }
         for c in self.c.all() {
             m.class(c);
+        }
+        // the namespaces of used files (their classes are reachable only there)
+        for u in self.units.values() {
+            if let Some(c) = u.module {
+                m.class(c);
+            }
         }
         let marks = m.finish();
         self.heap.sweep(marks);
@@ -2592,6 +2621,7 @@ impl Vm {
                 let v = match &f.irep.pool[i as usize] {
                     Literal::Float(x) => Value::float(*x),
                     Literal::Str(s) => self.str(s.to_string()),
+                    Literal::Use(_) => unreachable!("LoadL of a use"),
                 };
                 self.set_reg(f, a, v);
             }
@@ -3017,16 +3047,19 @@ impl Vm {
                 self.set_reg(f, a, p);
             }
             Op::TDef(s, idx) => {
-                self.check_frozen(&Value::from(f.target))?;
+                // a used file's top-level methods are global, like the main script's
+                let target = if self.heap[f.target].file_module.get() { self.c.object } else { f.target };
+                self.check_frozen(&Value::from(target))?;
                 let irep = f.irep.reps[idx as usize].clone();
                 let scope_vis = self.frame_vis(f);
                 let vis = if self.always_private(s) { Vis::Private } else { scope_vis };
                 if scope_vis == Vis::ModuleFunction {
-                    let meta = self.singleton_class(&Value::from(f.target))?;
+                    let meta = self.singleton_class(&Value::from(target))?;
                     self.heap[meta].methods.insert(s, Method::Ruby(irep.clone()));
                 }
-                self.heap[f.target].methods.insert_vis(s, Method::Ruby(irep), vis);
+                self.heap[target].methods.insert_vis(s, Method::Ruby(irep), vis);
             }
+            Op::Use(i) => return self.use_op(f, i),
             Op::DefaultVis(vis) => match self.scope_env(f) {
                 Some(e) => {
                     self.shared_vis |= vis != Vis::Public;
@@ -3329,6 +3362,54 @@ impl Vm {
         self.basic.epoch.set(epoch);
         self.basic.intact.set(intact);
         intact
+    }
+
+    /// `use` (see crate::modules): runs the used file once, in a namespace
+    /// of its own, then copies the imported constants into `f.target`.
+    #[cold]
+    #[inline(never)]
+    fn use_op(&mut self, f: &Frame, i: u32) -> Result<Flow, Unwind> {
+        let Literal::Use(decl) = &f.irep.pool[i as usize] else {
+            unreachable!("Use without a UseDecl")
+        };
+        let decl = decl.clone();
+        let Some(unit) = self.units.get(&decl.path) else {
+            return Err(self.err(&self.c.load_error, format!("use {}: not compiled", decl.path.replace('/', "::"))));
+        };
+        let module = match unit.module {
+            Some(m) => m,
+            None => {
+                let irep = unit.irep.clone();
+                let m = self.new_class(&decl.path.replace('/', "::"), None, true);
+                self.heap[m].file_module.set(true);
+                // recorded before it runs: a file is only ever run once
+                self.units.get_mut(&decl.path).unwrap().module = Some(m);
+                self.run_top(irep, m).map_err(Unwind::Error)?;
+                m
+            }
+        };
+        let imports: Vec<(Sym, Value)> = match &decl.items {
+            Some(items) => {
+                let consts = self.heap[module].consts.borrow();
+                let mut v = Vec::new();
+                for s in items {
+                    match consts.get(s) {
+                        Some(x) => v.push((*s, *x)),
+                        None => {
+                            drop(consts);
+                            let (file, name) = (decl.path.clone(), self.sym_name(*s).to_string());
+                            return Err(self.name_err(format!("use: {file}.rb defines no {name}")));
+                        }
+                    }
+                }
+                v
+            }
+            None => self.heap[module].consts.borrow().iter().map(|(k, v)| (*k, *v)).collect(),
+        };
+        for (s, v) in imports {
+            self.heap[f.target].consts.borrow_mut().insert(s, v);
+        }
+        Ok(Flow::Next)
     }
 
     /// A built-in Array: not a subclass' instance, no singleton.

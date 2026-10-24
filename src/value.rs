@@ -179,6 +179,9 @@ pub struct RClass {
     pub outer: Cell<Option<ClassRef>>,
     /// `freeze`: no more methods, constants, class variables, ivars, modules.
     pub frozen: Cell<bool>,
+    /// The namespace of a file loaded with `use`: its top-level `def`s go to
+    /// Object.
+    pub file_module: Cell<bool>,
 }
 
 impl RClass {
@@ -199,6 +202,7 @@ impl RClass {
             attached: Default::default(),
             outer: Default::default(),
             frozen: Default::default(),
+            file_module: Default::default(),
         }
     }
 

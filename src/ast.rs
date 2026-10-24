@@ -108,6 +108,14 @@ pub enum Node {
     Lambda(Box<Block>),
     Defined(Box<Node>),
     Alias(String, String),
+    /// `use models::user::User`, `use shapes::{Circle, Square}`, `use util::*`
+    /// (items `None`): the file `models/user.rb` under the program's root
+    /// directory, and the constants it defines that this file imports.
+    Use {
+        path: Vec<String>,
+        items: Option<Vec<String>>,
+        line: u32,
+    },
     GAlias(String, String),
     Undef(Vec<String>),
     /// `__method__`
