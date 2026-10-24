@@ -469,12 +469,12 @@ fn yield_runs_the_block_directly() {
         def two = yield(1, 2)
         def splat(a) = yield(*a)
         def each_twice(a) = a.each { |x| yield x; yield x }
-        def none = yield
+        def no_block = yield
         def stop = [yield(1), :after]
         p one { |x| x + 1 }, two { |a, b| a + b }, splat([3, 4]) { |a, b| a * b }
         r = []
         each_twice([1, 2]) { |x| r << x }
-        p r, (begin; none; rescue LocalJumpError => e; e.message; end)
+        p r, (begin; no_block; rescue LocalJumpError => e; e.message; end)
         p stop { |x| break :broke }, stop { |x| next x * 10 }
         p one(&->(x) { x * 3 }), (begin; two(&->(x) { x }); rescue ArgumentError; :strict; end)
         p one(&:to_s), 3.times.to_a rescue p one(&:to_s)

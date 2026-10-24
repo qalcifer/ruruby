@@ -338,8 +338,8 @@ fn yield_paths() {
     let out = run(r#"
         def two; yield 1, 2; end
         def one; yield [3, 4]; end
-        def none; yield; end
-        p two { |a, b| a + b }, one { |a, b| [a, b] }, one { |a| a }, none { |x = 5| x }
+        def no_args; yield; end
+        p two { |a, b| a + b }, one { |a, b| [a, b] }, one { |a| a }, no_args { |x = 5| x }
         r = [1, 2, 3].each { |x| break x * 10 if x == 2 }
         p r
         def find; [1, 2, 3].each { |x| return x if x > 1 }; nil; end

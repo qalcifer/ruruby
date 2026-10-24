@@ -69,6 +69,8 @@ const KEYWORDS: &[(&str, Kw)] = &[
     ("module", Kw::Module),
     ("self", Kw::SelfKw),
     ("nil", Kw::Nil),
+    // lang-fork: the spelling of nil
+    ("none", Kw::Nil),
     ("true", Kw::True),
     ("false", Kw::False),
     ("and", Kw::And),

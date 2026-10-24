@@ -15,6 +15,8 @@ const KNOWN_FAILURES: &[(&str, &str)] = &[
     ("mrbgems/mruby-complex/test/complex.rb", "imaginary literal (step 7)"),
     ("mrbgems/mruby-numeric-ext/test/numeric.rb", "rational literal (step 7)"),
     ("mrbgems/mruby-rational/test/rational.rb", "rational literal (step 7)"),
+    // lang-fork: intended differences from Ruby
+    ("mrbgems/mruby-hash-ext/mrblib/hash.rb", "`none` is a keyword (a parameter named none)"),
 ];
 
 fn ruby_files(dir: &Path, out: &mut Vec<PathBuf>) {
