@@ -258,7 +258,15 @@ Each step can be checked against mruby's own tests.
    and no env for blocks that don't reach outer locals: fib(34) 1.32 → 1.06 s
    (CRuby 2.6: 0.71), a `while` loop 0.47 → 0.37 s (CRuby: 0.67), `times`
    0.15 → 0.12 s (CRuby: 0.11).
-   Next: fewer frame copies per call, no heap object per block literal.
+   A fourth round cut per-instruction and per-call overhead: the dispatch
+   loop keeps the pc in a register, the frame shrank from 200 to 144 bytes,
+   register windows open without growing the stack Vec, and `x[k]`,
+   `x[k] = v`, `x << y` and `size`/`length` became instructions that work
+   on built-in Arrays and Hashes in place while their methods aren't
+   redefined (mruby's OP_GETIDX/`idx_class`); loops test their condition at
+   the bottom. fib(34) 1.05 → 0.96 s, Array#each 0.10 → 0.088 s (CRuby:
+   0.073), tiny hash literals 0.52 → 0.41 s (CRuby: 0.40).
+   Next: fewer frame copies per call (cold frame fields out of the frame).
 7. **Numbers.** Bignum (`num-bigint`, matching `mruby-bigint`), Rational, Complex.
 8. **Enumerators.** `Enumerator`, external iteration (needs Fibers), `lazy`.
 9. **Standard gems** as Cargo features: `mruby-io`/`mruby-dir`, `mruby-time`,
