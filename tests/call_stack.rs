@@ -90,7 +90,7 @@ fn control_flow_across_frames() {
         r = each_twice([1, 2]) { |x| break x * 10 if x == 2; log << x }
         p r, log
         # return from a block inside a method called from a block
-        def find_first(list) = list.each { |x| return x if yield(x) } && nil
+        def find_first(list) = list.each { |x| return x if yield(x) } && none
         p find_first([1, 4, 9]) { |x| x > 3 }
         # exceptions unwind through in-loop frames to an outer rescue, then retry
         def boom(n) = n == 0 ? raise("deep") : boom(n - 1)
@@ -141,7 +141,7 @@ fn closures_outlive_their_frames() {
           proc { b = 10; proc { a + b } }
         end
         p nested.call.call
-        $saved = nil
+        $saved = none
         def leaves_by_raise
           x = 5
           $saved = -> { x * 2 }
@@ -197,7 +197,7 @@ fn method_caches_see_every_change() {
         out << call(B.new) << B.new.hello
         p out
         # the same site sees receivers of different classes
-        p [1, "s", :y, nil, 2.0].map { |x| x.to_s }
+        p [1, "s", :y, none, 2.0].map { |x| x.to_s }
     "#;
     assert_eq!(
         run(src),

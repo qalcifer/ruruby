@@ -58,7 +58,7 @@ fn get_idx_and_size() {
     .unwrap();
     assert_eq!(
         out.split('\n').collect::<Vec<_>>().join(" "),
-        r#"10 30 nil nil 20 [10, 20] 1 2 nil 7 "y" :found :sub :subsize :singleton :len 1 5 3 1 4 42 :redefined :resized 1 1 1 1 :hsize 5 :private_size :[] "#
+        r#"10 30 none none 20 [10, 20] 1 2 none 7 "y" :found :sub :subsize :singleton :len 1 5 3 1 4 42 :redefined :resized 1 1 1 1 :hsize 5 :private_size :[] "#
     );
 }
 
@@ -115,7 +115,7 @@ fn set_idx_and_shl() {
     assert_eq!(
         out.lines().collect::<Vec<_>>(),
         [
-            r#"[:x, 2, :z, nil, nil, 5]"#,
+            r#"[:x, 2, :z, none, none, 5]"#,
             r#"[1, 2]"#,
             r#"16"#,
             r#""st""#,

@@ -20,7 +20,7 @@ fn harness_classifies_results() {
           assert_match("ab*", "abcdef")
         end
         assert('fails') { assert_equal(3, 1 + 1) }
-        assert('crashes') { nil.nope }
+        assert('crashes') { none.nope }
         assert('skips') { skip "later" }
         assert('no assertions') { 1 }
         assert('nested') do

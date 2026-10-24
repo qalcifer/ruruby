@@ -159,7 +159,7 @@ fn natives_that_define_methods_follow_the_scope() {
     "##);
     assert_eq!(
         out,
-        ":private\n:private\nnil\nnil\n:private\n:private\n:m\nfalse\n:dm\n[nil, :dm]\n\
+        ":private\n:private\nnone\nnone\n:private\n:private\n:m\nfalse\n:dm\n[none, :dm]\n\
          :private\n:f\n:private\ntrue\n"
     );
 }

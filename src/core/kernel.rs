@@ -117,6 +117,8 @@ fn init_object(vm: &mut Vm) {
         Ok(Value::bool(vm.equal(s, &arg(a, 0))?))
     });
     vm.def(&o, "nil?", |_, _, _, _| Ok(Value::FALSE));
+    // lang-fork: `x.none?` (Enumerable#none? comes first for collections)
+    vm.def(&o, "none?", |_, _, _, _| Ok(Value::FALSE));
     vm.def(&o, "is_a?", is_a);
     vm.def(&o, "kind_of?", is_a);
     vm.def(&o, "instance_of?", |vm, s, a, _| match vm.kind(arg(a, 0)) {
@@ -570,11 +572,14 @@ fn init_misc(vm: &mut Vm) {
     });
 
     let n = vm.c.nil;
+    // lang-fork: the class is NoneClass; NilClass names it too (for now)
+    vm.set_const("NilClass", Value::from(n));
     vm.def(&n, "to_s", |vm, _, _, _| Ok(vm.str("")));
     vm.def(&n, "to_a", |vm, _, _, _| Ok(vm.array(vec![])));
     vm.def(&n, "to_i", |_, _, _, _| Ok(Value::small_int(0)));
-    vm.def(&n, "inspect", |vm, _, _, _| Ok(vm.str("nil")));
+    vm.def(&n, "inspect", |vm, _, _, _| Ok(vm.str("none")));
     vm.def(&n, "nil?", |_, _, _, _| Ok(Value::TRUE));
+    vm.def(&n, "none?", |_, _, _, _| Ok(Value::TRUE));
 
     for cls in [vm.c.true_, vm.c.false_] {
         let to_s: NativeFn = |vm, s, _, _| Ok(vm.str(if s.truthy() { "true" } else { "false" }));

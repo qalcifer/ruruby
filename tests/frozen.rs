@@ -23,7 +23,7 @@ const FZ: &str = r##"
 fn frozen_values() {
     let out = run(&(FZ.to_owned()
         + r##"
-        p 1.frozen?, :a.frozen?, nil.frozen?, 1.5.frozen?, (1..2).frozen?, "x".frozen?, proc {}.frozen?
+        p 1.frozen?, :a.frozen?, none.frozen?, 1.5.frozen?, (1..2).frozen?, "x".frozen?, proc {}.frozen?
         a = [1, 2].freeze
         p fz { a << 3 }, fz { a.pop }, fz { a[0] = 9 }, fz { a.map! { _1 } }, fz { a.sort! }, fz { a.clear }
         s = "s".freeze

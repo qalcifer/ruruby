@@ -21,7 +21,7 @@ fn run_err(src: &str) -> String {
 fn literals_and_inspect() {
     assert_eq!(
         run(r##"p 1, -2, 3.5, 1e20, nil, true, :sym, "s\n""##),
-        "1\n-2\n3.5\n1.0e+20\nnil\ntrue\n:sym\n\"s\\n\"\n"
+        "1\n-2\n3.5\n1.0e+20\nnone\ntrue\n:sym\n\"s\\n\"\n"
     );
     assert_eq!(
         run(r##"p [1, [2, 3]], {a: 1, "b" => 2}, 1..3, 1...3"##),
@@ -75,7 +75,7 @@ fn control_flow() {
           break i * 100 if i == 6
         end
         p i, r
-        p(if false then 1 elsif nil then 2 else 3 end)
+        p(if false then 1 elsif none then 2 else 3 end)
         p((1 unless true))
         x = 5
         y = case x
@@ -85,7 +85,7 @@ fn control_flow() {
             end
         p y
     ";
-    assert_eq!(run(src), "6\n600\n3\nnil\n:mid\n");
+    assert_eq!(run(src), "6\n600\n3\nnone\n:mid\n");
 }
 
 #[test]
@@ -122,7 +122,7 @@ fn blocks_closures_break_and_return() {
         p [1, 2, 3].map { |x| next 0 if x == 2; x }
         def find_first(a)
           a.each { |x| return x if x > 1 }
-          nil
+          none
         end
         p find_first([1, 5, 7])
         p({a: 1, b: 2}.map { |k, v| "#{k}=#{v}" })
@@ -244,7 +244,7 @@ fn exceptions() {
     assert_eq!(run_err("raise 'boom'"), "boom (RuntimeError)");
     assert_eq!(
         run_err("nil.foo"),
-        "undefined method 'foo' for nil (NoMethodError)"
+        "undefined method 'foo' for none (NoMethodError)"
     );
     assert_eq!(run_err("Nope"), "uninitialized constant Nope (NameError)");
 }
@@ -327,7 +327,7 @@ fn loop_conditions() {
         s = s[1..] while s.size > 1
         p s
     "#);
-    assert_eq!(out, "[1, 3, 4]\n5\n3.5\n7\n4\nnil\n5\n\"a\"\n");
+    assert_eq!(out, "[1, 3, 4]\n5\n3.5\n7\n4\nnone\n5\n\"a\"\n");
 }
 
 /// `yield` to blocks taking exactly the arguments given starts their frame
@@ -358,7 +358,7 @@ fn yield_paths() {
         [1].each { |v| x += v }
         p x
     "#);
-    assert_eq!(out.lines().collect::<Vec<_>>().join(" "), "3 [3, 4] [3, 4] 5 20 2 [1, 0, 3] 8 ArgumentError 1 {a: 1} [1, nil] :bottom 11");
+    assert_eq!(out.lines().collect::<Vec<_>>().join(" "), "3 [3, 4] [3, 4] 5 20 2 [1, 0, 3] 8 ArgumentError 1 {a: 1} [1, none] :bottom 11");
 }
 
 /// Calls of Ruby methods that take just the arguments given start their

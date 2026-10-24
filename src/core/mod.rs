@@ -131,7 +131,7 @@ pub fn sym_of(vm: &mut Vm, v: &Value) -> Result<Sym, Unwind> {
 
 fn describe(vm: &Vm, v: &Value) -> String {
     if v.is_nil() {
-        "nil".into()
+        "none".into()
     } else {
         vm.class_name(v)
     }

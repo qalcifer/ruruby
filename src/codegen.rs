@@ -1735,7 +1735,7 @@ impl Codegen<'_> {
                 self.emit(Op::Defined(dst, DefinedKind::Super, s));
             }
             Node::SelfRef => self.defined_str(dst, "self"),
-            Node::Nil => self.defined_str(dst, "nil"),
+            Node::Nil => self.defined_str(dst, "expression"),
             Node::True => self.defined_str(dst, "true"),
             Node::False => self.defined_str(dst, "false"),
             Node::LAsgn(..)

@@ -27,8 +27,8 @@ fn hash_methods() {
     "##);
     assert_eq!(
         out,
-        "[:a, 1]\n2\nnil\n[:b, nil]\n[:c, 3]\ntrue\n{c: 3}\n{b: nil}\n2\nnil\n[:c]\n{}\n\
-         \"no zz\"\nnil\n{y: 2}\nProc\nnil\n{a: 1}\n{}\n\
+        "[:a, 1]\n2\nnone\n[:b, none]\n[:c, 3]\ntrue\n{c: 3}\n{b: none}\n2\nnone\n[:c]\n{}\n\
+         \"no zz\"\nnone\n{y: 2}\nProc\nnone\n{a: 1}\n{}\n\
          [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]\ntrue\n:frozen\n"
     );
 }
@@ -53,7 +53,7 @@ fn string_bang_methods_and_assignment() {
     "##);
     assert_eq!(
         out,
-        "\"HELLO\"\n\"HELLO\"\nnil\n\"cba\"\n\"Ab\"\n\"x\"\nnil\n\"aBc\"\nnil\n:frozen\n\
+        "\"HELLO\"\n\"HELLO\"\nnone\n\"cba\"\n\"Ab\"\n\"x\"\nnone\n\"aBc\"\nnone\n:frozen\n\
          \"Xbc\"\n\"abZ\"\n\"aQ\"\n\"_abc\"\n\"heLLo\"\n\"a!\"\n\"index 10 out of string\"\n\
          \"no implicit conversion of Integer into String\"\n\"el\"\n\"hlo\"\n\"a_bc\"\n\"abc_\"\n\"ab\"\n\"\"\n"
     );
@@ -78,7 +78,7 @@ fn string_search_bytes_and_substitution() {
     "##);
     assert_eq!(
         out,
-        "3\n0\n6\nnil\n3\n3\nnil\n3\n195\n\"bc\"\n\"bc\"\n3\n3\n\"aZZc\"\n\
+        "3\n0\n6\nnone\n3\n3\nnone\n3\n195\n\"bc\"\n\"bc\"\n3\n3\n\"aZZc\"\n\
          \"offset doesn't land on character boundary\"\n\"Abc\"\n[97, 98]\n10\n4\n12\n0\n6\n-42\n\
          \"ab<\\\\>cdXef\"\n\"ab<X>cdXef\"\n\"ab[ab]cdXef\"\n\"abxcdxef\"\n\"ab!cd!ef\"\n\".a.b.c.\"\n\
          \".abc\"\n\"b\"\n\"aa\"\n:range\n"
@@ -103,7 +103,7 @@ fn array_methods() {
     "##);
     assert_eq!(
         out,
-        "[nil, nil]\n[1, 2]\n[2, 3]\n[]\n\"x!\"\n\"a\"\n[\"b\"]\ntrue\nfalse\ntrue\nnil\n\
+        "[none, none]\n[1, 2]\n[2, 3]\n[]\n\"x!\"\n\"a\"\n[\"b\"]\ntrue\nfalse\ntrue\nnone\n\
          \"negative array size\"\n:argc\n:argc\n[1, 2, 3]\n\"comparison of Integer with Integer failed\"\n\
          2\n1\n[1, 2]\n[:a]\n[2, 4, 6]\n[10, 20]\n[7, 8]\n:range\n"
     );

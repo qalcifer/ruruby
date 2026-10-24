@@ -13,7 +13,7 @@ fn run(src: &str) -> String {
 fn parameters() {
     let src = r##"
         def m(a, b = 2, *rest, c, k:, opt: 5, **kw, &blk)
-          [a, b, rest, c, k, opt, kw, blk ? blk.call : nil]
+          [a, b, rest, c, k, opt, kw, blk ? blk.call : none]
         end
         p m(1, 9, k: 3)
         p m(1, 2, 3, 4, 5, k: 0, z: 1) { :b }
@@ -30,8 +30,8 @@ fn parameters() {
         run(src),
         // `c` (required, after the rest) is filled before the optional `b`;
         // defaults run before destructuring, so `d = a` sees nil
-        "[1, 2, [], 9, 3, 5, {}, nil]\n[1, 2, [3, 4], 5, 0, 5, {z: 1}, :b]\n[1, 2, 3, nil]\n\
-         [1, 2, [], 2, 7, 5, {}, nil]\n[4, 8]\n\"missing keyword: :a\"\n\"unknown keyword: :x\"\n"
+        "[1, 2, [], 9, 3, 5, {}, none]\n[1, 2, [3, 4], 5, 0, 5, {z: 1}, :b]\n[1, 2, 3, none]\n\
+         [1, 2, [], 2, 7, 5, {}, none]\n[4, 8]\n\"missing keyword: :a\"\n\"unknown keyword: :x\"\n"
     );
 }
 
@@ -68,7 +68,7 @@ fn multiple_assignment_and_splats() {
         def args(*a, **k) = [a, k]
         list = [1, 2]
         opts = {z: 1}
-        p args(*list, 3, **opts), [*list, *nil, 0], {**opts, y: 2}
+        p args(*list, 3, **opts), [*list, *none, 0], {**opts, y: 2}
         x = 1, 2
         p x
         p args(0, * %w[a b], ** opts)
@@ -172,8 +172,8 @@ fn control_flow() {
         end
         p f
         p(begin; Proc.new { break }.call; rescue LocalJumpError => e; e.class; end)
-        p defined?(foo), defined?(p), defined?(String), defined?(@x), defined?(r), defined?(nil)
-        p nil&.length, "ab"&.length
+        p defined?(foo), defined?(p), defined?(String), defined?(@x), defined?(r), defined?(none)
+        p none&.length, "ab"&.length
         n = 2
         out = []
         [:a, :b, :c].each { |v| n == 0 ? out << v : n -= 1 }
@@ -181,8 +181,8 @@ fn control_flow() {
     "##;
     assert_eq!(
         run(src),
-        "[3, 7]\n3\n3\n[:ok, 3]\n:ensure\n:cleanup\n10\nLocalJumpError\nnil\n\"method\"\n\"constant\"\nnil\n\
-         \"local-variable\"\n\"nil\"\nnil\n2\n[:c]\n0\n1\n1\n"
+        "[3, 7]\n3\n3\n[:ok, 3]\n:ensure\n:cleanup\n10\nLocalJumpError\nnone\n\"method\"\n\"constant\"\nnone\n\
+         \"local-variable\"\n\"expression\"\nnone\n2\n[:c]\n0\n1\n1\n"
     );
 }
 
@@ -249,7 +249,7 @@ fn interpolation_is_lexed_as_code() {
         $10 = :ten
         p $10, $1
     "##;
-    assert_eq!(run(src), "\"a}b\"\n\"}\"\n\"3\"\n\"oi3io\"\n\"4\"\n:ten\nnil\n");
+    assert_eq!(run(src), "\"a}b\"\n\"}\"\n\"3\"\n\"oi3io\"\n\"4\"\n:ten\nnone\n");
     let err = run_capture("p \"#{<<A}\"\nx\nA\n").unwrap_err().to_string();
     assert!(err.contains("heredoc can't start inside string interpolation"), "{err}");
 }
@@ -259,7 +259,7 @@ fn operator_precedence() {
     let src = r##"
         p 1 + 2 * 3 - 4 / 2, 5 - 2 - 1, 2 * 3 % 4, 1 << 2 + 1
         p 1 < 2 == true, 1 | 2 & 3, 6 ^ 3 | 8, 2 ** 3 ** 2, -2 ** 2
-        p !true && false, 1 == 1 && 2 != 3 || nil, nil || false && 1
+        p !true && false, 1 == 1 && 2 != 3 || none, none || false && 1
         p "ab" != "x" ? 1 : 2, (a = 1 || 2), a
     "##;
     assert_eq!(
@@ -372,7 +372,7 @@ fn local_increments_and_discarded_values() {
         def m(x) = (x += 1; x * 2)
         p f, s, k, i, n, r, m(4)
     "##;
-    assert_eq!(run(src), "1\n3\n3\n3\n2.5\n\"ab\"\n7\n23\n3\nnil\n10\n");
+    assert_eq!(run(src), "1\n3\n3\n3\n2.5\n\"ab\"\n7\n23\n3\nnone\n10\n");
 }
 
 #[test]
@@ -393,7 +393,7 @@ fn jumps_to_returns_keep_their_results() {
         p a(5), a(1), a(nil), b(3), b(false), b(nil), c(5), c(1)
         p [1, 2, 3].map { |v| v.odd? ? v : -v }
     "#);
-    assert_eq!(out, ":big\n:one\n:none\n6\n:false\n:nil\n:broke\nnil\n[1, -2, 3]\n");
+    assert_eq!(out, ":big\n:one\n:none\n6\n:false\n:nil\n:broke\nnone\n[1, -2, 3]\n");
 }
 
 #[test]

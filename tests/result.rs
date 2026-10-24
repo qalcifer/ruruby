@@ -45,7 +45,7 @@ fn ok_and_err_values() {
         r#":a"#,
         r#"2"#,
         r#""3 is odd""#,
-        r#"nil"#,
+        r#"none"#,
         r#"ok 2"#,
         r#"err 5 is odd"#,
         r#""called unwrap on Err(\"3 is odd\")""#,
@@ -96,7 +96,7 @@ fn try_operator() {
         r#"Err("3 is odd")"#,
         r#"Err("5 is odd")"#,
         r#""HI""#,
-        r#"nil"#,
+        r#"none"#,
         r#":all_even"#,
         r#"Err("3 is odd")"#,
         r#"105"#,
@@ -107,6 +107,6 @@ fn try_operator() {
         r#"false"#,
         r#"2"#,
         r#"Ok(7)"#,
-        r#"nil"#,
+        r#"none"#,
     ]);
 }

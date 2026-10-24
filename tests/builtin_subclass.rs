@@ -71,7 +71,7 @@ fn new_and_brackets_on_the_builtin_classes() {
     "##);
     assert_eq!(
         out,
-        "[0, 0, 0]\n[1, 2]\n[1, 2]\n[1, :b]\n5\n{1 => 2, 3 => 4}\n{1 => 2, 3 => nil}\n\
+        "[0, 0, 0]\n[1, 2]\n[1, 2]\n[1, :b]\n5\n{1 => 2, 3 => 4}\n{1 => 2, 3 => none}\n\
          {a: 1}\n\"q\"\n\"odd number of arguments for Hash\"\n\"negative array size\"\n"
     );
 }

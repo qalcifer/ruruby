@@ -35,7 +35,7 @@ fn index_finds_what_a_scan_finds() {
         out,
         "[]\n[6, 6, 6]\n118\n\
          [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, \
-         nil, 6, nil, 11, 13, 15, nil, nil, 17, nil, nil, nil, nil]\n"
+         none, 6, none, 11, 13, 15, none, none, 17, none, none, none, none]\n"
     );
 }
 
@@ -58,7 +58,7 @@ fn big_hash_keeps_order_through_updates_and_deletes() {
     "#);
     assert_eq!(
         out,
-        "500\n0\n-6\n16\nnil\n[0, 2, 4, 6]\n998\nnil\ntrue\nfalse\n0\nnil\n7\n20\n{a: 1}\n"
+        "500\n0\n-6\n16\nnone\n[0, 2, 4, 6]\n998\nnone\ntrue\nfalse\n0\nnone\n7\n20\n{a: 1}\n"
     );
 }
 
@@ -78,7 +78,7 @@ fn mutated_keys_and_rehash() {
         20.times { |i| s[i] = i }
         p s[s], s.size
     "#);
-    assert_eq!(out, "nil\nnil\n5\n20\n[5, :x]\n1\n21\n");
+    assert_eq!(out, "none\nnone\n5\n20\n[5, :x]\n1\n21\n");
 }
 
 #[test]
@@ -114,7 +114,7 @@ fn deletes_leave_no_trace() {
     "#);
     assert_eq!(
         out,
-        "20\n10000\n10019\n10019\nnil\ntrue\n3\n[10017, 10018, 10019]\n33\n29\n10019\n\
+        "20\n10000\n10019\n10019\nnone\ntrue\n3\n[10017, 10018, 10019]\n33\n29\n10019\n\
          [10017, 10018, 10019, 0]\n[10017, 10019, 0]\n29\n"
     );
 }
@@ -149,7 +149,7 @@ fn keys_with_their_own_hash_and_eql() {
     "#));
     assert_eq!(
         out,
-        ":b\nfalse\n2\n1\n42\n3\nnil\n7\nfalse\n99\n99\n:x\n[0, 9]\n[2, 1]\nnil\n1\n"
+        ":b\nfalse\n2\n1\n42\n3\nnone\n7\nfalse\n99\n99\n:x\n[0, 9]\n[2, 1]\nnone\n1\n"
     );
 }
 

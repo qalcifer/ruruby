@@ -475,7 +475,7 @@ impl Vm {
             proc_: sub("Proc", object),
             method_: sub("Method", object),
             unbound_method: sub("UnboundMethod", object),
-            nil: sub("NilClass", object),
+            nil: sub("NoneClass", object),
             true_: sub("TrueClass", object),
             false_: sub("FalseClass", object),
             syntax_error: sub("SyntaxError", script_error),
@@ -1419,10 +1419,10 @@ impl Vm {
         self.err(&self.c.no_method_error, msg)
     }
 
-    /// How error messages name a receiver: "nil", "class Foo", "an instance of Foo".
+    /// How error messages name a receiver: "none", "class Foo", "an instance of Foo".
     pub fn recv_desc(&self, recv: &Value) -> String {
         match self.kind(*recv) {
-            V::Nil => "nil".to_string(),
+            V::Nil => "none".to_string(),
             V::Bool(b) => b.to_string(),
             V::Class(c) => format!(
                 "{} {}",
@@ -3300,7 +3300,7 @@ impl Vm {
             (Float(a), Float(b)) => Value::float(float_arith(op, a, b)),
             _ => {
                 let what = match self.kind(*y) {
-                    V::Nil => "nil".to_string(),
+                    V::Nil => "none".to_string(),
                     _ => self.class_name(y),
                 };
                 return Err(self.type_err(format!(
@@ -3571,7 +3571,7 @@ impl Vm {
 
     pub fn inspect(&mut self, v: &Value) -> Result<String, Unwind> {
         Ok(match self.kind(*v) {
-            V::Nil => "nil".into(),
+            V::Nil => "none".into(),
             V::Bool(b) => b.to_string(),
             V::Int(i) => i.to_string(),
             V::Float(x) => fmt_float(x),
