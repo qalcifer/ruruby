@@ -11,17 +11,8 @@
 #   in Err(e)   then puts e
 #   end
 #
-# Absence is `none` (no Some wrapper); a bug is a `panic`, which ends the
-# program.
-
-# A failure that isn't an expected outcome. (Becomes uncatchable once
-# rescue goes away.)
-class Panic < Exception
-end
-
-def panic(message = "explicit panic")
-  raise Panic, message
-end
+# Absence is `none` (no Some wrapper); a bug is a `panic` (src/core/panic.rs),
+# which ends the program.
 
 class Result
   def ok? = false

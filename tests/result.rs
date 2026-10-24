@@ -23,9 +23,9 @@ fn ok_and_err_values() {
           in Err(e) then puts "err #{e}"
           end
         end
-        p (begin; half(3).unwrap; rescue Panic => e; e.message; end)
-        p (begin; half(3).expect("need even"); rescue Panic => e; e.message; end)
-        p (begin; begin; panic("boom"); rescue => e; :caught; end; rescue Panic => e; [:not_standard, e.message]; end)
+        p catch_panic { half(3).unwrap }.err.message
+        p catch_panic { half(3).expect("need even") }.err.message
+        p catch_panic { panic("boom") }.map_err { |e| [e.class, e.message] }
         p half(4).frozen?, Ok(1).is_a?(Result)
     "##);
     assert_eq!(out.lines().collect::<Vec<_>>(), [
@@ -50,7 +50,7 @@ fn ok_and_err_values() {
         r#"err 5 is odd"#,
         r#""called unwrap on Err(\"3 is odd\")""#,
         r#""need even: \"3 is odd\"""#,
-        r#"[:not_standard, "boom"]"#,
+        r#"Err([Panic, "boom"])"#,
         r#"true"#,
         r#"true"#,
     ]);
@@ -109,4 +109,17 @@ fn try_operator() {
         r#"Ok(7)"#,
         r#"none"#,
     ]);
+}
+
+/// `catch_panic` (Rust's catch_unwind): Ok(value), or Err(panic) for a
+/// panic of any kind; break/next/return pass through it.
+#[test]
+fn catch_panic_boundary() {
+    let out = run(r#"
+        p catch_panic { 1 + 1 }, catch_panic { none.foo }.err.class, catch_panic { 1 / 0 }.err.message
+        p [1, 2].map { |x| catch_panic { next x * 10 } }
+        def f = catch_panic { return :returned }
+        p f, catch_panic { [1].each { break :b } }
+    "#);
+    assert_eq!(out, "Ok(2)\nNoMethodError\n\"divided by 0\"\n[Ok(10), Ok(20)]\n:returned\nOk(:b)\n");
 }
