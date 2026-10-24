@@ -13,7 +13,7 @@ fn run(src: &str) -> String {
 const FZ: &str = r##"
     fn fz() {
       r = catch_panic { yield; :changed }
-      r.ok? ? r.ok : r.err.message
+      if r.ok? { r.ok } else { r.err.message }
     }
 "##;
 

@@ -28,7 +28,7 @@ p true && false, true || false, !true
 nothing = none
 p nothing, nothing.none?, 5.none?
 # only `false` and `none` are falsy: 0 and "" are true
-p (0 ? :truthy : :falsy), ("" ? :truthy : :falsy), (none ? :truthy : :falsy)
+p(if 0 { :truthy } else { :falsy }, if "" { :truthy } else { :falsy }, if none { :truthy } else { :falsy })
 
 # arrays, hashes and ranges
 list = [1, 2, 3]

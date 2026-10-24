@@ -6,7 +6,7 @@ add = |a, b| a + b
 greet = || "hello"
 clamp = |x| {
   return 0 if x < 0       # return leaves the closure
-  x > 10 ? 10 : x
+  if x > 10 { 10 } else { x }
 }
 p double.(4), add.call(2, 3), greet.(), clamp.(-5), clamp.(50), clamp.(7)
 
@@ -43,7 +43,7 @@ twice { |x| puts "got #{x}" }
 fn apply(x, &f) = f.(x)
 p apply(5, |x| x * x)
 
-fn maybe() = block_given? ? yield : "no block"
+fn maybe() = if block_given? { yield } else { "no block" }
 p maybe, maybe { "with a block" }
 
 # break ends the call that took the block, next ends one run of it

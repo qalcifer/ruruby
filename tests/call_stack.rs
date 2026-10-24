@@ -25,16 +25,16 @@ fn small_stack<T: Send + 'static>(kib: usize, f: impl FnOnce() -> T + Send + 'st
 fn deep_ruby_recursion_needs_no_native_stack() {
     let out = small_stack(512, || {
         run(r#"
-            fn down(n) = n == 0 ? 0 : 1 + down(n - 1)
-            fn via_yield(n) = n == 0 ? 0 : twice { 1 + via_yield(n - 1) }
+            fn down(n) = if n == 0 { 0 } else { 1 + down(n - 1) }
+            fn via_yield(n) = if n == 0 { 0 } else { twice { 1 + via_yield(n - 1) } }
             fn twice = yield
             class Num {
               fn initialize(n) = @n = n
-              fn +(o) = @n == 0 ? o : Num.new(@n - 1) + (o + 1)
+              fn +(o) = if @n == 0 { o } else { Num.new(@n - 1) + (o + 1) }
             }
             # each/map/times are written in Ruby (prelude.rb), so recursing
             # through them needs no native stack either
-            fn via_each(n) = n == 0 ? 0 : [n].map { |k| 1 + via_each(k - 1) }.first
+            fn via_each(n) = if n == 0 { 0 } else { [n].map { |k| 1 + via_each(k - 1) }.first }
             p down(9_000), via_yield(3_000), Num.new(4_000) + 0, via_each(2_000)
         "#)
     });
@@ -63,7 +63,7 @@ fn natives_calling_back_into_ruby_stay_within_the_stack_budget() {
         interp.vm.stack_budget = 256 << 10;
         interp.capture_output();
         let src = r#"
-            fn deep(n) = n == 0 ? 0 : [n].inject(0) { |_, k| 1 + deep(k - 1) }
+            fn deep(n) = if n == 0 { 0 } else { [n].inject(0) { |_, k| 1 + deep(k - 1) } }
             p deep(5)
             p(catch_panic { deep(100_000) }.err && :caught)
             p deep(5)
@@ -88,7 +88,7 @@ fn control_flow_across_frames() {
         fn find_first(list) = list.each { |x| return x if yield(x) } && none
         p find_first([1, 4, 9]) { |x| x > 3 }
         # panics unwind through in-loop frames to catch_panic, again and again
-        fn boom(n) = n == 0 ? panic("deep") : boom(n - 1)
+        fn boom(n) = if n == 0 { panic("deep") } else { boom(n - 1) }
         tries = 0
         r = none
         while tries < 3 {

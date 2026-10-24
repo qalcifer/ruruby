@@ -29,7 +29,7 @@ stock[:kiwis] = 2
 p stock.keys, stock.values, stock.size, stock.key?(:pears), stock[:figs]
 p stock.select(|_, n| n > 0), stock.map(|name, n| "#{name}=#{n}"), stock.sum(|_, n| n)
 p stock.sort_by(|_, n| -n).first, stock.min_by(|_, n| n), stock.to_a.first
-p stock.transform_values(|n| n * 10), stock.filter_map(|name, n| n.zero? ? name : none)
+p stock.transform_values(|n| n * 10), stock.filter_map(|name, n| if n.zero? { name })
 stock.delete(:pears)
 p stock, stock.invert, stock.any?(|_, n| n > 5)
 

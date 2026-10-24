@@ -13,7 +13,7 @@ fn run(src: &str) -> String {
 fn parameters() {
     let src = r##"
         fn m(a, b = 2, *rest, c, k:, opt: 5, **kw, &blk) {
-          [a, b, rest, c, k, opt, kw, blk ? blk.call : none]
+          [a, b, rest, c, k, opt, kw, if blk { blk.call }]
         }
         p m(1, 9, k: 3)
         p m(1, 2, 3, 4, 5, k: 0, z: 1) { :b }
@@ -163,8 +163,8 @@ fn control_flow() {
         p none&.length, "ab"&.length
         n = 2
         out = []
-        [:a, :b, :c].each { |v| n == 0 ? out << v : n -= 1 }
-        p out, n, (true ? m = 1 : 2), m
+        [:a, :b, :c].each { |v| if n == 0 { out << v } else { n -= 1 } }
+        p out, n, (if true { m = 1 } else { 2 }), m
     "##;
     assert_eq!(
         run(src),
@@ -247,7 +247,7 @@ fn operator_precedence() {
         p 1 + 2 * 3 - 4 / 2, 5 - 2 - 1, 2 * 3 % 4, 1 << 2 + 1
         p 1 < 2 == true, 1 | 2 & 3, 6 ^ 3 | 8, 2 ** 3 ** 2, -2 ** 2
         p !true && false, 1 == 1 && 2 != 3 || none, none || false && 1
-        p "ab" != "x" ? 1 : 2, (a = 1 || 2), a
+        p(if "ab" != "x" { 1 } else { 2 }, (a = 1 || 2), a)
     "##;
     assert_eq!(
         run(src),
@@ -304,7 +304,7 @@ fn operations_never_clobber_locals() {
         p x, y, f(3), s, z
         # right-hand sides that write their destination early (a condition,
         # a first statement) must not be computed in the local itself
-        a = 5; a = (a > 0 ? a * 2 : a)
+        a = 5; a = (if a > 0 { a * 2 } else { a })
         b = 3; b = (b if b > 1)
         c = 2; c = (c == 2 && c + 1)
         d = 1; d = (d.none? || d + 1)
@@ -367,7 +367,7 @@ fn jumps_to_returns_keep_their_results() {
     // the peephole pass turns jumps to a Return into the Return, and
     // `Move(a, b); Return(a)` into `Return(b)`
     let out = run(r#"
-        fn a(x) = x ? (x > 1 ? :big : :one) : :none
+        fn a(x) = if x { if x > 1 { :big } else { :one } } else { :none }
         fn b(x) {
           if x {
             y = x * 2
@@ -378,7 +378,7 @@ fn jumps_to_returns_keep_their_results() {
         }
         fn c(x) = while x > 0 { x -= 1; break :broke if x == 2 }
         p a(5), a(1), a(none), b(3), b(false), b(none), c(5), c(1)
-        p [1, 2, 3].map { |v| v.odd? ? v : -v }
+        p [1, 2, 3].map { |v| if v.odd? { v } else { -v } }
     "#);
     assert_eq!(out, ":big\n:one\n:none\n6\n:false\n:nil\n:broke\nnone\n[1, -2, 3]\n");
 }
@@ -408,12 +408,12 @@ fn fused_comparisons_keep_their_meaning() {
     // `if a < b` / `while i < n` with locals or Integer literals try a fused
     // compare-and-branch; other operands take the generic path after it
     let out = run(r#"
-        fn cmp(a, b) = [a < b ? 1 : 0, a <= b ? 1 : 0, a > b ? 1 : 0, a >= b ? 1 : 0, a == b ? 1 : 0]
-        fn lit(a) = [a < 2 ? :lt : :ge, (a == 2 ? :eq : :ne), (a >= 2 ? :ge : :lt)]
+        fn cmp(a, b) = [if a < b { 1 } else { 0 }, if a <= b { 1 } else { 0 }, if a > b { 1 } else { 0 }, if a >= b { 1 } else { 0 }, if a == b { 1 } else { 0 }]
+        fn lit(a) = [if a < 2 { :lt } else { :ge }, (if a == 2 { :eq } else { :ne }), (if a >= 2 { :ge } else { :lt })]
         p cmp(1, 2), cmp(2, 2), cmp(1.5, 2), cmp(2**60, 2**61), cmp("a", "b")
         p lit(1), lit(2), lit(2.0), lit(2**62)
         nan = 0.0 / 0.0
-        p cmp(nan, 1.0), (nan < 2 ? :t : :f)
+        p cmp(nan, 1.0), (if nan < 2 { :t } else { :f })
         class V { include Comparable; attr_reader :v; fn initialize(v) = @v = v; fn <=>(o) = v <=> o.v }
         x, y = V.new(1), V.new(2)
         p cmp(x, y)

@@ -215,7 +215,7 @@ fn user_defined_enumerable_and_comparable() {
 #[test]
 fn errors_are_results_and_panics() {
     let src = r##"
-        fn risky(n) = n > 1 ? Err("bad #{n}") : Ok(n)
+        fn risky(n) = if n > 1 { Err("bad #{n}") } else { Ok(n) }
         [1, 2].each { |n|
           case risky(n) {
           in Ok(v) { puts v }
@@ -338,7 +338,7 @@ fn yield_paths() {
         p kw { |a:| a }, kw { |h| h }
         fn blk() { yield 1 }
         p blk { |x, &b| [x, b] }
-        fn deep(n) = n == 0 ? yield : deep(n - 1) { yield }
+        fn deep(n) = if n == 0 { yield } else { deep(n - 1) { yield } }
         p deep(50) { :bottom }
         x = 10
         [1].each { |v| x += v }
@@ -354,7 +354,7 @@ fn yield_paths() {
 fn method_call_paths() {
     let out = run(r#"
         fn add(a, b) = a + b
-        fn with_blk(x, &b) = b ? b.call(x) : :none
+        fn with_blk(x, &b) = if b { b.call(x) } else { :none }
         fn each2(a, b) { yield a; yield b; :done }
         fn first_big(xs) { xs.each { |x| return x if x > 2 }; none }
         fn name = __method__
@@ -363,12 +363,12 @@ fn method_call_paths() {
           fn run = secret(2)
           private fn secret(n) = n * 21
         }
-        fn fact(n) = n <= 1 ? 1 : n * fact(n - 1)
+        fn fact(n) = if n <= 1 { 1 } else { n * fact(n - 1) }
         p add(1, 2), with_blk(3) { |v| v * 2 }, with_blk(3), each2(1, 2) { |v| break v * 100 if v == 2 }
         p first_big([1, 5, 3]), name, kw(a: 1), P.new.run, fact(20)
         p catch_panic { P.new.secret(1) }.err.message[0, 22]
         p catch_panic { add(1) }.err.message
-        fn down(n) = n == 0 ? 0 : down(n - 1)
+        fn down(n) = if n == 0 { 0 } else { down(n - 1) }
         p down(5000)
         p catch_panic { down(1_000_000) }.err.class
     "#);

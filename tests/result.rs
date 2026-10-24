@@ -12,7 +12,7 @@ fn run(src: &str) -> String {
 #[test]
 fn ok_and_err_values() {
     let out = run(r##"
-        fn half(n) = n.even? ? Ok(n / 2) : Err("#{n} is odd")
+        fn half(n) = if n.even? { Ok(n / 2) } else { Err("#{n} is odd") }
         p half(4), half(3), half(4).ok?, half(3).err?
         p half(4).unwrap, half(3).unwrap_or(0), half(3).unwrap_or_else { |e| e.size }
         p half(8).and_then { |x| half(x) }, half(6).and_then { |x| half(x) }, half(4).map { |x| x * 10 }, half(3).map_err(&:upcase)
@@ -62,7 +62,7 @@ fn ok_and_err_values() {
 #[test]
 fn try_operator() {
     let out = run(r##"
-        fn half(n) = n.even? ? Ok(n / 2) : Err("#{n} is odd")
+        fn half(n) = if n.even? { Ok(n / 2) } else { Err("#{n} is odd") }
         fn quarter(n) {
           h = half(n)?
           Ok(half(h)?)
@@ -87,7 +87,7 @@ fn try_operator() {
         fn chain(n) = Ok(half(n)?.to_s + "!")
         p chain(4), chain(3)
         x = 5
-        p x > 3 ? :big : :small, [1].empty?, x.even? ? 1 : 2
+        p(if x > 3 { :big } else { :small }, [1].empty?, if x.even? { 1 } else { 2 })
         fn plain(v) = Ok(v?)
         p plain(7), plain(none)
     "##);
@@ -257,7 +257,7 @@ fn try_edge_cases() {
         fn q6(h) = Ok(h[:a]?.fetch(:b)?)
         p q6({a: {b: 1}}), q6({a: {}}), q6({})
         x = 1
-        p x > 0 ? :pos : :neg, x.positive? ? 1 : 2, [x].empty? ? 1 : 2
+        p(if x > 0 { :pos } else { :neg }, if x.positive? { 1 } else { 2 }, if [x].empty? { 1 } else { 2 })
     "##);
     assert_eq!(out.lines().collect::<Vec<_>>(), [
         r#"NoMethodError"#,
@@ -287,7 +287,7 @@ fn panics_and_catch_panic() {
         p catch_panic { panic }.err.message, catch_panic { panic(42) }.err.message, catch_panic { panic("x") }.err.class.superclass
         p catch_panic { catch_panic { panic "inner" }.unwrap }.err.message
         p catch_panic { none }, catch_panic { [1, 2].map { |v| v * 2 } }
-        fn deep(n) = n == 0 ? panic("bottom") : deep(n - 1)
+        fn deep(n) = if n == 0 { panic("bottom") } else { deep(n - 1) }
         p catch_panic { deep(500) }.err.message
         fn runaway(n) = runaway(n + 1)
         p catch_panic { runaway(0) }.err.class

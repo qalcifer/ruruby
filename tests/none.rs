@@ -16,7 +16,7 @@ fn run(src: &str) -> String {
 fn none_value() {
     let out = run(r##"
         p none.to_s, none.to_a, none.inspect, none.class, none.none?, 0.none?, "".none?, [].none?, [none].none?, [1].none?
-        p (none ? 1 : 2), !none, none == false, none.equal?(none), [1, none, 2].compact, {a: none}.compact
+        p(if none { 1 } else { 2 }, !none, none == false, none.equal?(none), [1, none, 2].compact, {a: none}.compact)
         x = none
         x ||= 5
         y = 3

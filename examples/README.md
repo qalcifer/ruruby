@@ -14,7 +14,7 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
 |---|---|
 | [01_basics.rb](01_basics.rb) | `puts`/`p`, variables, interpolation, numbers, strings, symbols, `true`/`false`/`none`, arrays, hashes, ranges |
 | [02_functions.rb](02_functions.rb) | `fn name(args) { }` and `fn name(args) = expr`, return values, defaults, keyword and rest arguments, spreading, recursion |
-| [03_control_flow.rb](03_control_flow.rb) | `if` / `else if` / `else`, `unless`, `while`, `until`, `for`, `loop`, `break`/`next`, `case`/`when`, modifiers, the ternary |
+| [03_control_flow.rb](03_control_flow.rb) | `if` / `else if` / `else`, `unless`, `while`, `until`, `for`, `loop`, `break`/`next`, `case`/`when`, modifiers, `if` as a value |
 | [04_closures.rb](04_closures.rb) | closures `\|x\| ...`, capturing, closures as a call's last argument, blocks, `yield`, `&f`, `&:sym` |
 | [05_classes.rb](05_classes.rb) | classes, `initialize`, attributes, inheritance and `super`, class methods, operators, `Comparable`, `private fn`, reopening classes |
 | [06_modules.rb](06_modules.rb) | modules as mixins (`include`), as namespaces, `Enumerable` from `each` |
@@ -29,6 +29,8 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
 
 - **Functions** are `fn name(params) { body }`; the last expression is the
   value. One expression: `fn square(x) = x * x`.
+- **`if` is an expression** (as in Rust; there is no `c ? a : b`):
+  `x = if c { a } else { b }`; without `else` its value is `none`.
 - **Every construct takes braces**: `if c { } else if c { } else { }`,
   `while c { }`, `case x { when 1 { } in [a, b] { } else { } }`,
   `class Name < Base { }`, `module Name { }`.
@@ -43,7 +45,7 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
   A bug is a `panic`, which ends the program.
 - **`none`** is the absent value (falsy, like `false`).
 
-Removed from Ruby: `def`/`end`, `do ... end`, `->`, `elsif`, `then`, `begin`,
+Removed from Ruby: `def`/`end`, `do ... end`, `->`, `elsif`, `then`, `begin`, `? :`,
 `nil`, `raise`/`rescue`/`ensure`/`retry`. Each is a compile error that says what
 to write instead.
 

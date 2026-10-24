@@ -14,7 +14,7 @@ fn private_and_protected_with_names() {
     let out = run(r##"
         fn err() {
           r = catch_panic { yield; :ok }
-          r.ok? ? r.ok : r.err.message
+          if r.ok? { r.ok } else { r.err.message }
         }
         class A {
           fn pub = "#{priv} #{self.priv} #{prot}"
@@ -73,7 +73,7 @@ fn scope_default_visibility() {
     let out = run(r##"
         fn err() {
           r = catch_panic { yield }
-          r.ok? ? r.ok : r.err.message
+          if r.ok? { r.ok } else { r.err.message }
         }
         class A {
           fn a = :a

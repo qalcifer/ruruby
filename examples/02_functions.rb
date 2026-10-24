@@ -13,7 +13,7 @@ p square(9)
 # `return` leaves early
 fn sign(n) {
   return :zero if n == 0
-  n > 0 ? :positive : :negative
+  if n > 0 { :positive } else { :negative }
 }
 p sign(5), sign(0), sign(-2)
 
@@ -41,7 +41,7 @@ fn answer = 42
 p answer
 
 # Recursion
-fn fib(n) = n < 2 ? n : fib(n - 1) + fib(n - 2)
+fn fib(n) = if n < 2 { n } else { fib(n - 1) + fib(n - 2) }
 p (0..10).map(|n| fib(n))
 
 # Calling a function with the wrong number of arguments is a bug: a panic

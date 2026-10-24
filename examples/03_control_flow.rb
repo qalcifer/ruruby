@@ -2,7 +2,8 @@
 
 temperature = 23
 
-# if / else if / else — also an expression with a value
+# if / else if / else — an expression with a value, as in Rust (there is no
+# `c ? a : b`: write `if c { a } else { b }`)
 if temperature > 30 {
   puts "hot"
 } else if temperature > 15 {
@@ -16,9 +17,11 @@ p label
 # unless is `if not`
 unless temperature < 0 { puts "no frost" }
 
-# one-line forms: a statement modifier, the ternary
+# a statement modifier; `if` as a value anywhere an expression goes
 puts "warm day" if temperature > 20
-p temperature.even? ? :even : :odd
+p(if temperature.even? { :even } else { :odd })
+parity = [1, 2, 3].map(|n| if n.even? { "even" } else { "odd" })
+p parity
 
 # while / until
 i = 0

@@ -23,7 +23,7 @@ fn index_finds_what_a_scan_finds() {
                          [1.0, [2, "x"]], {a: 1}, :other, "other", 2, 2**50 + 1]
         smalls = [{}, {}, {}]   # 6 keys each: scanned
         keys.each_with_index { |k, i| smalls[i / 6][k] = i }
-        scan = |k| { s = smalls.find { |h| h.key?(k) }; s ? s[k] : none }
+        scan = |k| { s = smalls.find { |h| h.key?(k) }; if s { s[k] } }
         big = {}
         100.times { |i| big["filler#{i}"] = -i }
         keys.each_with_index { |k, i| big[k] = i }

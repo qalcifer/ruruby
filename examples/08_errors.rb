@@ -30,7 +30,7 @@ p birth_year("36"), birth_year("old")
 # ... or with its methods
 r = parse_age("12")
 p r.ok?, r.unwrap, r.map(|a| a + 1), parse_age("x").unwrap_or(0)
-p parse_age("x").map_err(&:upcase), r.and_then(|a| a > 10 ? Ok(:teen) : Err(:child))
+p parse_age("x").map_err(&:upcase), r.and_then(|a| if a > 10 { Ok(:teen) } else { Err(:child) })
 
 # Lookups that can miss give a Result too
 config = {port: "8080"}

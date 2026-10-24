@@ -3,7 +3,7 @@
 #
 #   fn parse_port(s) {
 #     n = Integer(s)?               # an Err goes back to the caller (`?`)
-#     n < 65536 ? Ok(n) : Err("port out of range: #{n}")
+#     if n < 65536 { Ok(n) } else { Err("port out of range: #{n}") }
 #   }
 #
 #   case parse_port(arg) {
@@ -91,7 +91,7 @@ class Hash {
 
 class Array {
   fn fetch(index, *default) {
-    i = index < 0 ? index + size : index
+    i = if index < 0 { index + size } else { index }
     return Ok(self[i]) if i >= 0 && i < size
     return Ok(yield(index)) if block_given?
     return Ok(default[0]) unless default.empty?
@@ -107,11 +107,11 @@ class Object {
   # Ok(n), or Err("invalid value for Integer(): \"x\"")
   fn Integer(value) {
     r = catch_panic { __integer(value) }
-    r.ok? ? r : Err(r.err.message)
+    if r.ok? { r } else { Err(r.err.message) }
   }
 
   fn Float(value) {
     r = catch_panic { __float(value) }
-    r.ok? ? r : Err(r.err.message)
+    if r.ok? { r } else { Err(r.err.message) }
   }
 }

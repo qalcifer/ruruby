@@ -849,32 +849,14 @@ impl Parser {
         }
     }
 
+    /// lang-fork: no `c ? a : b` — `if` is an expression (`if c { a } else { b }`);
+    /// a `?` here (after a space, before an operand) was a ternary.
     fn parse_ternary(&mut self) -> PResult<Node> {
         let c = self.parse_range()?;
-        if !self.eat(&Tok::Question) {
-            return Ok(c);
+        if self.at(&Tok::Question) {
+            return Err(self.gone("? :", "use `if cond { a } else { b }`, which is an expression"));
         }
-        self.skip_nl();
-        // branches are full `arg`s, so they may assign: `c ? a : n -= 1`
-        let t = self.nested(Self::parse_arg)?;
-        self.skip_nl();
-        // `a ? b :c` lexes `:c` as a symbol; it's really the identifier `c`
-        if let Tok::Sym(s) = self.peek().clone()
-            && (!self.spc_at(1) || is_ident_name(&s))
-        {
-            self.advance();
-            let e = if self.is_local(&s) {
-                Node::LVar(s)
-            } else {
-                ast::call(None, &s, vec![])
-            };
-            let e = self.parse_postfix(e)?;
-            return Ok(Node::If(b(c), b(t), b(e)));
-        }
-        self.expect(&Tok::Colon)?;
-        self.skip_nl();
-        let e = self.nested(Self::parse_arg)?;
-        Ok(Node::If(b(c), b(t), b(e)))
+        Ok(c)
     }
 
     fn parse_range(&mut self) -> PResult<Node> {

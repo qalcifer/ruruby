@@ -57,6 +57,8 @@ fn ruby_block_forms_are_compile_errors() {
         ("class << self; end", "class << obj: expected `{`"),
         ("fn f x { x }", "fn: expected `(parameters)`"),
         ("x = nil", "`nil` was removed: use `none`"),
+        ("x = 1 > 0 ? :a : :b", "`? :` was removed: use `if cond { a } else { b }`"),
+        ("p(true ? 1 : 2)", "`? :` was removed"),
     ];
     for (src, expected) in cases {
         let e = err(src);
@@ -82,8 +84,8 @@ fn look_alikes_still_work() {
         # an unmatched case/in still panics with its kind
         p catch_panic { case 5 { in String { 1 } } }.err.class
         p loop { break :out }
-        # statement modifiers and the ternary are unchanged
-        p((1 if true), (2 unless true), (true ? :t : :f))
+        # statement modifiers are unchanged; `if` is the expression form
+        p((1 if true), (2 unless true), if true { :t } else { :f })
         i = 0
         i += 1 while i < 5
         p i

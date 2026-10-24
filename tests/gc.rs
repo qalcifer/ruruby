@@ -52,7 +52,7 @@ fn every_kind_of_root_survives_stress() {
         counter = 0
         bump = || { counter += 1; "closure #{counter}" }
         h = Hash.new { |hash, k| hash[k] = "default #{k}" }
-        fn deep(n) = n == 0 ? ["deep"] : [deep(n - 1)].flatten
+        fn deep(n) = if n == 0 { ["deep"] } else { [deep(n - 1)].flatten }
         fn ensured() {
           $log = "ensure ran"
           yield

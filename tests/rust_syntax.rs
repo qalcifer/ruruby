@@ -26,7 +26,7 @@ fn fn_definitions() {
         fn greet(name = "you", *rest, loud: false, &blk) {
           s = "hi #{name}"
           s = s.upcase if loud
-          blk ? blk.call(s) : [s, rest]
+          if blk { blk.call(s) } else { [s, rest] }
         }
         fn none_args { :no_params }
         fn empty() {}
