@@ -760,6 +760,11 @@ impl Codegen<'_> {
             if let HashItem::Pair(k, v) = item {
                 let r = self.alloc();
                 self.expr(k, r)?;
+                if matches!(k, Node::Str(_)) {
+                    // the key a Hash keeps is a frozen String: freeze the
+                    // new literal instead of having the Hash copy it
+                    self.emit(Op::Freeze(r));
+                }
                 let r = self.alloc();
                 self.expr(v, r)?;
             }
