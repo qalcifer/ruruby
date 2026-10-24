@@ -266,7 +266,14 @@ Each step can be checked against mruby's own tests.
    redefined (mruby's OP_GETIDX/`idx_class`); loops test their condition at
    the bottom. fib(34) 1.05 → 0.96 s, Array#each 0.10 → 0.088 s (CRuby:
    0.073), tiny hash literals 0.52 → 0.41 s (CRuby: 0.40).
-   Next: fewer frame copies per call (cold frame fields out of the frame).
+   A fifth round: calls of Ruby methods and blocks that take just the
+   arguments given build their frame where the call is decoded (fib(34)
+   0.97 → 0.84 s), instructions shrank from 48 to 24 bytes, `x[k]` and
+   `size` read self and locals in place, and string interpolation writes
+   numbers and symbols out without temporary strings (an allocation-heavy
+   loop 0.17 → 0.10 s). Note CRuby needs 40 ms to start, which the short
+   benchmarks include. Next: the per-element cost of iterators written in
+   Ruby (CRuby's are C loops).
 7. **Numbers.** Bignum (`num-bigint`, matching `mruby-bigint`), Rational, Complex.
 8. **Enumerators.** `Enumerator`, external iteration (needs Fibers), `lazy`.
 9. **Standard gems** as Cargo features: `mruby-io`/`mruby-dir`, `mruby-time`,
