@@ -360,3 +360,31 @@ fn yield_paths() {
     "#);
     assert_eq!(out.lines().collect::<Vec<_>>().join(" "), "3 [3, 4] [3, 4] 5 20 2 [1, 0, 3] 8 ArgumentError 1 {a: 1} [1, nil] :bottom 11");
 }
+
+/// Calls of Ruby methods that take just the arguments given start their
+/// frame in send_op: blocks, break/return, private methods, arity errors,
+/// `__method__` and the frame limit behave as through start_invoke.
+#[test]
+fn method_call_paths() {
+    let out = run(r#"
+        def add(a, b) = a + b
+        def with_blk(x, &b) = b ? b.call(x) : :none
+        def each2(a, b); yield a; yield b; :done; end
+        def first_big(xs); xs.each { |x| return x if x > 2 }; nil; end
+        def name = __method__
+        def kw(h) = h
+        class P
+          def run = secret(2)
+          private def secret(n) = n * 21
+        end
+        def fact(n) = n <= 1 ? 1 : n * fact(n - 1)
+        p add(1, 2), with_blk(3) { |v| v * 2 }, with_blk(3), each2(1, 2) { |v| break v * 100 if v == 2 }
+        p first_big([1, 5, 3]), name, kw(a: 1), P.new.run, fact(20)
+        p (begin; P.new.secret(1); rescue NoMethodError => e; e.message[0, 22]; end)
+        p (begin; add(1); rescue ArgumentError => e; e.message; end)
+        def down(n) = n == 0 ? 0 : down(n - 1)
+        p down(5000)
+        p (begin; down(1_000_000); rescue SystemStackError => e; e.class; end)
+    "#);
+    assert_eq!(out, "3\n6\n:none\n200\n5\n:name\n{a: 1}\n42\n2432902008176640000\n\"private method 'secret\"\n\"wrong number of arguments (given 1, expected 2)\"\n0\nSystemStackError\n");
+}

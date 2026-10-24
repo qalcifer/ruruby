@@ -2430,6 +2430,32 @@ impl Vm {
         if vis != Vis::Public && !self.visible(vis, &owner, &recv, &f.self_) {
             return Err(self.not_visible(vis, &recv, mid));
         }
+        let at = f.base as usize + a as usize + 1;
+        // a Ruby method taking just as many required arguments: its frame
+        // right here (as start_invoke and bind_args would make it)
+        if let Method::Ruby(irep) = &m
+            && irep.simple_args
+            && irep.spec.req == argc
+            && !(argc > 0 && self.stack[at + argc - 1].is_hash())
+        {
+            let irep = irep.clone();
+            let base = self.open_window(irep.frame_size, 1 + argc);
+            self.stack[base] = recv;
+            for i in 0..argc {
+                self.stack[base + 1 + i] = self.stack[at + i];
+            }
+            if irep.spec.block {
+                self.stack[base + 1 + argc] = blk.unwrap_or(Value::NIL);
+            }
+            let mut callee = Frame::new(irep, base, recv, owner);
+            callee.block = blk;
+            callee.method = Some((owner, mid));
+            callee.home = self.new_id();
+            callee.is_home = true;
+            callee.ret = a;
+            callee.break_tag = tag;
+            return Ok(Flow::Call(callee));
+        }
         if let Method::Native(native) = m {
             let scope = self.scope_of(f);
             if scope.is_some() || self.native_scope.is_some() {
@@ -2440,7 +2466,6 @@ impl Vm {
             // natives take their arguments as a slice: no Vec for the common case
             if argc <= MAX_INLINE_ARGS {
                 let mut buf: [Value; MAX_INLINE_ARGS] = Default::default();
-                let at = f.base as usize + a as usize + 1;
                 buf[..argc].clone_from_slice(&self.stack[at..at + argc]);
                 let args = &buf[..argc];
                 return self.call_flow(f, a, tag, |vm| {
