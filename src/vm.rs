@@ -197,8 +197,10 @@ pub struct CommonSyms {
 pub struct Vm {
     pub heap: Heap,
     /// Registers of all live frames, each frame a window at its `base`
-    /// (mruby: the VM stack).
+    /// (mruby: the VM stack). In use up to `sp`; the slots above are
+    /// leftovers, kept so opening a window doesn't have to grow the Vec.
     stack: Vec<Value>,
+    sp: usize,
     pub syms: SymbolTable,
     pub c: Classes,
     pub s: CommonSyms,
@@ -514,6 +516,7 @@ impl Vm {
         let mut vm = Vm {
             heap,
             stack: Vec::new(),
+            sp: 0,
             syms,
             c,
             s,
@@ -789,7 +792,35 @@ impl Vm {
                 *regs = EnvRegs::Heap(self.stack[base..base + len].to_vec());
             }
         }
-        self.stack.truncate(f.base as usize);
+        self.sp = f.base as usize;
+    }
+
+    /// Opens a window of `n` registers on top of the stack, the first
+    /// `set` of which the caller writes; the rest start nil.
+    #[inline]
+    fn open_window(&mut self, n: usize, set: usize) -> usize {
+        const NILS: [Value; 8] = [Value::NIL; 8];
+        let base = self.sp;
+        let end = base + n;
+        // room for writing a whole NILS past `end` (scratch space)
+        if end + NILS.len() > self.stack.len() {
+            self.grow_stack(end + NILS.len());
+        }
+        let from = base + set.min(n);
+        if end - from <= NILS.len() {
+            // fixed-size stores: a fill of variable length becomes a memset call
+            self.stack[from..from + NILS.len()].copy_from_slice(&NILS);
+        } else {
+            self.stack[from..end].fill(Value::NIL);
+        }
+        self.sp = end;
+        base
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn grow_stack(&mut self, len: usize) {
+        self.stack.resize(len.next_power_of_two().max(1024), Value::NIL);
     }
 
     #[inline]
@@ -816,6 +847,7 @@ impl Vm {
     pub fn recover(&mut self) {
         self.frames.clear();
         self.stack.clear();
+        self.sp = 0;
         self.reentry = 0;
         self.gc_level = 0;
         self.inspecting.clear();
@@ -1499,8 +1531,7 @@ impl Vm {
                 && self.stack[at + n - 1].is_hash()
                 && matches!(self.kind(self.stack[at + n - 1]), V::Hash(h) if self.heap[h].borrow().kw))
         {
-            let base = self.stack.len();
-            self.stack.resize(base + irep.frame_size, Value::NIL);
+            let base = self.open_window(irep.frame_size, 1 + n);
             self.stack[base] = *self_;
             for i in 0..n {
                 self.stack[base + 1 + i] = self.stack[at + i];
@@ -1558,8 +1589,7 @@ impl Vm {
         let opt_filled = (n - mand).min(spec.opt);
         let rest_len = n - mand - opt_filled;
         // the frame's registers: a new window on top of the stack
-        let base = self.stack.len();
-        self.stack.resize(base + irep.nregs.max(1 + spec.nparams()), Value::NIL);
+        let base = self.open_window(irep.nregs.max(1 + spec.nparams()), 0);
         self.stack[base] = *self_;
         let mut r = 1;
         let mut it = args.into_iter();
@@ -1584,7 +1614,7 @@ impl Vm {
         }
         let mut kw_mask = 0u64;
         if spec.nokw && kwargs.as_ref().is_some_and(|h| !h.is_empty()) {
-            self.stack.truncate(base);
+            self.sp = base;
             return Err(self.arg_err("no keywords accepted"));
         }
         let mut kwh = kwargs.unwrap_or_default();
@@ -1601,7 +1631,7 @@ impl Vm {
             r += 1;
         }
         if !missing.is_empty() {
-            self.stack.truncate(base);
+            self.sp = base;
             let s = if missing.len() > 1 { "s" } else { "" };
             return Err(self.arg_err(format!("missing keyword{s}: {}", self.sym_list(&missing))));
         }
@@ -1625,7 +1655,7 @@ impl Vm {
                 })
                 .collect();
             let s = if unknown.len() > 1 { "s" } else { "" };
-            self.stack.truncate(base);
+            self.sp = base;
             return Err(self.arg_err(format!("unknown keyword{s}: {}", self.sym_list(&unknown))));
         }
         if spec.block {
@@ -2001,8 +2031,7 @@ impl Vm {
 
     /// A frame for the script or a class body (`class X`, `class << obj`).
     fn body_frame(&mut self, irep: Rc<Irep>, self_: Value, target: ClassRef) -> Frame {
-        let base = self.stack.len();
-        self.stack.resize(base + irep.nregs.max(1), Value::NIL);
+        let base = self.open_window(irep.nregs.max(1), 0);
         self.stack[base] = self_;
         let mut f = Frame::new(irep, base, self_, target);
         f.home = self.new_id();
@@ -2110,7 +2139,7 @@ impl Vm {
         for f in self.frames.iter().chain(std::iter::once(current)) {
             mark_frame(&mut m, f);
         }
-        for v in &self.stack {
+        for v in &self.stack[..self.sp] {
             m.value(v);
         }
         m.value(&self.main_obj);
