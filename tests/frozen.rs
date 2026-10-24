@@ -12,10 +12,8 @@ fn run(src: &str) -> String {
 
 const FZ: &str = r##"
     def fz
-      yield
-      :changed
-    rescue FrozenError => e
-      e.message
+      r = catch_panic { yield; :changed }
+      r.ok? ? r.ok : r.err.message
     end
 "##;
 

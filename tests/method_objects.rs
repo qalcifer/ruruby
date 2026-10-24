@@ -22,8 +22,8 @@ fn bound_methods() {
         p m.call(1), m.(2, 3), m[4], m.arity, m.name, m.owner, m.receiver.equal?(a), m
         p [1, 2].map(&a.method(:hi)), m.to_proc.lambda?, [3, 1].map(&10.method(:+))
         p A.method(:cm).call, A.method(:cm), a.method(:priv).call, "x".method(:upcase).call
-        p (begin; a.public_method(:priv); rescue NoMethodError => e; e.message; end)
-        p (begin; a.method(:nope); rescue NameError => e; e.message; end)
+        p catch_panic { a.public_method(:priv) }.err.message
+        p catch_panic { a.method(:nope) }.err.message
         p a.method(:hi) == a.method(:hi), a.method(:hi) == A.new.method(:hi), m.instance_variables
         GC.stress = true
         keep = a.method(:hi)
@@ -47,10 +47,10 @@ fn unbound_methods() {
         u = A.instance_method(:hi)
         p u, u.arity, u.owner, u.name, u.bind(B.new).call(1), u.bind_call(B.new, 2), B.new.hi(3)
         p A.instance_method(:v).arity, A.instance_method(:v=).arity, A.new.method(:hi).unbind
-        p (begin; u.bind(1); rescue TypeError => e; e.message; end)
-        p (begin; A.instance_method(:nope); rescue NameError => e; e.message; end)
+        p catch_panic { u.bind(1) }.err.message
+        p catch_panic { A.instance_method(:nope) }.err.message
         class A; private def secret = 1; end
-        p (begin; A.public_instance_method(:secret); rescue NameError => e; e.message; end)
+        p catch_panic { A.public_instance_method(:secret) }.err.message
     "##);
     assert_eq!(
         out,

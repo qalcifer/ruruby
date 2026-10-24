@@ -46,9 +46,8 @@ fn runaway_recursion_is_a_system_stack_error() {
     let out = small_stack(512, || {
         run(r#"
             def forever(n) = forever(n + 1)
-            p(begin; forever(0); rescue SystemStackError => e; e.message; end)
-            # not a StandardError, so a bare rescue doesn't catch it
-            p(begin; forever(0); rescue; :no; rescue Exception => e; e.class; end)
+            p(catch_panic { forever(0) }.err.message)
+            p(catch_panic { forever(0) }.err.class)
         "#)
     });
     assert_eq!(out, "\"stack level too deep\"\nSystemStackError\n");
@@ -66,7 +65,7 @@ fn natives_calling_back_into_ruby_stay_within_the_stack_budget() {
         let src = r#"
             def deep(n) = n == 0 ? 0 : [n].inject(0) { |_, k| 1 + deep(k - 1) }
             p deep(5)
-            p(begin; deep(100_000); rescue SystemStackError; :caught; end)
+            p(catch_panic { deep(100_000) }.err && :caught)
             p deep(5)
         "#;
         interp.eval(src).map_err(|e| e.to_string())?;
@@ -81,27 +80,22 @@ fn control_flow_across_frames() {
         log = []
         def each_twice(a)
           a.each { |x| yield x; yield x }
-        ensure
-          log_it(:each_twice_ensure)
         end
-        def log_it(x) = $log << x
-        $log = log
-        # break leaves two Ruby frames and a native one, running ensure on the way
+        # break leaves two Ruby frames and a native one
         r = each_twice([1, 2]) { |x| break x * 10 if x == 2; log << x }
         p r, log
         # return from a block inside a method called from a block
         def find_first(list) = list.each { |x| return x if yield(x) } && none
         p find_first([1, 4, 9]) { |x| x > 3 }
-        # exceptions unwind through in-loop frames to an outer rescue, then retry
-        def boom(n) = n == 0 ? raise("deep") : boom(n - 1)
+        # panics unwind through in-loop frames to catch_panic, again and again
+        def boom(n) = n == 0 ? panic("deep") : boom(n - 1)
         tries = 0
-        begin
+        r = none
+        while tries < 3
           tries += 1
-          boom(50) if tries < 3
-        rescue => e
-          retry
+          r = catch_panic { boom(50) }
         end
-        p [tries, e.message]
+        p [tries, r.err.message]
         # super chains, method_missing, define_method lambdas and class bodies
         class A; def hi(x) = "A#{x}"; end
         class B < A; def hi(x) = "B" + super; end
@@ -119,7 +113,7 @@ fn control_flow_across_frames() {
     "#;
     assert_eq!(
         run(src),
-        "20\n[1, 1, :each_twice_ensure]\n4\n[3, \"deep\"]\n\
+        "20\n[1, 1]\n4\n[3, \"deep\"]\n\
          \"CBA2\"\n[:zap, [1, 2]]\n10\n42\n101\n7\n"
     );
 }
@@ -145,9 +139,9 @@ fn closures_outlive_their_frames() {
         def leaves_by_raise
           x = 5
           $saved = -> { x * 2 }
-          raise "boom"
+          panic "boom"
         end
-        begin; leaves_by_raise; rescue; end
+        catch_panic { leaves_by_raise }
         p $saved.()
         def leaves_by_break
           y = 7
@@ -170,7 +164,7 @@ fn method_caches_see_every_change() {
     // of change must make it look the method up again
     let src = r#"
         class A; def hi = "A"; end
-        def call(o) = (o.hi rescue "none")
+        def call(o) = catch_panic { o.hi }.unwrap_or("none")
         a = A.new
         out = [call(a)]
         class A; def hi = "A2"; end

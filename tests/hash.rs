@@ -163,11 +163,11 @@ fn eql_callbacks_that_change_the_hash() {
           def hash = 0
         end
         h = {"a" => 1, "b" => 2, "c" => 3}
-        r = begin; h[Evil.new(h)]; rescue RuntimeError => e; e.message; end
+        r = catch_panic { h[Evil.new(h)] }.err.message
         p r, h.keys, h.keys.all? { |k| h.key?(k) }
         class Bad; def hash = "x"; end
-        p((begin; {Bad.new => 1}; rescue TypeError => e; e.message; end))
-        class Same; def eql?(o) = raise("not called for the same object"); end
+        p(catch_panic { {Bad.new => 1} }.err.message)
+        class Same; def eql?(o) = panic("not called for the same object"); end
         s = Same.new
         p({s => 1}[s])
     "#);

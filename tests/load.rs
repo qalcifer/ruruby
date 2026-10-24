@@ -25,8 +25,8 @@ p require_relative('sub/rel'), require_relative('lib/helper'), helper, $count
 $LOAD_PATH << __dir__ + '/lib'
 p require('helper'), $count
 p load(__dir__ + '/lib/helper.rb'), $count
-p (begin; require 'nope'; rescue LoadError => e; e.message; end)
-p (begin; require_relative 'bad'; rescue SyntaxError => e; e.class; end)
+p catch_panic { require 'nope' }.err.message
+p catch_panic { require_relative 'bad' }.err.class
 p REL_DIR.end_with?('sub'), $LOADED_FEATURES.size, $".equal?($LOADED_FEATURES)
 "#,
     )

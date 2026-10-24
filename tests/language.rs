@@ -211,37 +211,23 @@ fn user_defined_enumerable_and_comparable() {
     );
 }
 
+/// lang-fork: expected failures are Err values, bugs are panics.
 #[test]
-fn exceptions() {
+fn errors_are_results_and_panics() {
     let src = r##"
-        class AppError < StandardError; end
-        def risky(n)
-          raise AppError, "bad #{n}" if n > 1
-          n
-        end
+        def risky(n) = n > 1 ? Err("bad #{n}") : Ok(n)
         [1, 2].each do |n|
-          begin
-            puts risky(n)
-          rescue AppError => e
-            puts "rescued #{e.message} (#{e.class})"
-          ensure
-            puts "ensure #{n}"
+          case risky(n)
+          in Ok(v) then puts v
+          in Err(e) then puts "failed: #{e}"
           end
         end
-        x = Integer("zz") rescue -1
-        p x
-        def m
-          yield
-        rescue ZeroDivisionError
-          :saved
-        end
+        p catch_panic { Integer("zz") }.err.class
+        def m = catch_panic { yield }.unwrap_or(:saved)
         p(m { 1 / 0 })
     "##;
-    assert_eq!(
-        run(src),
-        "1\nensure 1\nrescued bad 2 (AppError)\nensure 2\n-1\n:saved\n"
-    );
-    assert_eq!(run_err("raise 'boom'"), "boom (RuntimeError)");
+    assert_eq!(run(src), "1\nfailed: bad 2\nArgumentError\n:saved\n");
+    assert_eq!(run_err("panic 'boom'"), "boom (Panic)");
     assert_eq!(
         run_err("nil.foo"),
         "undefined method 'foo' for none (NoMethodError)"
@@ -347,7 +333,7 @@ fn yield_paths() {
         p [1, 2, 3].map { |x| next 0 if x == 2; x }
         def lam; yield 7; end
         p lam(&->(x) { x + 1 })
-        p (begin; lam(&->(x, y) { x }); rescue ArgumentError => e; e.class; end)
+        p catch_panic { lam(&->(x, y) { x }) }.err.class
         def kw; yield a: 1; end
         p kw { |a:| a }, kw { |h| h }
         def blk; yield 1; end
@@ -380,11 +366,11 @@ fn method_call_paths() {
         def fact(n) = n <= 1 ? 1 : n * fact(n - 1)
         p add(1, 2), with_blk(3) { |v| v * 2 }, with_blk(3), each2(1, 2) { |v| break v * 100 if v == 2 }
         p first_big([1, 5, 3]), name, kw(a: 1), P.new.run, fact(20)
-        p (begin; P.new.secret(1); rescue NoMethodError => e; e.message[0, 22]; end)
-        p (begin; add(1); rescue ArgumentError => e; e.message; end)
+        p catch_panic { P.new.secret(1) }.err.message[0, 22]
+        p catch_panic { add(1) }.err.message
         def down(n) = n == 0 ? 0 : down(n - 1)
         p down(5000)
-        p (begin; down(1_000_000); rescue SystemStackError => e; e.class; end)
+        p catch_panic { down(1_000_000) }.err.class
     "#);
     assert_eq!(out, "3\n6\n:none\n200\n5\n:name\n{a: 1}\n42\n2432902008176640000\n\"private method 'secret\"\n\"wrong number of arguments (given 1, expected 2)\"\n0\nSystemStackError\n");
 }

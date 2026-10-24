@@ -53,7 +53,7 @@ fn get_idx_and_size() {
           private def size = :private_size
         end
         p C.new.go
-        p (begin; nil[0]; rescue NoMethodError => e; e.name; end)
+        p catch_panic { nil[0] }.err.name
     "##)
     .unwrap();
     assert_eq!(
@@ -79,9 +79,9 @@ fn set_idx_and_shl() {
         s << "!"
         p h, h.keys[1].frozen?
         f = [1].freeze
-        p (begin; f[0] = 2; rescue FrozenError => e; e.class; end)
-        p (begin; f << 2; rescue FrozenError => e; e.class; end)
-        p (begin; {}.freeze[:a] = 1; rescue FrozenError => e; e.class; end)
+        p catch_panic { f[0] = 2 }.err.class
+        p catch_panic { f << 2 }.err.class
+        p catch_panic { {}.freeze[:a] = 1 }.err.class
         class Sub < Array
           def []=(i, v) = super(i, v.to_s)
           def <<(v) = super(v * 2)

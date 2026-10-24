@@ -13,10 +13,8 @@ fn run(src: &str) -> String {
 fn private_and_protected_with_names() {
     let out = run(r##"
         def err
-          yield
-          :ok
-        rescue NoMethodError => e
-          e.message
+          r = catch_panic { yield; :ok }
+          r.ok? ? r.ok : r.err.message
         end
         class A
           def pub = "#{priv} #{self.priv} #{prot}"
@@ -56,8 +54,8 @@ fn visibility_errors_and_inherited_methods() {
     let out = run(r##"
         class A; def m = :a; end
         class B < A; private :m; end
-        p A.new.m, (begin; B.new.m; rescue NoMethodError => e; e.message; end)
-        p (begin; A.send(:private, :nope); rescue NameError => e; e.message; end)
+        p A.new.m, catch_panic { B.new.m }.err.message
+        p catch_panic { A.send(:private, :nope) }.err.message
         class A; def m = :redefined; end
         p A.new.m
         class C; def m = 1; private :m; def m = 2; end
@@ -74,9 +72,8 @@ fn visibility_errors_and_inherited_methods() {
 fn scope_default_visibility() {
     let out = run(r##"
         def err
-          yield
-        rescue NoMethodError => e
-          e.message
+          r = catch_panic { yield }
+          r.ok? ? r.ok : r.err.message
         end
         class A
           def a = :a
@@ -125,11 +122,7 @@ fn natives_that_define_methods_follow_the_scope() {
     // or a class_eval block) under `private` define private methods; called
     // on another class or from a method they define public ones
     let out = run(r##"
-        def err
-          yield
-        rescue NoMethodError
-          :private
-        end
+        def err = catch_panic { yield }.unwrap_or(:private)
         other = Class.new
         c = Class.new do
           private
@@ -155,7 +148,7 @@ fn natives_that_define_methods_follow_the_scope() {
           module_function :f
         end
         p m2.f, err { Class.new { include m2 }.new.f }
-        p (begin; Module.new { module_function :nope }; rescue NameError => e; e.message.start_with?("undefined method 'nope' for module"); end)
+        p catch_panic { Module.new { module_function :nope } }.err.message.start_with?("undefined method 'nope' for module")
     "##);
     assert_eq!(
         out,
@@ -167,11 +160,7 @@ fn natives_that_define_methods_follow_the_scope() {
 #[test]
 fn aliases_and_builtin_private_methods() {
     let out = run(r##"
-        def err
-          yield
-        rescue NoMethodError
-          :private
-        end
+        def err = catch_panic { yield }.unwrap_or(:private)
         class A
           private def priv = :priv
           alias_method :priv2, :priv
@@ -200,8 +189,8 @@ fn respond_to_and_public_send() {
         p r.respond_to?(:pub), r.respond_to?(:priv), r.respond_to?(:priv, true)
         p r.respond_to?(:prot), r.respond_to?(:prot, true), r.respond_to?(:initialize)
         p r.respond_to?(:ghost), r.asked, r.respond_to?(:nope, true), r.asked
-        p r.public_send(:pub), (begin; r.public_send(:priv); rescue NoMethodError => e; e.message; end)
-        p (begin; r.respond_to?; rescue ArgumentError; :argc; end)
+        p r.public_send(:pub), catch_panic { r.public_send(:priv) }.err.message
+        p (catch_panic { r.respond_to? }.err && :argc)
     "##);
     assert_eq!(
         out,

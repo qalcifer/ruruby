@@ -51,7 +51,7 @@ use models::user::User
 use shapes::{Circle, Square}
 puts Person.new("Ann"), User.new("Bob"), User.superclass, Circle.new.area + Square.new.area
 p User.new("x").admin?, shout("hi"), $runs
-p (begin; HELPER; rescue NameError => e; e.message; end)
+p catch_panic { HELPER }.err.message
 p Person.name, User.name
 "#,
             ),

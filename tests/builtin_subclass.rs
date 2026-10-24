@@ -66,8 +66,8 @@ fn new_and_brackets_on_the_builtin_classes() {
     let out = run(r##"
         p Array.new(3, 0), Array.new([1, 2]), Array.new(2) { _1 + 1 }, Array[1, :b]
         p Hash.new(5)[:z], Hash[1, 2, 3, 4], Hash[[[1, 2], [3]]], Hash[{a: 1}], String.new("q")
-        p (begin; Hash[1, 2, 3]; rescue ArgumentError => e; e.message; end)
-        p (begin; Array.new(-1); rescue ArgumentError => e; e.message; end)
+        p catch_panic { Hash[1, 2, 3] }.err.message
+        p catch_panic { Array.new(-1) }.err.message
     "##);
     assert_eq!(
         out,
@@ -114,7 +114,7 @@ fn singleton_methods_on_builtin_values() {
         GC.start
         p s.shout, a.total, h.keyz, s.singleton_methods, s.class, a.is_a?(Sum)
         p "x".respond_to?(:shout), s.dup.respond_to?(:shout)
-        p (begin; 1.singleton_class; rescue TypeError => e; e.message; end)
+        p catch_panic { 1.singleton_class }.err.message
         p [0, 1, 2].map { |i| t = "t#{i}"; def t.m = self * 2; t.m }
     "##);
     assert_eq!(

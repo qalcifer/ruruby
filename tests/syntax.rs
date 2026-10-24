@@ -23,8 +23,8 @@ fn parameters() {
         p fwd(1, 2, k: 7)
         def kw_only(a:, b: a * 2) = [a, b]
         p kw_only(a: 4)
-        p(begin; kw_only; rescue ArgumentError => e; e.message; end)
-        p(begin; kw_only(a: 1, x: 2); rescue ArgumentError => e; e.message; end)
+        p(catch_panic { kw_only }.err.message)
+        p(catch_panic { kw_only(a: 1, x: 2) }.err.message)
     "##;
     assert_eq!(
         run(src),
@@ -45,7 +45,7 @@ fn blocks_and_lambdas() {
         p add.(2), add[2, 3], add.lambda?, add.arity
         early = lambda { return 7; 8 }
         p early.call
-        p(begin; add.call; rescue ArgumentError => e; e.message; end)
+        p(catch_panic { add.call }.err.message)
         p proc { |a, b| [a, b] }.call([1, 2]), proc { |x, *y, z| }.arity
     "##;
     assert_eq!(
@@ -154,24 +154,11 @@ fn control_flow() {
         n = 0
         begin n += 1 end while n < 3
         p n
-        tries = 0
-        begin
-          tries += 1
-          raise "x" if tries < 3
-        rescue
-          retry
-        else
-          p [:ok, tries]
-        ensure
-          p :ensure
-        end
         def f
           [1, 2].each { |x| return x * 10 }
-        ensure
-          p :cleanup
         end
         p f
-        p(begin; Proc.new { break }.call; rescue LocalJumpError => e; e.class; end)
+        p(catch_panic { Proc.new { break }.call }.err.class)
         p defined?(foo), defined?(p), defined?(String), defined?(@x), defined?(r), defined?(none)
         p none&.length, "ab"&.length
         n = 2
@@ -181,7 +168,7 @@ fn control_flow() {
     "##;
     assert_eq!(
         run(src),
-        "[3, 7]\n3\n3\n[:ok, 3]\n:ensure\n:cleanup\n10\nLocalJumpError\nnone\n\"method\"\n\"constant\"\nnone\n\
+        "[3, 7]\n3\n3\n10\nLocalJumpError\nnone\n\"method\"\n\"constant\"\nnone\n\
          \"local-variable\"\n\"expression\"\nnone\n2\n[:c]\n0\n1\n1\n"
     );
 }
@@ -209,7 +196,7 @@ fn pattern_matching() {
         case [1, 42, "x", 7]
         in [*, String => s, *post] then p [s, post]
         end
-        p(begin; 5 => String; rescue NoMatchingPatternError => e; e.class; end)
+        p(catch_panic { 5 => String }.err.class)
     "##;
     assert_eq!(
         run(src),
@@ -313,7 +300,7 @@ fn operations_never_clobber_locals() {
         s = "ab"
         s = s + s.upcase
         z = 3
-        z = z.times.map { |i| i + z } rescue z = [z, z]
+        z = [z, z]
         p x, y, f(3), s, z
         # right-hand sides that write their destination early (a condition,
         # a first statement) must not be computed in the local itself
@@ -436,7 +423,7 @@ fn fused_comparisons_keep_their_meaning() {
         until j <= 7; j -= 1; end
         k = 0
         k += 1 while k < 3.5
-        p s, j, k, 3.times.to_a rescue p s, j, k
+        p s, j, k
     "#);
     assert_eq!(
         out,
@@ -474,10 +461,10 @@ fn yield_runs_the_block_directly() {
         p one { |x| x + 1 }, two { |a, b| a + b }, splat([3, 4]) { |a, b| a * b }
         r = []
         each_twice([1, 2]) { |x| r << x }
-        p r, (begin; no_block; rescue LocalJumpError => e; e.message; end)
+        p r, catch_panic { no_block }.err.message
         p stop { |x| break :broke }, stop { |x| next x * 10 }
-        p one(&->(x) { x * 3 }), (begin; two(&->(x) { x }); rescue ArgumentError; :strict; end)
-        p one(&:to_s), 3.times.to_a rescue p one(&:to_s)
+        p one(&->(x) { x * 3 }), (catch_panic { two(&->(x) { x }) }.err && :strict)
+        p one(&:to_s)
     "#);
     assert_eq!(
         out,

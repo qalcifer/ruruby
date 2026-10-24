@@ -23,7 +23,7 @@ fn hash_methods() {
         big = {}
         20.times { |i| big[i] = i }
         p (0...20).map { big.shift[0] }
-        p big.empty?, (begin; {a: 1}.freeze.shift; rescue FrozenError; :frozen; end)
+        p big.empty?, (catch_panic { {a: 1}.freeze.shift }.err && :frozen)
     "##);
     assert_eq!(
         out,
@@ -38,7 +38,7 @@ fn string_bang_methods_and_assignment() {
     let out = run(r##"
         s = "Hello"
         p s.upcase!, s, s.upcase!, "abc".reverse!, "ab".capitalize!, "x\n".chomp!, "x".chomp!
-        p "abc".sub!("b", "B"), "abc".gsub!("z", "Z"), (begin; "x".freeze.upcase!; rescue FrozenError; :frozen; end)
+        p "abc".sub!("b", "B"), "abc".gsub!("z", "Z"), (catch_panic { "x".freeze.upcase! }.err && :frozen)
         a = "abc"; a[0] = "X"
         b = "abc"; b[-1] = "Z"
         c = "abc"; c[1, 3] = "Q"
@@ -46,8 +46,8 @@ fn string_bang_methods_and_assignment() {
         e = "hello"; e["ll"] = "LL"
         f = "abc"; f[1..] = "!"
         p a, b, c, d, e, f
-        p (begin; "abc"[10] = "x"; rescue IndexError => e; e.message; end)
-        p (begin; "a"[0] = 1; rescue TypeError => e; e.message; end)
+        p catch_panic { "abc"[10] = "x" }.err.message
+        p catch_panic { "a"[0] = 1 }.err.message
         y = "hello"
         p y.slice!(1..2), y, "abc".insert(1, "_"), "abc".insert(-1, "_"), "b".prepend("a"), "x".clear
     "##);
@@ -66,7 +66,7 @@ fn string_search_bytes_and_substitution() {
         p "あいうあ".rindex("あ", -1), "abcabc".index("a", 1), "hello".index("", 6), "hello".index("l", -2)
         p "héllo".getbyte(1), "abc".byteslice(1, 2), "abc".byteslice(1..), "héllo".byteindex("l")
         p "abcab".byterindex("ab"), "abc".bytesplice(1, 1, "ZZ")
-        p (begin; "héllo".bytesplice(2, 1, ""); rescue IndexError => e; e.message; end)
+        p catch_panic { "héllo".bytesplice(2, 1, "") }.err.message
         x = "abc"; x.setbyte(0, 65)
         r = []; "ab".each_byte { r << _1 }
         p x, r
@@ -74,7 +74,7 @@ fn string_search_bytes_and_substitution() {
         s = "abXcdXef"
         p s.sub("X", "<\\\\>"), s.sub("X", "<\\&>"), s.sub("X", "[\\`]"), s.gsub("X") { |m| m.downcase }
         p s.gsub("X", "X" => "!"), "abc".gsub("", "."), "abc".sub("", "."), "abc"[1.1], "a" * 2.1
-        p (begin; "" * Float::INFINITY; rescue RangeError; :range; end)
+        p (catch_panic { "" * Float::INFINITY }.err && :range)
     "##);
     assert_eq!(
         out,
@@ -92,14 +92,14 @@ fn array_methods() {
         a = ["a", "b"]
         p a.delete("x") { _1 + "!" }, a.delete("a"), a
         p [1, 2].eql?([1, 2]), [1, 2].eql?([1.0, 2.0]), [1, 2] == [1.0, 2.0], {[1] => :a}[[1.0]]
-        p (begin; [1].first(-1); rescue ArgumentError => e; e.message; end)
-        p (begin; [1].last(1, 2); rescue ArgumentError; :argc; end), (begin; [].[](); rescue ArgumentError; :argc; end)
-        p [3, 1, 2].sort { |x, y| (x - y).to_f }, (begin; [1, 2].sort { nil }; rescue ArgumentError => e; e.message; end)
+        p catch_panic { [1].first(-1) }.err.message
+        p (catch_panic { [1].last(1, 2) }.err && :argc), (catch_panic { [].[]() }.err && :argc)
+        p [3, 1, 2].sort { |x, y| (x - y).to_f }, catch_panic { [1, 2].sort { nil } }.err.message
         p [1, 2, 1].rindex(1), [1, 2, 3].rindex { _1 < 3 }, [1, :a, "s", 2].grep(Integer), [1, :a].grep_v(Integer)
         p (1..6).find_all(&:even?), [1, 2].grep(Integer) { _1 * 10 }
         x = [1]
         x.send(:initialize_copy, [7, 8])
-        p x, (begin; [1][Float::NAN]; rescue RangeError; :range; end)
+        p x, (catch_panic { [1][Float::NAN] }.err && :range)
     "##);
     assert_eq!(
         out,
@@ -114,12 +114,13 @@ fn errors_ranges_and_numbers() {
     let out = run(r##"
         e = NameError.new("a", :foo)
         p e.message, e.name
-        begin; class X; alias foo bar; end; rescue NameError => e; p e.name; end
-        begin; NoSuchConst; rescue NameError => e; p e.name; end
-        begin; nosuch(3, 1, 4); rescue NoMethodError => e; p e.name, e.args, e.instance_variables; end
+        p catch_panic { class X; alias foo bar; end }.err.name
+        p catch_panic { NoSuchConst }.err.name
+        e = catch_panic { nosuch(3, 1, 4) }.err
+        p e.name, e.args, e.instance_variables
         p NoMethodError.new("t", :t, [1, 2]).args
         p Range.new(1, 10, true), Range.new(1, nil), Range.new(1, 3) == (1..3)
-        p (begin; Range.new(1, "a"); rescue ArgumentError => e; e.message; end)
+        p catch_panic { Range.new(1, "a") }.err.message
         p ~0, ~2, 7.quo(2), 5.75.quo(-2), nil.__id__ == nil.object_id
     "##);
     assert_eq!(

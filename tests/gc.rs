@@ -54,12 +54,11 @@ fn every_kind_of_root_survives_stress() {
         h = Hash.new { |hash, k| hash[k] = "default #{k}" }
         def deep(n) = n == 0 ? ["deep"] : [deep(n - 1)].flatten
         def ensured
-          yield
-        ensure
           $log = "ensure ran"
+          yield
         end
         r = [1, 2, 3].map { |x| "m#{x}" }
-        e = begin; raise ArgumentError, "boom #{[1]}"; rescue => ex; ex; end
+        e = catch_panic { panic "boom #{[1]}" }.err
         v = ensured { [1, 2].each { |x| break "broke #{x}" if x == 2 } }
         at_exit { puts "at_exit #{[1, 2].sum}" }
         p $global, CONST, Holder.ivar, Holder.new.cvar, Holder.new.dm, obj.single
