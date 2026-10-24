@@ -30,8 +30,8 @@ fn fn_definitions() {
         }
         fn none_args { :no_params }
         fn empty() {}
-        class V
-          def initialize(n) = @n = n
+        class V {
+          fn initialize(n) = @n = n
           fn self.make(n) { new(n) }
           fn ==(o) { o.is_a?(V) && o.n == n }
           fn n = @n
@@ -39,15 +39,15 @@ fn fn_definitions() {
           fn -@ = V.new(-@n)
           private fn hidden() { :h }
           fn call_hidden = hidden
-        end
+        }
         p add(1, 2), square(4), greet, greet("Ann", 1, 2), greet(loud: true) { |s| s + "!" }, none_args, empty
         p V.make(3) == V.new(3), V.new(2)[5], (-V.new(4)).n, V.new(1).call_hidden, V.new(1).respond_to?(:hidden)
         fn multi(x) {
-          if x > 1
+          if x > 1 {
             :big
-          else
+          } else {
             :small
-          end
+          }
         }
         p multi(5), multi(0)
         p [1, 2].map { |x| x * 10 }

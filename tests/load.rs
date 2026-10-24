@@ -14,9 +14,9 @@ fn scratch(name: &str) -> PathBuf {
 #[test]
 fn require_family() {
     let dir = scratch("family");
-    std::fs::write(dir.join("lib/helper.rb"), "$count = ($count || 0) + 1\ndef helper = :helped\n").unwrap();
+    std::fs::write(dir.join("lib/helper.rb"), "$count = ($count || 0) + 1\nfn helper = :helped\n").unwrap();
     std::fs::write(dir.join("sub/rel.rb"), "REL_DIR = __dir__\nrequire_relative '../lib/helper'\n").unwrap();
-    std::fs::write(dir.join("bad.rb"), "def (\n").unwrap();
+    std::fs::write(dir.join("bad.rb"), "fn (() {\n").unwrap();
     let main = dir.join("main.rb");
     std::fs::write(
         &main,

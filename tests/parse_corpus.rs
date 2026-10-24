@@ -36,6 +36,7 @@ fn ruby_files(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 #[test]
+#[ignore = "lang-fork: mruby's sources are Ruby, a different syntax now"]
 fn mruby_sources_compile() {
     // input nested up to the parser's limit needs ~4 MiB in a debug build,
     // more than a test thread gets by default

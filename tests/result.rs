@@ -12,17 +12,17 @@ fn run(src: &str) -> String {
 #[test]
 fn ok_and_err_values() {
     let out = run(r##"
-        def half(n) = n.even? ? Ok(n / 2) : Err("#{n} is odd")
+        fn half(n) = n.even? ? Ok(n / 2) : Err("#{n} is odd")
         p half(4), half(3), half(4).ok?, half(3).err?
         p half(4).unwrap, half(3).unwrap_or(0), half(3).unwrap_or_else { |e| e.size }
         p half(8).and_then { |x| half(x) }, half(6).and_then { |x| half(x) }, half(4).map { |x| x * 10 }, half(3).map_err(&:upcase)
         p half(4) == Ok(2), half(4).eql?(Ok(2)), { Ok(1) => :a }[Ok(1)], half(4).ok, half(3).err, half(4).err
-        [half(4), half(5)].each do |r|
-          case r
-          in Ok(v) then puts "ok #{v}"
-          in Err(e) then puts "err #{e}"
-          end
-        end
+        [half(4), half(5)].each { |r|
+          case r {
+          in Ok(v) { puts "ok #{v}" }
+          in Err(e) { puts "err #{e}" }
+          }
+        }
         p catch_panic { half(3).unwrap }.err.message
         p catch_panic { half(3).expect("need even") }.err.message
         p catch_panic { panic("boom") }.map_err { |e| [e.class, e.message] }
@@ -62,33 +62,33 @@ fn ok_and_err_values() {
 #[test]
 fn try_operator() {
     let out = run(r##"
-        def half(n) = n.even? ? Ok(n / 2) : Err("#{n} is odd")
-        def quarter(n)
+        fn half(n) = n.even? ? Ok(n / 2) : Err("#{n} is odd")
+        fn quarter(n) {
           h = half(n)?
           Ok(half(h)?)
-        end
+        }
         p quarter(8), quarter(6), quarter(5)
-        def first_word(s)
+        fn first_word(s) {
           w = s.split(" ").first()?
           w.upcase
-        end
+        }
         p first_word("hi there"), first_word("")
-        def from_block(xs)
+        fn from_block(xs) {
           xs.each { |x| half(x)? }
           :all_even
-        end
+        }
         p from_block([2, 4]), from_block([2, 3, 4])
-        def local_try(n)
+        fn local_try(n) {
           r = half(n)
           v = r?
           v + 100
-        end
+        }
         p local_try(10), local_try(1)
-        def chain(n) = Ok(half(n)?.to_s + "!")
+        fn chain(n) = Ok(half(n)?.to_s + "!")
         p chain(4), chain(3)
         x = 5
         p x > 3 ? :big : :small, [1].empty?, x.even? ? 1 : 2
-        def plain(v) = Ok(v?)
+        fn plain(v) = Ok(v?)
         p plain(7), plain(none)
     "##);
     assert_eq!(out.lines().collect::<Vec<_>>(), [
@@ -118,7 +118,7 @@ fn catch_panic_boundary() {
     let out = run(r#"
         p catch_panic { 1 + 1 }, catch_panic { none.foo }.err.class, catch_panic { 1 / 0 }.err.message
         p [1, 2].map { |x| catch_panic { next x * 10 } }
-        def f = catch_panic { return :returned }
+        fn f = catch_panic { return :returned }
         p f, catch_panic { [1].each { break :b } }
     "#);
     assert_eq!(out, "Ok(2)\nNoMethodError\n\"divided by 0\"\n[Ok(10), Ok(20)]\n:returned\nOk(:b)\n");
@@ -137,11 +137,11 @@ fn fallible_core_methods() {
         p a.fetch(0), a.fetch(-1), a.fetch(3), a.fetch(-4), a.fetch(9, :d), a.fetch(9) { |i| i * 2 }
         p Integer("42"), Integer(" 1_000 "), Integer("4x"), Integer(3.9), Integer(none)
         p Float("2.5"), Float("x"), Float(3)
-        def port(cfg)
+        fn port(cfg) {
           raw = cfg.fetch(:port)?
           n = Integer(raw)?
           Ok(n + 1)
-        end
+        }
         p port({port: "8080"}), port({}), port({port: "eighty"})
         p catch_panic { h.fetch(:zz) { |k| none.boom } }.err.class
         p h.fetch(:a).unwrap + 1, a.fetch(5).unwrap_or(0)
@@ -194,15 +194,15 @@ fn results_nest_compare_and_combine() {
         p Ok(1).unwrap_or(0), Err(1).unwrap_or(0), Ok(3).expect("never"), Err("x").unwrap_err
         p catch_panic { Ok(1).unwrap_err }.err.message
         # case/in with guards and nested patterns
-        def show(r)
-          case r
-          in Ok(Integer => n) if n > 10 then "big #{n}"
-          in Ok(Integer => n) then "small #{n}"
-          in Ok([a, b]) then "pair #{a},#{b}"
-          in Err(String => msg) then "error #{msg}"
-          in Err(_) then "other error"
-          end
-        end
+        fn show(r) {
+          case r {
+          in Ok(Integer => n) if n > 10 { "big #{n}" }
+          in Ok(Integer => n) { "small #{n}" }
+          in Ok([a, b]) { "pair #{a},#{b}" }
+          in Err(String => msg) { "error #{msg}" }
+          in Err(_) { "other error" }
+          }
+        }
         p show(Ok(50)), show(Ok(5)), show(Ok([1, 2])), show(Err("no")), show(Err(3))
     "##);
     assert_eq!(out.lines().collect::<Vec<_>>(), [
@@ -247,14 +247,14 @@ fn try_edge_cases() {
     let out = run(r##"
         p catch_panic { show(Ok("x")) }.err.class
         # ? edge cases
-        def q1 = Ok(Ok(1)?)
-        def q2 = Ok(Ok(none)?)
-        def q3(x) = Ok([x?, :after])
-        def q4(r) = (v = r?; Ok(v.to_s))
+        fn q1 = Ok(Ok(1)?)
+        fn q2 = Ok(Ok(none)?)
+        fn q3(x) = Ok([x?, :after])
+        fn q4(r) = (v = r?; Ok(v.to_s))
         p q1, q2, q3(5), q3(none), q4(Ok(7)), q4(Err(:bad)), q4(false)
-        def q5(list) = list.map { |r| r? }
+        fn q5(list) = list.map { |r| r? }
         p q5([Ok(1), Ok(2)]), q5([Ok(1), Err(2), Ok(3)])
-        def q6(h) = Ok(h[:a]?.fetch(:b)?)
+        fn q6(h) = Ok(h[:a]?.fetch(:b)?)
         p q6({a: {b: 1}}), q6({a: {}}), q6({})
         x = 1
         p x > 0 ? :pos : :neg, x.positive? ? 1 : 2, [x].empty? ? 1 : 2
@@ -287,9 +287,9 @@ fn panics_and_catch_panic() {
         p catch_panic { panic }.err.message, catch_panic { panic(42) }.err.message, catch_panic { panic("x") }.err.class.superclass
         p catch_panic { catch_panic { panic "inner" }.unwrap }.err.message
         p catch_panic { none }, catch_panic { [1, 2].map { |v| v * 2 } }
-        def deep(n) = n == 0 ? panic("bottom") : deep(n - 1)
+        fn deep(n) = n == 0 ? panic("bottom") : deep(n - 1)
         p catch_panic { deep(500) }.err.message
-        def runaway(n) = runaway(n + 1)
+        fn runaway(n) = runaway(n + 1)
         p catch_panic { runaway(0) }.err.class
         p catch_panic { 1 + "x" }.err.class, catch_panic { Integer.nope }.err.class, catch_panic { [].fetch(1).unwrap }.err.message
     "##);
@@ -316,12 +316,12 @@ fn try_at_the_top_level_panics() {
     let err = |src: &str| run_capture(src).unwrap_err().to_string();
     assert_eq!(err("x = Err(\"bad\")?\np :after"), "`?` at the top level got Err(\"bad\") (Panic)");
     assert_eq!(err("[Ok(1), none].each { |r| r? }"), "`?` at the top level got none (Panic)");
-    assert_eq!(err("class D; X = Err(1)?; end"), "`?` at the top level got Err(1) (Panic)");
+    assert_eq!(err("class D { X = Err(1)? }"), "`?` at the top level got Err(1) (Panic)");
     assert_eq!(run("p Ok(3)?"), "3\n");
     let out = run(r#"
-        l = ->(r) { Ok(r? + 1) }
-        class C; define_method(:m) { |r| Ok(r? * 2) }; end
-        def f = [1].each { |x| return Err(x)? }
+        l = |r| { Ok(r? + 1) }
+        class C { define_method(:m) { |r| Ok(r? * 2) } }
+        fn f = [1].each { |x| return Err(x)? }
         p l.(Ok(1)), l.(Err(:e)), C.new.m(Ok(2)), C.new.m(Err(0)), f
     "#);
     assert_eq!(out, "Ok(2)\nErr(:e)\nOk(4)\nErr(0)\nErr(1)\n");

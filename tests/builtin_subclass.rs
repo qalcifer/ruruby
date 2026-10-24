@@ -34,24 +34,24 @@ fn instance_variables_on_builtin_values() {
 #[test]
 fn instances_of_builtin_subclasses() {
     let out = run(r##"
-        class SubArray < Array; end
+        class SubArray < Array {  }
         a = SubArray[1, 2, 3]
         p a.class, a, a.is_a?(Array), a.size, a.map { _1 * 2 }.class
-        class Entries < Array
+        class Entries < Array {
           self.class.alias_method :[], :new
-          def initialize(entries) = replace(entries)
-          def keys = map { |k, v| k }
-          def to_s = "#{self.class}#{super}"
-        end
+          fn initialize(entries) = replace(entries)
+          fn keys = map { |k, v| k }
+          fn to_s = "#{self.class}#{super}"
+        }
         e = Entries[[1, :a], [2, :b]]
         p e.class, e.keys, e.to_s
         h = Class.new(Hash) { attr_accessor :foo }.new(0)
         h.foo = 5
         h[:x] = 1
         p h.foo, h[:x], h[:nope], h.class.superclass
-        s = Class.new(String) { def shout = upcase + "!" }.new("hi")
+        s = Class.new(String) { fn shout = upcase + "!" }.new("hi")
         p s.shout, s.class.superclass, (s + "x").class
-        c = Class.new(Array) { def initialize(n) = super(n) { |i| i * i } }
+        c = Class.new(Array) { fn initialize(n) = super(n) { |i| i * i } }
         p c.new(4), Class.new(Hash)[a: 1].class.superclass
     "##);
     assert_eq!(
@@ -79,7 +79,7 @@ fn new_and_brackets_on_the_builtin_classes() {
 #[test]
 fn copies_keep_class_and_ivars() {
     let out = run(r##"
-        class E < Array; def hi = :hi; end
+        class E < Array { fn hi = :hi }
         e = E[3, 1, 2]
         e.instance_variable_set(:@t, 1)
         d = e.dup
@@ -105,17 +105,17 @@ fn singleton_methods_on_builtin_values() {
     let out = run(r##"
         GC.stress = true
         s = "abc"
-        def s.shout = upcase
+        fn s.shout = upcase
         a = [1, 2]
-        module Sum; def total = sum; end
+        module Sum { fn total = sum }
         a.extend(Sum)
         h = {k: 1}
-        class << h; def keyz = keys; end
+        class << h { fn keyz = keys }
         GC.start
         p s.shout, a.total, h.keyz, s.singleton_methods, s.class, a.is_a?(Sum)
         p "x".respond_to?(:shout), s.dup.respond_to?(:shout)
         p catch_panic { 1.singleton_class }.err.message
-        p [0, 1, 2].map { |i| t = "t#{i}"; def t.m = self * 2; t.m }
+        p [0, 1, 2].map { |i| t = "t#{i}"; fn t.m = self * 2; t.m }
     "##);
     assert_eq!(
         out,

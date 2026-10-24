@@ -12,11 +12,11 @@ fn run(src: &str) -> String {
 #[test]
 fn bound_methods() {
     let out = run(r##"
-        class A
-          def hi(x, y = 1) = "A#hi #{x} #{y}"
-          def self.cm = :cm
-          private def priv = :priv
-        end
+        class A {
+          fn hi(x, y = 1) = "A#hi #{x} #{y}"
+          fn self.cm = :cm
+          private fn priv = :priv
+        }
         a = A.new
         m = a.method(:hi)
         p m.call(1), m.(2, 3), m[4], m.arity, m.name, m.owner, m.receiver.equal?(a), m
@@ -42,14 +42,14 @@ fn bound_methods() {
 #[test]
 fn unbound_methods() {
     let out = run(r##"
-        class A; def hi(x) = "A#hi #{x}"; attr_accessor :v; end
-        class B < A; def hi(x) = "B#hi #{x}"; end
+        class A { fn hi(x) = "A#hi #{x}"; attr_accessor :v }
+        class B < A { fn hi(x) = "B#hi #{x}" }
         u = A.instance_method(:hi)
         p u, u.arity, u.owner, u.name, u.bind(B.new).call(1), u.bind_call(B.new, 2), B.new.hi(3)
         p A.instance_method(:v).arity, A.instance_method(:v=).arity, A.new.method(:hi).unbind
         p catch_panic { u.bind(1) }.err.message
         p catch_panic { A.instance_method(:nope) }.err.message
-        class A; private def secret = 1; end
+        class A { private fn secret = 1 }
         p catch_panic { A.public_instance_method(:secret) }.err.message
     "##);
     assert_eq!(

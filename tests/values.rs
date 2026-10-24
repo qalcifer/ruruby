@@ -35,9 +35,9 @@ fn boxed_integers_as_keys_and_in_loops() {
         h = {m + 1 => :big, 1 => :one}
         p h[2**47], [m + 1, 2**47].uniq.size
         i = m - 3
-        while i < m + 3
+        while i < m + 3 {
           i += 1
-        end
+        }
         p i, (m..m + 2).to_a
         j = -m
         j -= 1 while j > -m - 3
@@ -55,7 +55,7 @@ fn boxed_integers_survive_collection() {
     let out = run(r#"
         GC.stress = true
         a = [2**50, {k: 2**51}, 2**52..2**52 + 1]
-        def big = 2**60 + 1
+        fn big = 2**60 + 1
         b = big
         GC.start
         p a[0] + 1, a[1][:k] - 1, a[2].to_a.size, b

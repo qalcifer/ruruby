@@ -19,7 +19,7 @@ fn hash_methods() {
         p g.keep_if { false }, g.delete(:zz) { |k| "no #{k}" }, g.delete(:zz)
         r = {x: 1}
         p r.replace({y: 2}), Hash.new { |hh, k| k }.default_proc.class, {}.default_proc
-        p({a: 1, b: 2}.select(&->((k, v)) { v == 1 }), {a: 1}.reject { |k, v| v == 1 })
+        p({a: 1, b: 2}.select(|(k, v)| v == 1), {a: 1}.reject { |k, v| v == 1 })
         big = {}
         20.times { |i| big[i] = i }
         p (0...20).map { big.shift[0] }
@@ -114,7 +114,7 @@ fn errors_ranges_and_numbers() {
     let out = run(r##"
         e = NameError.new("a", :foo)
         p e.message, e.name
-        p catch_panic { class X; alias foo bar; end }.err.name
+        p catch_panic { class X { alias foo bar } }.err.name
         p catch_panic { NoSuchConst }.err.name
         e = catch_panic { nosuch(3, 1, 4) }.err
         p e.name, e.args, e.instance_variables

@@ -12,21 +12,21 @@ fn harness_classifies_results() {
         .eval(include_str!("mruby/assert.rb"))
         .expect("harness loads");
     let src = r#"
-        assert('passes') do
+        assert('passes') {
           assert_equal(2, 1 + 1)
           assert_raise(ZeroDivisionError) { 1 / 0 }
           assert_raise_with_message(RuntimeError, "boom") { raise "boom" }
           assert_operator(1, :<, 2)
           assert_float(0.3, 0.1 + 0.2)
           assert_match("ab*", "abcdef")
-        end
+        }
         assert('fails') { assert_equal(3, 1 + 1) }
         assert('crashes') { none.nope }
         assert('skips') { skip "later" }
         assert('no assertions') { 1 }
-        assert('nested') do
+        assert('nested') {
           assert('inner') { assert_true(true) }
-        end
+        }
         _mrbtest_stats
     "#;
     let stats = interp.eval(src).expect("tests run");

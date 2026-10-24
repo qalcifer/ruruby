@@ -12,16 +12,16 @@ fn run(src: &str) -> String {
 #[test]
 fn parameters() {
     let src = r##"
-        def m(a, b = 2, *rest, c, k:, opt: 5, **kw, &blk)
+        fn m(a, b = 2, *rest, c, k:, opt: 5, **kw, &blk) {
           [a, b, rest, c, k, opt, kw, blk ? blk.call : none]
-        end
+        }
         p m(1, 9, k: 3)
         p m(1, 2, 3, 4, 5, k: 0, z: 1) { :b }
-        def d((a, (b, c)), d = a) = [a, b, c, d]
+        fn d((a, (b, c)), d = a) = [a, b, c, d]
         p d([1, [2, 3]])
-        def fwd(...) = m(...)
+        fn fwd(...) = m(...)
         p fwd(1, 2, k: 7)
-        def kw_only(a:, b: a * 2) = [a, b]
+        fn kw_only(a:, b: a * 2) = [a, b]
         p kw_only(a: 4)
         p(catch_panic { kw_only }.err.message)
         p(catch_panic { kw_only(a: 1, x: 2) }.err.message)
@@ -41,7 +41,7 @@ fn blocks_and_lambdas() {
         p [[1, [2, 3]], [4, [5, 6]]].map { |a, (b, c)| a + b + c }
         p [[1, 2], [3, 4]].map { |a, | a }
         p [1, 2, 3].map { _1 * 10 }, [4, 5].map { it + 1 }
-        add = ->(a, b = 1) { a + b }
+        add = |a, b = 1| { a + b }
         p add.(2), add[2, 3], add.lambda?, add.arity
         early = lambda { return 7; 8 }
         p early.call
@@ -65,7 +65,7 @@ fn multiple_assignment_and_splats() {
         h = {}
         h[:x], h[:y] = 1, 2
         p h
-        def args(*a, **k) = [a, k]
+        fn args(*a, **k) = [a, k]
         list = [1, 2]
         opts = {z: 1}
         p args(*list, 3, **opts), [*list, *none, 0], {**opts, y: 2}
@@ -91,7 +91,7 @@ fn literals() {
         p ?a, "\x41\u{42 43}", 0b101, 0o17, 0x1f, 0_10, 1_000
         name = "x"
         p :"sym_#{name}", {"key": 1, name:}
-        def show(s) = p(s)
+        fn show(s) = p(s)
         show <<EOS
 __END__
 EOS
@@ -110,33 +110,33 @@ EOS
 #[test]
 fn classes_and_singletons() {
     let src = r##"
-        class Counter
+        class Counter {
           @@total = 0
-          class << self
+          class << self {
             attr_accessor :label
-            def create = new.tap { @@total += 1 }
-            def total = @@total
-          end
-        end
+            fn create = new.tap { @@total += 1 }
+            fn total = @@total
+          }
+        }
         Counter.label = "c"
         2.times { Counter.create }
         p Counter.total, Counter.label
-        module Outer
+        module Outer {
           LIMIT = 3
-          class Inner
-            def limit = LIMIT
-          end
-        end
-        class Outer::Other; end
+          class Inner {
+            fn limit = LIMIT
+          }
+        }
+        class Outer::Other {  }
         p Outer::Inner.new.limit, Outer::Other.name, ::Outer::LIMIT
         o = Object.new
-        def o.hi = "hi from o"
+        fn o.hi = "hi from o"
         p o.hi, o.singleton_methods
-        Named = Class.new(StandardError) { def extra = 1 }
+        Named = Class.new(StandardError) { fn extra = 1 }
         p Named.name, Named.new.extra, Named.ancestors.include?(StandardError)
-        class String
+        class String {
           alias shout upcase
-        end
+        }
         p "a".shout
     "##;
     assert_eq!(
@@ -149,14 +149,14 @@ fn classes_and_singletons() {
 fn control_flow() {
     let src = r##"
         r = []
-        for i, j in [[1, 2], [3, 4]] do r << i + j end
+        for i, j in [[1, 2], [3, 4]] { r << i + j }
         p r, i
         n = 0
-        begin n += 1 end while n < 3
+        loop { n += 1; break unless n < 3 }
         p n
-        def f
+        fn f() {
           [1, 2].each { |x| return x * 10 }
-        end
+        }
         p f
         p(catch_panic { Proc.new { break }.call }.err.class)
         p defined?(foo), defined?(p), defined?(String), defined?(@x), defined?(r), defined?(none)
@@ -176,26 +176,26 @@ fn control_flow() {
 #[test]
 fn pattern_matching() {
     let src = r##"
-        def describe(v)
-          case v
-          in Integer | Float => n if n > 100 then "big #{n}"
-          in Integer then "int"
-          in [] then "empty"
-          in [first, *rest] then "list #{first} +#{rest.size}"
-          in {name: String => name, age:} then "#{name}/#{age}"
-          in {type: :circle, r:} then "circle #{r}"
-          else "other"
-          end
-        end
+        fn describe(v) {
+          case v {
+          in Integer | Float => n if n > 100 { "big #{n}" }
+          in Integer { "int" }
+          in [] { "empty" }
+          in [first, *rest] { "list #{first} +#{rest.size}" }
+          in {name: String => name, age:} { "#{name}/#{age}" }
+          in {type: :circle, r:} { "circle #{r}" }
+          else { "other" }
+          }
+        }
         p describe(500), describe(5), describe([]), describe([1, 2, 3])
         p describe({name: "Ada", age: 36}), describe({type: :circle, r: 2}), describe("s")
         config = {db: {user: "admin", port: 5432}}
         config => {db: {user:}}
         p user
         p((1 in Integer), ([1, [2, 3]] in [_, [_, x]]), x)
-        case [1, 42, "x", 7]
-        in [*, String => s, *post] then p [s, post]
-        end
+        case [1, 42, "x", 7] {
+        in [*, String => s, *post] { p [s, post] }
+        }
         p(catch_panic { 5 => String }.err.class)
     "##;
     assert_eq!(
@@ -270,7 +270,7 @@ fn deep_nesting_is_a_syntax_error_not_a_crash() {
                 deep("(", ")", 10_000),
                 deep("[", "]", 10_000),
                 deep("\"#{", "}\"", 10_000),
-                deep("-> { ", " }", 10_000),
+                deep("|| { ", " }", 10_000),
                 deep("!", "", 10_000),
                 format!("p 1{}", " + 1".repeat(10_000)),
                 format!("p 1{}", ".abs".repeat(10_000)),
@@ -296,7 +296,7 @@ fn operations_never_clobber_locals() {
         x = 1 + x
         y = 5
         y = [y, y * 2, x - y]
-        def f(a) = (a = 10 - a; a * a)
+        fn f(a) = (a = 10 - a; a * a)
         s = "ab"
         s = s + s.upcase
         z = 3
@@ -308,7 +308,7 @@ fn operations_never_clobber_locals() {
         b = 3; b = (b if b > 1)
         c = 2; c = (c == 2 && c + 1)
         d = 1; d = (d.none? || d + 1)
-        e = 2; e = (case e when 2 then e * 5 end)
+        e = 2; e = (case e { when 2 { e * 5 } })
         g = 2; g = (1; g)
         h = 6; h = (h > 0 and h)
         p [a, b, c, d, e, g, h]
@@ -324,10 +324,10 @@ fn immediate_operands() {
     // `x + 1` / `x - 2` compile to AddI/SubI; non-Integers and overflow
     // take the ordinary path
     let src = r##"
-        class Meters
-          def initialize(n) = @n = n
-          def +(o) = "#{@n + o}m"
-        end
+        class Meters {
+          fn initialize(n) = @n = n
+          fn +(o) = "#{@n + o}m"
+        }
         big = 9223372036854775807
         p 1 + 1, 5 - -2, 1.5 + 1, big + 1, -big - 3, "a" + "b", [1, 2] - [1], Meters.new(2) + 3
     "##;
@@ -352,11 +352,11 @@ fn local_increments_and_discarded_values() {
         k -= 3
         [1, 2].each { i += 10 }
         n = 0
-        r = while n < 3
+        r = while n < 3 {
           n += 1
           :ignored
-        end
-        def m(x) = (x += 1; x * 2)
+        }
+        fn m(x) = (x += 1; x * 2)
         p f, s, k, i, n, r, m(4)
     "##;
     assert_eq!(run(src), "1\n3\n3\n3\n2.5\n\"ab\"\n7\n23\n3\nnone\n10\n");
@@ -367,16 +367,16 @@ fn jumps_to_returns_keep_their_results() {
     // the peephole pass turns jumps to a Return into the Return, and
     // `Move(a, b); Return(a)` into `Return(b)`
     let out = run(r#"
-        def a(x) = x ? (x > 1 ? :big : :one) : :none
-        def b(x)
-          if x
+        fn a(x) = x ? (x > 1 ? :big : :one) : :none
+        fn b(x) {
+          if x {
             y = x * 2
             y
-          else
-            unless x.none? then :false else :nil end
-          end
-        end
-        def c(x) = while x > 0; x -= 1; break :broke if x == 2; end
+          } else {
+            unless x.none? { :false } else { :nil }
+          }
+        }
+        fn c(x) = while x > 0 { x -= 1; break :broke if x == 2 }
         p a(5), a(1), a(none), b(3), b(false), b(none), c(5), c(1)
         p [1, 2, 3].map { |v| v.odd? ? v : -v }
     "#);
@@ -388,9 +388,9 @@ fn adding_an_immediate_to_a_local() {
     // `x + 1` with x a local compiles to AddIR/SubIR; the slow path takes
     // boxed Integers, Floats and any `+`/`-` method
     let out = run(r#"
-        def f(x) = [x + 1, x - 2, 10 - 3, x + 1 + 1]
+        fn f(x) = [x + 1, x - 2, 10 - 3, x + 1 + 1]
         p f(1), f(2**62), f(2.5)
-        class Tag; def +(o) = "tag+#{o}"; def -(o) = "tag-#{o}"; end
+        class Tag { fn +(o) = "tag+#{o}"; fn -(o) = "tag-#{o}" }
         t = Tag.new
         p t + 1, t - 1
         m = 140737488355327
@@ -408,19 +408,19 @@ fn fused_comparisons_keep_their_meaning() {
     // `if a < b` / `while i < n` with locals or Integer literals try a fused
     // compare-and-branch; other operands take the generic path after it
     let out = run(r#"
-        def cmp(a, b) = [a < b ? 1 : 0, a <= b ? 1 : 0, a > b ? 1 : 0, a >= b ? 1 : 0, a == b ? 1 : 0]
-        def lit(a) = [a < 2 ? :lt : :ge, (a == 2 ? :eq : :ne), (a >= 2 ? :ge : :lt)]
+        fn cmp(a, b) = [a < b ? 1 : 0, a <= b ? 1 : 0, a > b ? 1 : 0, a >= b ? 1 : 0, a == b ? 1 : 0]
+        fn lit(a) = [a < 2 ? :lt : :ge, (a == 2 ? :eq : :ne), (a >= 2 ? :ge : :lt)]
         p cmp(1, 2), cmp(2, 2), cmp(1.5, 2), cmp(2**60, 2**61), cmp("a", "b")
         p lit(1), lit(2), lit(2.0), lit(2**62)
         nan = 0.0 / 0.0
         p cmp(nan, 1.0), (nan < 2 ? :t : :f)
-        class V; include Comparable; attr_reader :v; def initialize(v) = @v = v; def <=>(o) = v <=> o.v; end
+        class V { include Comparable; attr_reader :v; fn initialize(v) = @v = v; fn <=>(o) = v <=> o.v }
         x, y = V.new(1), V.new(2)
         p cmp(x, y)
         i = 0; n = 5; s = 0
-        while i < n; s += i; i += 1; end
+        while i < n { s += i; i += 1 }
         j = 10
-        until j <= 7; j -= 1; end
+        until j <= 7 { j -= 1 }
         k = 0
         k += 1 while k < 3.5
         p s, j, k
@@ -440,7 +440,7 @@ fn blocks_reaching_outer_locals_through_nested_blocks() {
     let out = run(r#"
         x = 0
         [1, 2].each { [10].each { x += 1 } }
-        def mk = [1].map { |a| -> { a + 1 } }.first
+        fn mk = [1].map { |a| || { a + 1 } }.first
         y = 5
         f = proc { proc { proc { y * 2 } } }
         g = [1].map { |v| [2].map { |w| [3].map { v + w } } }
@@ -452,18 +452,18 @@ fn blocks_reaching_outer_locals_through_nested_blocks() {
 #[test]
 fn yield_runs_the_block_directly() {
     let out = run(r#"
-        def one = yield(1)
-        def two = yield(1, 2)
-        def splat(a) = yield(*a)
-        def each_twice(a) = a.each { |x| yield x; yield x }
-        def no_block = yield
-        def stop = [yield(1), :after]
+        fn one = yield(1)
+        fn two = yield(1, 2)
+        fn splat(a) = yield(*a)
+        fn each_twice(a) = a.each { |x| yield x; yield x }
+        fn no_block = yield
+        fn stop = [yield(1), :after]
         p one { |x| x + 1 }, two { |a, b| a + b }, splat([3, 4]) { |a, b| a * b }
         r = []
         each_twice([1, 2]) { |x| r << x }
         p r, catch_panic { no_block }.err.message
         p stop { |x| break :broke }, stop { |x| next x * 10 }
-        p one(&->(x) { x * 3 }), (catch_panic { two(&->(x) { x }) }.err && :strict)
+        p one(&|x| { x * 3 }), (catch_panic { two(&|x| { x }) }.err && :strict)
         p one(&:to_s)
     "#);
     assert_eq!(

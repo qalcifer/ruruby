@@ -1,17 +1,17 @@
 # Hashes, strings, case/when, while, modules, format
-module Greeter
-  def greet
+module Greeter {
+  fn greet() {
     "Hello, #{name}!"
-  end
-end
+  }
+}
 
-class Person
+class Person {
   include Greeter
   attr_accessor :name
-  def initialize(name)
+  fn initialize(name) {
     @name = name
-  end
-end
+  }
+}
 
 pp = Person.new("Ada")
 puts pp.greet
@@ -23,24 +23,24 @@ counts = Hash.new(0)
 top = counts.sort_by { |w, c| [-c, w] }.first(3)
 top.each { |w, c| puts "#{w.ljust(6)} #{c}" }
 
-def classify(x)
-  case x
-  when Integer then "int"
-  when 1.0..2.0 then "small float"
-  when String, Symbol then "text"
-  when none then "nothing"
-  else "other"
-  end
-end
+fn classify(x) {
+  case x {
+  when Integer { "int" }
+  when 1.0..2.0 { "small float" }
+  when String, Symbol { "text" }
+  when none { "nothing" }
+  else { "other" }
+  }
+}
 [1, 1.5, "s", :t, none, 9.9].each { |v| puts classify(v) }
 
 i = 0
-while i < 10
+while i < 10 {
   i += 1
   next if i % 3 != 0
   puts "multiple of 3: #{i}"
   break if i >= 6
-end
+}
 
 puts format("%05.2f|%-5s|%3d|%x", 3.14159, "ab", 42, 255)
 puts "%s has %d items" % ["list", 3]

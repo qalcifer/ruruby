@@ -12,46 +12,46 @@ fn get_idx_and_size() {
         p a[0], a[-1], a[3], a[-4], a[1.9], a[0..1]
         h = {a: 1, "s" => 2}
         p h[:a], h["s"], h[:zz], Hash.new(7)[:x], Hash.new { |hh, k| k.to_s }[:y]
-        class Key
-          def initialize(n) = @n = n
-          def hash = 1
-          def eql?(o) = true
-        end
+        class Key {
+          fn initialize(n) = @n = n
+          fn hash = 1
+          fn eql?(o) = true
+        }
         p({Key.new(1) => :found}[Key.new(2)])
-        class Sub < Array
-          def [](i) = :sub
-          def size = :subsize
-        end
+        class Sub < Array {
+          fn [](i) = :sub
+          fn size = :subsize
+        }
         s = Sub.new
         p s[0], s.size
         b = [1, 2]
-        def b.[](i) = :singleton
-        def b.length = :len
+        fn b.[](i) = :singleton
+        fn b.length = :len
         p b[0], b.length, [1, 2][0]
         p "héllo".size, [1, 2, 3].size, {a: 1}.length, (1..4).size
         o = Object.new
-        def o.size = 42
+        fn o.size = 42
         p o.size
-        class Array
+        class Array {
           alias_method :__orig_aref, :[]
           alias_method :__orig_size, :size
-          def [](*) = :redefined
-          def size = :resized
-        end
+          fn [](*) = :redefined
+          fn size = :resized
+        }
         p [1][0], [1].size, {a: 1}[:a], {a: 1}.size
-        class Array
+        class Array {
           alias_method :[], :__orig_aref
           alias_method :size, :__orig_size
-        end
+        }
         p [1][0], [1].size
-        class Hash
-          def size = :hsize
-        end
+        class Hash {
+          fn size = :hsize
+        }
         p({a: 1}.size, [5][0])
-        class C
-          def go = size
-          private def size = :private_size
-        end
+        class C {
+          fn go = size
+          private fn size = :private_size
+        }
         p C.new.go
         p catch_panic { none[0] }.err.name
     "##)
@@ -82,28 +82,28 @@ fn set_idx_and_shl() {
         p catch_panic { f[0] = 2 }.err.class
         p catch_panic { f << 2 }.err.class
         p catch_panic { {}.freeze[:a] = 1 }.err.class
-        class Sub < Array
-          def []=(i, v) = super(i, v.to_s)
-          def <<(v) = super(v * 2)
-        end
+        class Sub < Array {
+          fn []=(i, v) = super(i, v.to_s)
+          fn <<(v) = super(v * 2)
+        }
         s2 = Sub.new
         s2[0] = 1
         s2 << 3
         p s2
-        class Array
+        class Array {
           alias_method :__orig_aset, :[]=
           alias_method :__orig_shl, :<<
-          def []=(i, v) = none
-          def <<(v) = self
-        end
+          fn []=(i, v) = none
+          fn <<(v) = self
+        }
         c = [0]
         c[0] = 1
         c << 2
         p c
-        class Array
+        class Array {
           alias_method :[]=, :__orig_aset
           alias_method :<<, :__orig_shl
-        end
+        }
         c[0] = 1
         c << 2
         p c
@@ -139,8 +139,8 @@ fn set_idx_and_shl() {
 #[test]
 fn interpolation_and_string_keys() {
     let out = run_capture(r##"
-        class Foo; def to_s = "foo!"; end
-        class Bad; def to_s = 42; end
+        class Foo { fn to_s = "foo!" }
+        class Bad { fn to_s = 42 }
         x = 5
         p "a#{x}b#{none}c#{true}#{1.5}#{:sym}#{"str"}#{Foo.new}#{[1, "x"]}#{{a: 1}}"
         p "#{x}", "#{x}#{x}", "lit", :"dyn#{x}", "#{1 << 60}", "#{2**70}", "#{-0.0}#{1e20}"
@@ -148,9 +148,9 @@ fn interpolation_and_string_keys() {
         s = "#{s}#{s}!"
         p s, Bad.new.to_s.class
         p "#{Bad.new}".start_with?("#<Bad")
-        class Integer; alias_method :__to_s, :to_s; def to_s(*) = "int"; end
+        class Integer { alias_method :__to_s, :to_s; fn to_s(*) = "int" }
         p "#{7}"
-        class Integer; alias_method :to_s, :__to_s; end
+        class Integer { alias_method :to_s, :__to_s }
         h = {"x" => 1, "y" => [2]}
         p h, h.keys.map(&:frozen?), "x".frozen?
         k = "z"
@@ -196,30 +196,30 @@ fn operands_in_place() {
         p a[i], h[k], a[i + 1], a[a.size - 1]
         x = [5, 6]
         p x[(x = [7, 8]; 1)], x
-        class Counter
+        class Counter {
           attr_reader :calls
-          def initialize = @calls = 0
-          def size
+          fn initialize = @calls = 0
+          fn size() {
             @calls += 1
             2.5
-          end
-        end
+          }
+        }
         c = Counter.new
         n = 0
         n += 1 while n < c.size
         p n, c.calls
-        class Grow < Array
-          def walk
+        class Grow < Array {
+          fn walk() {
             i = 0
             out = []
-            while i < size
+            while i < size {
               out << self[i]
               push(i) if size < 4
               i += 1
-            end
+            }
             out
-          end
-        end
+          }
+        }
         g = Grow.new
         g.push(:a)
         p g.walk
@@ -227,7 +227,7 @@ fn operands_in_place() {
         j = 0
         j += 1 while j < s.length
         p j
-        def m(arr) = arr.size
+        fn m(arr) = arr.size
         p m([1, 2]), m({a: 1}), m("xyz")
     "##)
     .unwrap();

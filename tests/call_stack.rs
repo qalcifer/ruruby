@@ -25,16 +25,16 @@ fn small_stack<T: Send + 'static>(kib: usize, f: impl FnOnce() -> T + Send + 'st
 fn deep_ruby_recursion_needs_no_native_stack() {
     let out = small_stack(512, || {
         run(r#"
-            def down(n) = n == 0 ? 0 : 1 + down(n - 1)
-            def via_yield(n) = n == 0 ? 0 : twice { 1 + via_yield(n - 1) }
-            def twice = yield
-            class Num
-              def initialize(n) = @n = n
-              def +(o) = @n == 0 ? o : Num.new(@n - 1) + (o + 1)
-            end
+            fn down(n) = n == 0 ? 0 : 1 + down(n - 1)
+            fn via_yield(n) = n == 0 ? 0 : twice { 1 + via_yield(n - 1) }
+            fn twice = yield
+            class Num {
+              fn initialize(n) = @n = n
+              fn +(o) = @n == 0 ? o : Num.new(@n - 1) + (o + 1)
+            }
             # each/map/times are written in Ruby (prelude.rb), so recursing
             # through them needs no native stack either
-            def via_each(n) = n == 0 ? 0 : [n].map { |k| 1 + via_each(k - 1) }.first
+            fn via_each(n) = n == 0 ? 0 : [n].map { |k| 1 + via_each(k - 1) }.first
             p down(9_000), via_yield(3_000), Num.new(4_000) + 0, via_each(2_000)
         "#)
     });
@@ -45,7 +45,7 @@ fn deep_ruby_recursion_needs_no_native_stack() {
 fn runaway_recursion_is_a_system_stack_error() {
     let out = small_stack(512, || {
         run(r#"
-            def forever(n) = forever(n + 1)
+            fn forever(n) = forever(n + 1)
             p(catch_panic { forever(0) }.err.message)
             p(catch_panic { forever(0) }.err.class)
         "#)
@@ -63,7 +63,7 @@ fn natives_calling_back_into_ruby_stay_within_the_stack_budget() {
         interp.vm.stack_budget = 256 << 10;
         interp.capture_output();
         let src = r#"
-            def deep(n) = n == 0 ? 0 : [n].inject(0) { |_, k| 1 + deep(k - 1) }
+            fn deep(n) = n == 0 ? 0 : [n].inject(0) { |_, k| 1 + deep(k - 1) }
             p deep(5)
             p(catch_panic { deep(100_000) }.err && :caught)
             p deep(5)
@@ -78,36 +78,36 @@ fn natives_calling_back_into_ruby_stay_within_the_stack_budget() {
 fn control_flow_across_frames() {
     let src = r#"
         log = []
-        def each_twice(a)
+        fn each_twice(a) {
           a.each { |x| yield x; yield x }
-        end
+        }
         # break leaves two Ruby frames and a native one
         r = each_twice([1, 2]) { |x| break x * 10 if x == 2; log << x }
         p r, log
         # return from a block inside a method called from a block
-        def find_first(list) = list.each { |x| return x if yield(x) } && none
+        fn find_first(list) = list.each { |x| return x if yield(x) } && none
         p find_first([1, 4, 9]) { |x| x > 3 }
         # panics unwind through in-loop frames to catch_panic, again and again
-        def boom(n) = n == 0 ? panic("deep") : boom(n - 1)
+        fn boom(n) = n == 0 ? panic("deep") : boom(n - 1)
         tries = 0
         r = none
-        while tries < 3
+        while tries < 3 {
           tries += 1
           r = catch_panic { boom(50) }
-        end
+        }
         p [tries, r.err.message]
         # super chains, method_missing, define_method lambdas and class bodies
-        class A; def hi(x) = "A#{x}"; end
-        class B < A; def hi(x) = "B" + super; end
-        class C < B; def hi(x) = "C" + super(x + 1); end
-        class Ghost; def method_missing(name, *args) = [name, args]; end
-        class D
+        class A { fn hi(x) = "A#{x}" }
+        class B < A { fn hi(x) = "B" + super }
+        class C < B { fn hi(x) = "C" + super(x + 1) }
+        class Ghost { fn method_missing(name, *args) = [name, args] }
+        class D {
           define_method(:stop) { |x| [1, 2, 3].each { |y| return y * x if y == 2 }; :never }
-        end
-        v = class E; 42; end
+        }
+        v = class E { 42 }
         p C.new.hi(1), Ghost.new.zap(1, 2), D.new.stop(5), v
         # a lambda's break and return stay inside it
-        l = -> { [1, 2].each { |x| return x + 100 }; :no }
+        l = || { [1, 2].each { |x| return x + 100 }; :no }
         m = lambda { break 7 }
         p l.call, m.call
     "#;
@@ -123,34 +123,34 @@ fn closures_outlive_their_frames() {
     // registers live on the VM stack while a frame runs; a captured env
     // takes a copy when the frame exits, however it exits
     let src = r#"
-        def counter
+        fn counter() {
           n = 0
-          [-> { n += 1 }, -> { n }]
-        end
+          [|| { n += 1 }, || { n }]
+        }
         inc, get = counter
         inc.(); inc.()
         p get.()
-        def nested
+        fn nested() {
           a = 1
           proc { b = 10; proc { a + b } }
-        end
+        }
         p nested.call.call
         $saved = none
-        def leaves_by_raise
+        fn leaves_by_raise() {
           x = 5
-          $saved = -> { x * 2 }
+          $saved = || { x * 2 }
           panic "boom"
-        end
+        }
         catch_panic { leaves_by_raise }
         p $saved.()
-        def leaves_by_break
+        fn leaves_by_break() {
           y = 7
-          [1].each { $saved = -> { y + 1 }; break }
+          [1].each { $saved = || { y + 1 }; break }
           y = 8
           :done
-        end
+        }
         p leaves_by_break, $saved.()
-        fs = (1..3).map { |i| -> { i * 10 } }
+        fs = (1..3).map { |i| || { i * 10 } }
         p fs.map(&:call)
         GC.stress = true
         p inc.(), get.(), nested.call.call
@@ -163,29 +163,29 @@ fn method_caches_see_every_change() {
     // `call(o)` is one Send whose inline cache gets filled, then each kind
     // of change must make it look the method up again
     let src = r#"
-        class A; def hi = "A"; end
-        def call(o) = catch_panic { o.hi }.unwrap_or("none")
+        class A { fn hi = "A" }
+        fn call(o) = catch_panic { o.hi }.unwrap_or("none")
         a = A.new
         out = [call(a)]
-        class A; def hi = "A2"; end
+        class A { fn hi = "A2" }
         out << call(a)
-        module M; def hi = "M"; end
-        class A; include M; end
+        module M { fn hi = "M" }
+        class A { include M }
         out << call(a)
-        module P; def hi = "P"; end
-        class A; prepend P; end
+        module P { fn hi = "P" }
+        class A { prepend P }
         out << call(a)
-        def a.hi = "singleton"
+        fn a.hi = "singleton"
         out << call(a)
         b = A.new
         out << call(b)
         b.extend(Module.new { define_method(:hi) { "extended" } })
         out << call(b)
-        class B; def hi = "B"; end
+        class B { fn hi = "B" }
         out << call(B.new)
-        class B; alias_method :hello, :hi; undef_method :hi; end
+        class B { alias_method :hello, :hi; undef_method :hi }
         out << call(B.new)
-        class B; define_method(:hi) { "defined" }; end
+        class B { define_method(:hi) { "defined" } }
         out << call(B.new)
         B.send(:remove_method, :hi)
         out << call(B.new) << B.new.hello

@@ -1,37 +1,37 @@
 # Blocks, closures, yield, procs, break/next, Enumerable
-def twice
+fn twice() {
   yield 1
   yield 2
-end
+}
 
 total = 0
 twice { |x| total += x * 10 }
 puts total
 
-def make_counter
+fn make_counter() {
   count = 0
   increment = proc { count += 1 }
   get = proc { count }
   [increment, get]
-end
+}
 
 inc, get = make_counter
 3.times { inc.call }
 puts get.call
 
-def with_block_check
-  if block_given?
+fn with_block_check() {
+  if block_given? {
     yield
-  else
+  } else {
     "no block"
-  end
-end
+  }
+}
 puts with_block_check
 puts with_block_check { "got block" }
 
-r = [1, 2, 3, 4, 5].each do |x|
+r = [1, 2, 3, 4, 5].each { |x|
   break x * 100 if x == 3
-end
+}
 puts r
 
 evens = (1..10).select { |x| x.even? }

@@ -15,16 +15,16 @@ fn run(src: &str) -> String {
 #[test]
 fn cyclic_garbage_is_freed() {
     let out = run(r#"
-        class Node; attr_accessor :other; end
-        def make_proc = (x = proc { x })
+        class Node { attr_accessor :other }
+        fn make_proc = (x = proc { x })
         keep = []
         i = 0
-        while i < 30_000
+        while i < 30_000 {
           a = Node.new; b = Node.new; a.other = b; b.other = a
           make_proc
           keep << [i] if i % 1000 == 0
           i += 1
-        end
+        }
         GC.start
         none
         p GC.count > 0, GC.live < 5_000, keep.size, keep.last
@@ -40,23 +40,23 @@ fn every_kind_of_root_survives_stress() {
         GC.stress = true
         $global = ["global"]
         CONST = {k: "const"}
-        class Holder
+        class Holder {
           @class_ivar = "class ivar"
           @@cvar = ["cvar"]
-          def self.ivar = @class_ivar
-          def cvar = @@cvar
+          fn self.ivar = @class_ivar
+          fn cvar = @@cvar
           define_method(:dm) { "define_method #{[1]}" }
-        end
+        }
         obj = Object.new
-        def obj.single = "singleton method"
+        fn obj.single = "singleton method"
         counter = 0
-        bump = -> { counter += 1; "closure #{counter}" }
+        bump = || { counter += 1; "closure #{counter}" }
         h = Hash.new { |hash, k| hash[k] = "default #{k}" }
-        def deep(n) = n == 0 ? ["deep"] : [deep(n - 1)].flatten
-        def ensured
+        fn deep(n) = n == 0 ? ["deep"] : [deep(n - 1)].flatten
+        fn ensured() {
           $log = "ensure ran"
           yield
-        end
+        }
         r = [1, 2, 3].map { |x| "m#{x}" }
         e = catch_panic { panic "boom #{[1]}" }.err
         v = ensured { [1, 2].each { |x| break "broke #{x}" if x == 2 } }
@@ -114,20 +114,20 @@ fn anonymous_classes_are_collected() {
     // classes live in the heap too; unreachable ones are freed, named and
     // referenced ones survive
     let out = run(r#"
-        Kept = Class.new { def hi = "kept" }
-        held = [Class.new(StandardError) { def hi = "held" }]
+        Kept = Class.new { fn hi = "kept" }
+        held = [Class.new(StandardError) { fn hi = "held" }]
         i = 0
-        while i < 20_000
-          c = Class.new { def x = 1 }
+        while i < 20_000 {
+          c = Class.new { fn x = 1 }
           c.new.x
           Module.new
           i += 1
-        end
+        }
         GC.start
         none
         p GC.live < 20_000, Kept.new.hi, held[0].new.hi, held[0].ancestors.include?(StandardError)
         GC.stress = true
-        k = Class.new(Kept) { def hi = super + "!" }
+        k = Class.new(Kept) { fn hi = super + "!" }
         p k.new.hi, Kept.name, k.superclass == Kept
     "#);
     assert_eq!(out, "true\n\"kept\"\n\"held\"\ntrue\n\"kept!\"\n\"Kept\"\ntrue\n");

@@ -434,12 +434,7 @@ impl Parser {
     fn at_stmts_end(&self) -> bool {
         matches!(
             self.peek(),
-            Tok::Eof
-                | Tok::RBrace
-                | Tok::RParen
-                | Tok::Kw(
-                    Kw::End | Kw::Else | Kw::Elsif | Kw::When | Kw::In | Kw::Rescue | Kw::Ensure
-                )
+            Tok::Eof | Tok::RBrace | Tok::RParen
         )
     }
 
@@ -456,7 +451,13 @@ impl Parser {
         while !self.at_stmts_end() {
             v.push(self.parse_stmt()?);
             if !self.at_stmts_end() && !matches!(self.peek(), Tok::Newline | Tok::Semi) {
-                return Err(self.err("unexpected token"));
+                return Err(match self.peek() {
+                    Tok::Kw(Kw::Elsif) => self.gone("elsif", "use `} else if cond {`"),
+                    Tok::Kw(Kw::Then) => self.gone("then", "put the body in `{ ... }`"),
+                    Tok::Kw(Kw::End) => self.gone("end", "close the block with `}`"),
+                    Tok::Kw(Kw::Do) => self.gone("do", "use `{ |x| ... }` or a closure `|x| ...`"),
+                    _ => self.err("unexpected token"),
+                });
             }
             self.skip_terms();
         }
@@ -1214,7 +1215,8 @@ impl Parser {
                 }
                 Tok::Amp => {
                     self.advance();
-                    block_arg = Some(b(if self.arg_ends() {
+                    // `&|x| x + 1` passes a closure; a bare `&` forwards the block
+                    block_arg = Some(b(if self.arg_ends() && !matches!(self.peek(), Tok::Pipe | Tok::OrOr) {
                         Node::LVar("%block".into())
                     } else {
                         self.parse_arg()?
@@ -1299,15 +1301,15 @@ impl Parser {
 
     fn parse_block_opt(&mut self, allow_brace: bool) -> PResult<Option<Box<Block>>> {
         if allow_brace && !self.no_brace && self.eat(&Tok::LBrace) {
-            return Ok(Some(Box::new(self.parse_block_body(true)?)));
+            return Ok(Some(Box::new(self.parse_block_body()?)));
         }
-        if !self.no_do && self.eat_kw(Kw::Do) {
-            return Ok(Some(Box::new(self.parse_block_body(false)?)));
+        if !self.no_do && self.at_kw(Kw::Do) {
+            return Err(self.gone("do", "use `{ |x| ... }` or a closure `|x| ...`"));
         }
         Ok(None)
     }
 
-    fn parse_block_body(&mut self, brace: bool) -> PResult<Block> {
+    fn parse_block_body(&mut self) -> PResult<Block> {
         self.push_scope(false);
         self.skip_nl();
         let mut params = Params::default();
@@ -1318,13 +1320,8 @@ impl Parser {
         } else {
             self.scopes.last_mut().unwrap().implicit_params = true;
         }
-        let body = if brace {
-            let body = self.with_no_do(false, |p| p.parse_stmts())?;
-            self.expect(&Tok::RBrace)?;
-            body
-        } else {
-            self.with_no_do(false, |p| p.parse_body_rescue())?
-        };
+        let body = self.with_no_do(false, |p| p.parse_stmts())?;
+        self.expect(&Tok::RBrace)?;
         self.finish_block(params, body)
     }
 
@@ -1677,7 +1674,7 @@ impl Parser {
                 // `END { }` runs at exit; `BEGIN { }` runs in place
                 self.advance();
                 self.advance();
-                let block = self.parse_block_body(true)?;
+                let block = self.parse_block_body()?;
                 if name == "BEGIN" {
                     return Ok(block.body);
                 }
@@ -1742,10 +1739,7 @@ impl Parser {
                 self.advance();
                 self.with_no_do(false, |p| p.parse_hash_literal())
             }
-            Tok::Lambda => {
-                self.advance();
-                self.parse_lambda()
-            }
+            Tok::Lambda => Err(self.gone("->", "use a closure `|x| ...`")),
             Tok::Pipe | Tok::OrOr => self.parse_closure(),
             Tok::Dot2 | Tok::Dot3 => self.parse_range(),
             Tok::Kw(kw) => {
@@ -1843,46 +1837,25 @@ impl Parser {
             Kw::SelfKw => Ok(Node::SelfRef),
             Kw::If => {
                 let cond = self.with_no_do(false, |p| p.header(|p| p.parse_expr()))?;
-                if self.at(&Tok::LBrace) {
-                    return self.parse_brace_if(cond);
-                }
-                self.eat_then();
-                let then = self.parse_stmts()?;
-                let els = self.parse_else_chain()?;
-                Ok(Node::If(b(cond), b(then), b(els)))
+                self.need_brace("if")?;
+                self.parse_brace_if(cond)
             }
             Kw::Unless => {
                 let cond = self.header(|p| p.parse_expr())?;
-                if self.at(&Tok::LBrace) {
-                    let then = self.parse_brace_body()?;
-                    let els = if self.brace_followed_by(Kw::Else) {
-                        self.advance();
-                        self.parse_brace_body()?
-                    } else {
-                        Node::Nil
-                    };
-                    return Ok(Node::If(b(cond), b(els), b(then)));
-                }
-                self.eat_then();
-                let then = self.parse_stmts()?;
-                let els = if self.eat_kw(Kw::Else) {
-                    self.parse_stmts()?
+                self.need_brace("unless")?;
+                let then = self.parse_brace_body()?;
+                let els = if self.brace_followed_by(Kw::Else) {
+                    self.advance();
+                    self.parse_brace_body()?
                 } else {
                     Node::Nil
                 };
-                self.expect_kw(Kw::End)?;
                 Ok(Node::If(b(cond), b(els), b(then)))
             }
             Kw::While | Kw::Until => {
                 let cond = self.with_no_do(true, |p| p.header(|p| p.parse_expr()))?;
-                let body = if self.at(&Tok::LBrace) {
-                    self.parse_brace_body()?
-                } else {
-                    self.eat_kw(Kw::Do);
-                    let body = self.parse_stmts()?;
-                    self.expect_kw(Kw::End)?;
-                    body
-                };
+                self.need_brace(if kw == Kw::While { "while" } else { "until" })?;
+                let body = self.parse_brace_body()?;
                 Ok(Node::While {
                     cond: b(cond),
                     body: b(body),
@@ -1892,16 +1865,22 @@ impl Parser {
             }
             Kw::For => self.parse_for(),
             Kw::Case => self.parse_case(),
-            Kw::Def => self.parse_def(false),
-            Kw::Fn => self.parse_def(true),
+            Kw::Def => Err(self.gone("def", "use `fn name(args) { ... }`")),
+            Kw::Fn => self.parse_def(),
             Kw::Class => self.parse_class(false),
             Kw::Module => self.parse_class(true),
-            Kw::Begin => self.parse_begin(),
+            Kw::Begin => Err(self.gone("begin", "group with parentheses `( ... )`")),
+            Kw::End => Err(self.gone("end", "close the block with `}`")),
+            Kw::Then => Err(self.gone("then", "put the body in `{ ... }`")),
+            Kw::Elsif => Err(self.gone("elsif", "use `} else if cond {`")),
+            Kw::Do => Err(self.gone("do", "use `{ |x| ... }` or a closure `|x| ...`")),
             Kw::Return => Ok(Node::Return(self.jump_value()?)),
             Kw::Break => Ok(Node::Break(self.jump_value()?)),
             Kw::Next => Ok(Node::Next(self.jump_value()?)),
             Kw::Redo => Ok(Node::Redo),
             Kw::Retry => Err(self.removed("retry")),
+            Kw::Rescue => Err(self.removed("rescue")),
+            Kw::Ensure => Err(self.removed("ensure")),
             Kw::Yield => {
                 let args = self.parse_bare_args()?.map(|(a, _)| a).unwrap_or_default();
                 Ok(Node::Yield(args))
@@ -1924,19 +1903,6 @@ impl Parser {
     // The helpers below are marked `inline(never)` so their locals don't
     // enlarge the frames of parse_keyword/parse_primary, which are on the
     // recursive path of every nested expression.
-
-    #[inline(never)]
-    fn parse_begin(&mut self) -> PResult<Node> {
-        Ok(match self.parse_body_rescue()? {
-            n @ Node::Begin { .. } => n,
-            n => Node::Begin {
-                body: b(n),
-                rescues: vec![],
-                else_body: None,
-                ensure: None,
-            },
-        })
-    }
 
     #[inline(never)]
     fn parse_super(&mut self) -> PResult<Node> {
@@ -2022,23 +1988,6 @@ impl Parser {
         }
     }
 
-    fn parse_else_chain(&mut self) -> PResult<Node> {
-        if self.eat_kw(Kw::Elsif) {
-            let cond = self.parse_expr()?;
-            self.eat_then();
-            let then = self.parse_stmts()?;
-            let els = self.parse_else_chain()?;
-            return Ok(Node::If(b(cond), b(then), b(els)));
-        }
-        let els = if self.eat_kw(Kw::Else) {
-            self.parse_stmts()?
-        } else {
-            Node::Nil
-        };
-        self.expect_kw(Kw::End)?;
-        Ok(els)
-    }
-
     /// `for a, b in expr do body end` → `expr.each { |%for| a, b = %for; body }`.
     /// The loop variables and body locals belong to the enclosing scope.
     #[inline(never)]
@@ -2050,14 +1999,8 @@ impl Parser {
         self.expect_kw(Kw::In)?;
         self.declare_mlhs(&lhs);
         let iter = self.with_no_do(true, |p| p.header(|p| p.parse_expr()))?;
-        let body = if self.at(&Tok::LBrace) {
-            self.parse_brace_body()?
-        } else {
-            self.eat_kw(Kw::Do);
-            let body = self.parse_stmts()?;
-            self.expect_kw(Kw::End)?;
-            body
-        };
+        self.need_brace("for")?;
+        let body = self.parse_brace_body()?;
         let param = self.fresh("for");
         let assign = match (&lhs.pre[..], &lhs.splat, &lhs.post[..]) {
             ([MTarget::Var(v)], None, []) => make_assign(v.clone(), Node::LVar(param.clone())),
@@ -2090,7 +2033,8 @@ impl Parser {
         } else {
             Some(self.header(|p| p.parse_expr())?)
         };
-        // lang-fork: `case x { when 1 { ... } else { ... } }`
+        // `case x { when 1 { ... } else { ... } }`
+        self.need_brace("case")?;
         let braced = self.eat(&Tok::LBrace);
         self.skip_terms();
         if self.at_kw(Kw::In) {
@@ -2171,9 +2115,9 @@ impl Parser {
     }
 
     #[inline(never)]
-    /// `def name(params) ... end`, or with `fn` (lang-fork) `fn name(params)
-    /// { ... }` / `fn name(params) = expr` (parameters only in parentheses).
-    fn parse_def(&mut self, fn_style: bool) -> PResult<Node> {
+    /// `fn name(params) { ... }` / `fn name(params) = expr` (parameters only
+    /// in parentheses, or none).
+    fn parse_def(&mut self) -> PResult<Node> {
         // singleton target: `def self.x`, `def obj.x`, `def Const.x`, `def (expr).x`
         let mut recv = None;
         if matches!(self.peek2(), Tok::Dot) {
@@ -2244,21 +2188,14 @@ impl Parser {
             let p = self.parse_params(Some(Tok::RParen), false)?;
             self.expect(&Tok::RParen)?;
             p
-        } else if !fn_style
-            && matches!(
-                self.peek(),
-                Tok::Ident(_) | Tok::Star | Tok::Pow | Tok::Amp | Tok::Label(_) | Tok::Dot3
-            )
-        {
-            self.parse_params(None, false)?
         } else {
             Params::default()
         };
-        let body = if fn_style && self.at(&Tok::LBrace) {
-            self.parse_brace_body()?
-        } else if fn_style && !self.at(&Tok::Assign) {
+        let body = if self.at(&Tok::LBrace) {
+            self.parse_code_body()?
+        } else if !self.at(&Tok::Assign) {
             return Err(self.err("fn: expected `(parameters)`, then `{ body }` or `= expression`"));
-        } else if self.at(&Tok::Assign) {
+        } else {
             // endless def: `def m(a) = expr`
             self.advance();
             self.skip_nl();
@@ -2267,8 +2204,6 @@ impl Parser {
                 return Err(self.removed("rescue"));
             }
             e
-        } else {
-            self.parse_body_rescue()?
         };
         let mut names = params.names();
         names.extend(destructured_names(&params));
@@ -2289,7 +2224,8 @@ impl Parser {
             // `class << obj`
             let target = self.header(|p| p.parse_expr())?;
             self.push_scope(true);
-            let body = if self.at(&Tok::LBrace) { self.parse_brace_body()? } else { self.parse_body_rescue()? };
+            self.need_brace("class << obj")?;
+            let body = self.parse_brace_body()?;
             let locals = self.pop_scope();
             return Ok(Node::SClass(b(target), b(body), locals));
         }
@@ -2300,7 +2236,8 @@ impl Parser {
             None
         };
         self.push_scope(true);
-        let body = if self.at(&Tok::LBrace) { self.parse_brace_body()? } else { self.parse_body_rescue()? };
+        self.need_brace(if is_module { "module" } else { "class" })?;
+        let body = self.parse_brace_body()?;
         let locals = self.pop_scope();
         Ok(Node::Class {
             path: b(path),
@@ -2343,7 +2280,18 @@ impl Parser {
         Ok(node)
     }
 
-    /// `{ statements }` (lang-fork bodies), the braces included.
+    /// A function's or closure's `{ statements }`, which may start with a
+    /// closure (`fn adder() { |x| x + 1 }`).
+    fn parse_code_body(&mut self) -> PResult<Node> {
+        self.expect(&Tok::LBrace)?;
+        let body = self.with_no_do(false, |p| p.parse_stmts())?;
+        self.skip_nl();
+        self.expect(&Tok::RBrace)?;
+        Ok(body)
+    }
+
+    /// A construct's `{ statements }` after its header (condition, subject,
+    /// class name), the braces included.
     fn parse_brace_body(&mut self) -> PResult<Node> {
         self.expect(&Tok::LBrace)?;
         if matches!(self.peek(), Tok::Pipe | Tok::OrOr) {
@@ -2358,6 +2306,19 @@ impl Parser {
         Ok(body)
     }
 
+    /// A removed keyword: what to write instead.
+    fn gone(&self, what: &str, instead: &str) -> String {
+        self.err(&format!("`{what}` was removed: {instead}"))
+    }
+
+    /// The `{` that starts a construct's body.
+    fn need_brace(&self, what: &str) -> PResult<()> {
+        if self.at(&Tok::LBrace) {
+            return Ok(());
+        }
+        Err(self.err(&format!("{what}: expected `{{` to start the body (`end` blocks were removed)")))
+    }
+
     /// lang-fork: exception handling is gone; say what replaces it.
     fn removed(&self, what: &str) -> String {
         let instead = if what == "ensure" {
@@ -2366,51 +2327,6 @@ impl Parser {
             "return Err(...) for expected failures, panic(...) for bugs (catch_panic { } at boundaries)"
         };
         self.err(&format!("`{what}` was removed: {instead}"))
-    }
-
-    /// A body up to and including `end`. lang-fork: `rescue`/`else`/`ensure`
-    /// clauses are errors (the code after this point parsed them before).
-    #[inline(never)]
-    fn parse_body_rescue(&mut self) -> PResult<Node> {
-        let body = self.parse_stmts()?;
-        match self.peek() {
-            Tok::Kw(Kw::Rescue) => return Err(self.removed("rescue")),
-            Tok::Kw(Kw::Ensure) => return Err(self.removed("ensure")),
-            Tok::Kw(Kw::Else) => return Err(self.removed("begin/else")),
-            _ => {}
-        }
-        self.expect_kw(Kw::End)?;
-        Ok(body)
-    }
-
-    #[inline(never)]
-    fn parse_lambda(&mut self) -> PResult<Node> {
-        self.push_scope(false);
-        let params = if self.at(&Tok::LParen) {
-            self.advance();
-            let p = self.parse_params(Some(Tok::RParen), true)?;
-            self.expect(&Tok::RParen)?;
-            p
-        } else if matches!(
-            self.peek(),
-            Tok::Ident(_) | Tok::Star | Tok::Pow | Tok::Amp | Tok::Label(_)
-        ) {
-            self.parse_params(None, true)?
-        } else {
-            self.scopes.last_mut().unwrap().implicit_params = true;
-            Params::default()
-        };
-        let body = if self.eat(&Tok::LBrace) {
-            let body = self.with_no_do(false, |p| p.parse_stmts())?;
-            self.expect(&Tok::RBrace)?;
-            body
-        } else if self.eat_kw(Kw::Do) {
-            self.with_no_do(false, |p| p.parse_body_rescue())?
-        } else {
-            return Err(self.err("expected lambda body"));
-        };
-        let block = self.finish_block(params, body)?;
-        Ok(Node::Lambda(Box::new(block)))
     }
 
     /// lang-fork closures: `|a, b| expr`, `|x| { stmts }`, `|| expr`. The body
@@ -2427,7 +2343,7 @@ impl Parser {
             p
         };
         let body = if self.at(&Tok::LBrace) {
-            self.parse_brace_body()?
+            self.parse_code_body()?
         } else {
             self.with_no_do(false, |p| p.parse_arg())?
         };

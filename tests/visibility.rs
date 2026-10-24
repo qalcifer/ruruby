@@ -12,25 +12,25 @@ fn run(src: &str) -> String {
 #[test]
 fn private_and_protected_with_names() {
     let out = run(r##"
-        def err
+        fn err() {
           r = catch_panic { yield; :ok }
           r.ok? ? r.ok : r.err.message
-        end
-        class A
-          def pub = "#{priv} #{self.priv} #{prot}"
-          def priv = "priv"
-          def prot = "prot"
-          def peer(o) = o.prot
-          def poke(o) = o.priv
-          def x=(v) = (@x = v)
-          def set = (self.x = 5; @x)
+        }
+        class A {
+          fn pub = "#{priv} #{self.priv} #{prot}"
+          fn priv = "priv"
+          fn prot = "prot"
+          fn peer(o) = o.prot
+          fn poke(o) = o.priv
+          fn x=(v) = (@x = v)
+          fn set = (self.x = 5; @x)
           private :priv, :x=
           protected :prot
-        end
-        class B < A
+        }
+        class B < A {
           public :priv
-          def call_peer(o) = o.prot
-        end
+          fn call_peer(o) = o.prot
+        }
         a = A.new
         p a.pub, err { a.priv }, err { a.prot }, a.peer(A.new), err { a.poke(A.new) }
         p B.new.priv, err { A.new.priv }, B.new.call_peer(A.new), a.set, err { a.x = 1 }
@@ -52,13 +52,13 @@ fn private_and_protected_with_names() {
 #[test]
 fn visibility_errors_and_inherited_methods() {
     let out = run(r##"
-        class A; def m = :a; end
-        class B < A; private :m; end
+        class A { fn m = :a }
+        class B < A { private :m }
         p A.new.m, catch_panic { B.new.m }.err.message
         p catch_panic { A.send(:private, :nope) }.err.message
-        class A; def m = :redefined; end
+        class A { fn m = :redefined }
         p A.new.m
-        class C; def m = 1; private :m; def m = 2; end
+        class C { fn m = 1; private :m; fn m = 2 }
         p C.new.m
     "##);
     assert_eq!(
@@ -71,40 +71,40 @@ fn visibility_errors_and_inherited_methods() {
 #[test]
 fn scope_default_visibility() {
     let out = run(r##"
-        def err
+        fn err() {
           r = catch_panic { yield }
           r.ok? ? r.ok : r.err.message
-        end
-        class A
-          def a = :a
+        }
+        class A {
+          fn a = :a
           private
-          def b = :b
+          fn b = :b
           protected
-          def c = :c
+          fn c = :c
           public
-          def d = "#{b} #{c}"
-          def initialize = none
+          fn d = "#{b} #{c}"
+          fn initialize = none
           private
-          def self.cm = :cm
-        end
+          fn self.cm = :cm
+        }
         x = A.new
         p x.a, x.d, err { x.b }, err { x.c }, err { x.initialize }, A.cm
-        class A; def e = :e; end
+        class A { fn e = :e }
         p x.e
-        module M
+        module M {
           module_function
-          def f = :f
-        end
-        class B; include M; def g = f; end
+          fn f = :f
+        }
+        class B { include M; fn g = f }
         p M.f, B.new.g, err { B.new.f }
-        class C
+        class C {
           private
-          class D; def inner = :inner; end
-          def m
-            def nested = :nested
+          class D { fn inner = :inner }
+          fn m() {
+            fn nested = :nested
             :m
-          end
-        end
+          }
+        }
         p C::D.new.inner, C.new.send(:m), C.new.nested
     "##);
     assert_eq!(
@@ -122,31 +122,31 @@ fn natives_that_define_methods_follow_the_scope() {
     // or a class_eval block) under `private` define private methods; called
     // on another class or from a method they define public ones
     let out = run(r##"
-        def err = catch_panic { yield }.unwrap_or(:private)
+        fn err = catch_panic { yield }.unwrap_or(:private)
         other = Class.new
-        c = Class.new do
+        c = Class.new {
           private
           attr_accessor :a
           [1].each { define_method(:d) { :d } }
           other.attr_reader :pub
-          def self.make = attr_reader(:from_cm)
-        end
+          fn self.make = attr_reader(:from_cm)
+        }
         c.make
         p err { c.new.a }, err { c.new.d }, other.new.pub, c.new.from_cm
         e = Class.new
         e.class_eval { private; attr_reader :r; define_method(:m) { :m } }
         p err { e.new.r }, err { e.new.m }, e.new.send(:m)
-        mod = Module.new do
+        mod = Module.new {
           module_function
           attr_reader :mf
           define_method(:dm) { :dm }
-        end
-        k = Class.new { include mod; def call = [mf, dm] }
+        }
+        k = Class.new { include mod; fn call = [mf, dm] }
         p mod.respond_to?(:mf), mod.dm, k.new.call, err { k.new.dm }
-        m2 = Module.new do
-          def f = :f
+        m2 = Module.new {
+          fn f = :f
           module_function :f
-        end
+        }
         p m2.f, err { Class.new { include m2 }.new.f }
         p catch_panic { Module.new { module_function :nope } }.err.message.start_with?("undefined method 'nope' for module")
     "##);
@@ -160,14 +160,14 @@ fn natives_that_define_methods_follow_the_scope() {
 #[test]
 fn aliases_and_builtin_private_methods() {
     let out = run(r##"
-        def err = catch_panic { yield }.unwrap_or(:private)
-        class A
-          private def priv = :priv
+        fn err = catch_panic { yield }.unwrap_or(:private)
+        class A {
+          private fn priv = :priv
           alias_method :priv2, :priv
           alias priv3 priv
-          def pub = :pub
+          fn pub = :pub
           alias pub2 pub
-        end
+        }
         a = A.new
         p err { a.priv2 }, err { a.priv3 }, a.pub2, a.send(:priv2)
         p err { Object.new.initialize }, err { Object.new.respond_to_missing?(:x, false) }
@@ -178,13 +178,13 @@ fn aliases_and_builtin_private_methods() {
 #[test]
 fn respond_to_and_public_send() {
     let out = run(r##"
-        class R
-          def pub = :pub
-          private def priv = :priv
-          protected def prot = :prot
-          def respond_to_missing?(name, all = false) = (@asked = [name, all]; name == :ghost)
-          def asked = @asked
-        end
+        class R {
+          fn pub = :pub
+          private fn priv = :priv
+          protected fn prot = :prot
+          fn respond_to_missing?(name, all = false) = (@asked = [name, all]; name == :ghost)
+          fn asked = @asked
+        }
         r = R.new
         p r.respond_to?(:pub), r.respond_to?(:priv), r.respond_to?(:priv, true)
         p r.respond_to?(:prot), r.respond_to?(:prot, true), r.respond_to?(:initialize)
@@ -202,27 +202,27 @@ fn respond_to_and_public_send() {
 #[test]
 fn listings_by_visibility() {
     let out = run(r##"
-        module M
-          def mpub = 1
-          private def mpriv = 1
-        end
-        class A
+        module M {
+          fn mpub = 1
+          private fn mpriv = 1
+        }
+        class A {
           include M
-          def pub = 1
-          private def priv = 1
-          protected def prot = 1
-        end
-        class B < A
+          fn pub = 1
+          private fn priv = 1
+          protected fn prot = 1
+        }
+        class B < A {
           public :priv
           undef_method :pub
-        end
+        }
         p A.instance_methods(false), A.public_instance_methods(false)
         p A.private_instance_methods(false), A.protected_instance_methods(false)
         p A.method_defined?(:mpub), A.method_defined?(:mpriv), A.method_defined?(:prot)
         p A.method_defined?(:mpub, false), A.private_method_defined?(:mpriv)
         p B.method_defined?(:priv, false), B.method_defined?(:pub), A.method_defined?(:priv)
         o = A.new
-        def o.single = 1
+        fn o.single = 1
         p o.singleton_methods, o.methods.include?(:priv), o.private_methods.include?(:priv)
         p o.protected_methods.include?(:prot), o.public_methods.include?(:mpub)
         p B.instance_methods.include?(:pub), B.public_instance_methods(false)
@@ -239,10 +239,10 @@ fn blocks_share_the_scope_visibility() {
     // a `private` in a block reaches the scope it was written in; blocks
     // run by class_eval & co. are scopes of their own, starting public
     let out = run(r##"
-        a = Class.new { -> { private }.call; def m = 1 }
-        b = Class.new { private; [1].each { [2].each { def n = 1 } }; def o = 1 }
-        c = Class.new { private; class_eval { def q = 1; [1].each { def r = 1 } }; def s = 1 }
-        d = Class.new { class_eval { private }; def t = 1 }
+        a = Class.new { (|| { private }).call; fn m = 1 }
+        b = Class.new { private; [1].each { [2].each { fn n = 1 } }; fn o = 1 }
+        c = Class.new { private; class_eval { fn q = 1; [1].each { fn r = 1 } }; fn s = 1 }
+        d = Class.new { class_eval { private }; fn t = 1 }
         p a.private_method_defined?(:m), b.private_instance_methods(false).sort
         p c.public_instance_methods(false).sort, c.private_method_defined?(:s)
         p d.public_method_defined?(:t)
@@ -255,12 +255,12 @@ fn blocks_without_upvars_still_share_visibility() {
     // a block that reads no outer local skips the frame's env, unless the
     // frame's code sets a default visibility
     let out = run(r##"
-        c = Class.new do
+        c = Class.new {
           blk = proc { attr_reader :late }
           private
           blk.call
-          [1].each { def in_block = 1 }
-        end
+          [1].each { fn in_block = 1 }
+        }
         p c.private_method_defined?(:late), c.private_method_defined?(:in_block)
         d = Class.new { [1].each { define_method(:pub) { 1 } } }
         p d.public_method_defined?(:pub)

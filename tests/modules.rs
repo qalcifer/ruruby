@@ -26,12 +26,12 @@ fn run(dir: &Path) -> Result<String, String> {
 }
 
 const PERSON: &str = "
-class Person
-  def initialize(name) = @name = name
-  def to_s = \"Person(#{@name})\"
-end
+class Person {
+  fn initialize(name) = @name = name
+  fn to_s = \"Person(#{@name})\"
+}
 HELPER = 42
-def shout(s) = s.upcase
+fn shout(s) = s.upcase
 $runs = ($runs || 0) + 1
 ";
 
@@ -41,8 +41,8 @@ fn use_imports_named_constants() {
         "named",
         &[
             ("person.rb", PERSON),
-            ("models/user.rb", "use person::Person\nclass User < Person\n  def admin? = false\nend\n"),
-            ("shapes.rb", "class Circle; def area = 3; end\nclass Square; def area = 4; end\n"),
+            ("models/user.rb", "use person::Person\nclass User < Person {\n  fn admin? = false\n}\n"),
+            ("shapes.rb", "class Circle { fn area = 3 }\nclass Square { fn area = 4 }\n"),
             (
                 "main.rb",
                 r#"
@@ -68,8 +68,8 @@ fn use_glob_and_namespaces_stay_apart() {
     let dir = project(
         "glob",
         &[
-            ("a.rb", "class Thing; def who = :a; end\nLIMIT = 1\n"),
-            ("b.rb", "class Thing; def who = :b; end\n"),
+            ("a.rb", "class Thing { fn who = :a }\nLIMIT = 1\n"),
+            ("b.rb", "class Thing { fn who = :b }\n"),
             ("main.rb", "use a::*\np Thing.new.who, LIMIT\nuse b::Thing\np Thing.new.who\n"),
         ],
     );
@@ -83,8 +83,8 @@ fn use_errors_are_compile_errors() {
         ("missing-name", &[("person.rb", PERSON), ("main.rb", "puts 1\nuse person::Persn\n")], "line 2: use person::Persn: person.rb doesn't define Persn"),
         ("missing-file", &[("main.rb", "use nofile::X\n")], "use nofile::X: can't read"),
         ("cycle", &[("a.rb", "use b::B\nA = 1\n"), ("b.rb", "use a::A\nB = 1\n"), ("main.rb", "use a::A\n")], "cyclic use (a -> b -> a)"),
-        ("nested", &[("main.rb", "def f\n  use person::Person\nend\n")], "use is only allowed among a file's top-level statements"),
-        ("syntax", &[("x.rb", "class X\n  def (\nend\n"), ("main.rb", "use x::X\n")], "x.rb: syntax error"),
+        ("nested", &[("main.rb", "fn f() {\n  use person::Person\n}\n")], "use is only allowed among a file's top-level statements"),
+        ("syntax", &[("x.rb", "class X {\n  fn (() {\n  }\n"), ("main.rb", "use x::X\n")], "x.rb: syntax error"),
     ];
     for (name, files, expected) in cases {
         let dir = project(name, files);
@@ -96,26 +96,26 @@ fn use_errors_are_compile_errors() {
 }
 
 const GEOMETRY: &str = "
-module Shapes
-  class Circle
-    def initialize(r) = @r = r
-    def area = 3 * @r * @r
+module Shapes {
+  class Circle {
+    fn initialize(r) = @r = r
+    fn area = 3 * @r * @r
     KIND = :round
-  end
-  class Square
-    def initialize(s) = @s = s
-    def area = @s * @s
-  end
-end
-module Units
+  }
+  class Square {
+    fn initialize(s) = @s = s
+    fn area = @s * @s
+  }
+}
+module Units {
   CM = 100
-  module Imperial
+  module Imperial {
     INCH = 2.54
-  end
-end
-module Shapes
-  class Triangle; def area = 1; end
-end
+  }
+}
+module Shapes {
+  class Triangle { fn area = 1 }
+}
 ";
 
 #[test]
@@ -152,7 +152,7 @@ p Circle.name, defined?(Shapes)
     }
 }
 
-const BASE: &str = "$loads = ($loads || []) << :base\nclass Base; def kind = :base; end\n";
+const BASE: &str = "$loads = ($loads || []) << :base\nclass Base { fn kind = :base }\n";
 
 /// A file used by several others runs once (a diamond), a re-export passes a
 /// class on, an imported class can be reopened, a class body sees its file's
@@ -163,12 +163,12 @@ fn use_graphs_and_namespaces() {
         "graph",
         &[
             ("base.rb", BASE),
-            ("left.rb", "use base::Base\n$loads << :left\nclass Left < Base; end\n"),
-            ("right.rb", "use base::Base\n$loads << :right\nclass Right < Base; end\n"),
+            ("left.rb", "use base::Base\n$loads << :left\nclass Left < Base {  }\n"),
+            ("right.rb", "use base::Base\n$loads << :right\nclass Right < Base {  }\n"),
             ("reexport.rb", "use base::Base\n"),
             (
                 "consts.rb",
-                "LIMIT = 10\nclass Box\n  def self.limit = LIMIT\n  def inner = Helper.new.name\n  class Helper; def name = :helper; end\nend\n",
+                "LIMIT = 10\nclass Box {\n  fn self.limit = LIMIT\n  fn inner = Helper.new.name\n  class Helper { fn name = :helper }\n}\n",
             ),
             ("lib/req.rb", "use base::Base\nREQ_BASE = Base\n"),
             (
@@ -178,7 +178,7 @@ use left::Left
 use right::Right
 use reexport::Base
 p $loads, Left.superclass.equal?(Right.superclass), Left.superclass.equal?(Base), Base.new.kind
-class Base; def extra = :reopened; end
+class Base { fn extra = :reopened }
 p Left.new.extra
 use consts::Box
 p Box.limit, Box.new.inner, defined?(LIMIT)
@@ -197,14 +197,14 @@ p REQ_BASE.equal?(Base)
 #[test]
 fn use_failures() {
     // a panic while a used file runs ends the program, there
-    let dir = project("load-panic", &[("boom.rb", "class Partial; end\npanic \"boom while loading\"\n"), ("main.rb", "use boom::Partial\np :never\n")]);
+    let dir = project("load-panic", &[("boom.rb", "class Partial {  }\npanic \"boom while loading\"\n"), ("main.rb", "use boom::Partial\np :never\n")]);
     assert_eq!(run(&dir).unwrap_err(), "boom while loading (Panic)");
     // one name, one origin; the same import twice is fine
     let dir = project(
         "clash",
         &[
-            ("t1.rb", "class Thing; end\n"),
-            ("t2.rb", "class Thing; end\n"),
+            ("t1.rb", "class Thing {  }\n"),
+            ("t2.rb", "class Thing {  }\n"),
             ("main.rb", "use t1::Thing\nuse t1::Thing\nuse t2::{Thing}\n"),
         ],
     );
@@ -215,7 +215,7 @@ fn use_failures() {
         ("use person\n", "use: expected `::`"),
         ("use person::\n", "use: expected a constant, { } or * after `::`"),
         ("use person::{}\n", "use: expected a constant name in { }"),
-        ("if true\n  use person::Person\nend\n", "use is only allowed among a file's top-level statements"),
+        ("if true {\n  use person::Person\n}\n", "use is only allowed among a file's top-level statements"),
     ] {
         let dir = project("syntax-errors", &[("person.rb", PERSON), ("main.rb", src)]);
         let err = run(&dir).unwrap_err();

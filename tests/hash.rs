@@ -15,7 +15,7 @@ fn index_finds_what_a_scan_finds() {
     // each probe looked up in small hashes of the keys (scanned) and in one
     // with 100 filler keys too (indexed); `bad` lists probes they disagree on
     let out = run(r#"
-        class Obj; end
+        class Obj {  }
         o = Obj.new
         keys = [1, -1, 0, 2**50, -(2**60), 1.5, 0.0, none, true, false, :sym, "str",
                 "", [1, [2, "x"]], [], 1..3, o, {a: 1}]
@@ -23,7 +23,7 @@ fn index_finds_what_a_scan_finds() {
                          [1.0, [2, "x"]], {a: 1}, :other, "other", 2, 2**50 + 1]
         smalls = [{}, {}, {}]   # 6 keys each: scanned
         keys.each_with_index { |k, i| smalls[i / 6][k] = i }
-        scan = ->(k) { s = smalls.find { |h| h.key?(k) }; s ? s[k] : none }
+        scan = |k| { s = smalls.find { |h| h.key?(k) }; s ? s[k] : none }
         big = {}
         100.times { |i| big["filler#{i}"] = -i }
         keys.each_with_index { |k, i| big[k] = i }
@@ -120,12 +120,12 @@ fn deletes_leave_no_trace() {
 }
 
 const POINT: &str = r#"
-    class Pt
+    class Pt {
       attr_reader :x, :y
-      def initialize(x, y) = (@x = x; @y = y)
-      def eql?(o) = o.is_a?(Pt) && x == o.x && y == o.y
-      def hash = [x, y].hash
-    end
+      fn initialize(x, y) = (@x = x; @y = y)
+      fn eql?(o) = o.is_a?(Pt) && x == o.x && y == o.y
+      fn hash = [x, y].hash
+    }
 "#;
 
 #[test]
@@ -157,17 +157,17 @@ fn keys_with_their_own_hash_and_eql() {
 fn eql_callbacks_that_change_the_hash() {
     // a lookup that ran Ruby code checks the hash didn't change under it
     let out = run(r#"
-        class Evil
-          def initialize(h) = @h = h
-          def eql?(o) = (@h.delete("b"); false)
-          def hash = 0
-        end
+        class Evil {
+          fn initialize(h) = @h = h
+          fn eql?(o) = (@h.delete("b"); false)
+          fn hash = 0
+        }
         h = {"a" => 1, "b" => 2, "c" => 3}
         r = catch_panic { h[Evil.new(h)] }.err.message
         p r, h.keys, h.keys.all? { |k| h.key?(k) }
-        class Bad; def hash = "x"; end
+        class Bad { fn hash = "x" }
         p(catch_panic { {Bad.new => 1} }.err.message)
-        class Same; def eql?(o) = panic("not called for the same object"); end
+        class Same { fn eql?(o) = panic("not called for the same object") }
         s = Same.new
         p({s => 1}[s])
     "#);
