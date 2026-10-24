@@ -252,6 +252,9 @@ pub struct Vm {
     pub module_root: Option<std::path::PathBuf>,
     /// `Ok`, `Err` (from result.rb) and the ivar holding an Ok's value, for `?`.
     pub results: Option<(ClassRef, ClassRef, Sym)>,
+    /// `home` of the files' top-level frames running now (a `?` that would
+    /// return from one panics).
+    top_homes: Vec<usize>,
 }
 
 /// A file compiled for `use`.
@@ -578,6 +581,7 @@ impl Vm {
             units: HashMap::new(),
             module_root: None,
             results: None,
+            top_homes: Vec::new(),
         };
         crate::core::init(&mut vm);
         crate::core::load_prelude(&mut vm);
@@ -2062,7 +2066,9 @@ impl Vm {
         if self.reentry == 0 {
             self.gc_level = 1;
         }
+        self.top_homes.push(f.home);
         let r = self.run_frames(f);
+        self.top_homes.pop();
         self.gc_level = outer_gc_level;
         let r = r.map_err(|e| self.materialize(e));
         match r {
@@ -2795,7 +2801,11 @@ impl Vm {
             },
             Op::BlockGiven(a) => self.set_reg(f, a, Value::bool(f.block.is_some())),
             Op::Return(a) => return Ok(Flow::Return(self.reg(f, a))),
-            Op::ReturnBlk(a) => {
+            Op::TryFail(a) => return Err(self.try_failed(self.reg(f, a))),
+            Op::TryReturnBlk(a) if self.top_homes.contains(&f.home) => {
+                return Err(self.try_failed(self.reg(f, a)));
+            }
+            Op::ReturnBlk(a) | Op::TryReturnBlk(a) => {
                 if !self.live_homes.contains(&f.home) {
                     return Err(self.err(&self.c.local_jump_error, "unexpected return"));
                 }
@@ -3382,6 +3392,19 @@ impl Vm {
         self.basic.epoch.set(epoch);
         self.basic.intact.set(intact);
         intact
+    }
+
+    /// The panic of a `?` whose Err or none nothing can return.
+    #[cold]
+    fn try_failed(&mut self, v: Value) -> Unwind {
+        let shown = self.inspect(&v).unwrap_or_else(|_| "?".into());
+        let s = self.intern("Panic");
+        let found = self.heap[self.c.object].consts.borrow().get(&s).copied();
+        let class = match found.map(|v| self.kind(v)) {
+            Some(V::Class(c)) => c,
+            _ => self.c.runtime_error,
+        };
+        self.err(&class, format!("`?` at the top level got {shown}"))
     }
 
     /// `use` (see crate::modules): runs the used file once, in a namespace

@@ -223,6 +223,12 @@ pub enum Op {
     /// `expr?`: R[a] = v and jump to `t` for `Ok(v)` (or any value but an
     /// Err or none); an Err or none falls through to the `return` after it.
     TryOk(Reg, u32),
+    /// `expr?` got an Err or none where nothing can return it (the top level
+    /// of a file, a class body): a panic, like Rust's `main` returning Err.
+    TryFail(Reg),
+    /// `expr?` in a block: returns R[a] from the method around it, or panics
+    /// like TryFail when that is the top level of a file.
+    TryReturnBlk(Reg),
     /// `use`: runs the used file once (in a namespace of its own) and copies
     /// the imported constants into the current namespace; pool[i] is a
     /// [`Literal::Use`].

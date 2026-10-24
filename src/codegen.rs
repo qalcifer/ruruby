@@ -671,7 +671,11 @@ impl Codegen<'_> {
                 let pass = self.emit(Op::TryOk(dst, 0));
                 // an Err or none returns from the method, like `return`
                 self.inline_ensures(0, dst)?;
-                self.emit(if self.kind() == Kind::Block { Op::ReturnBlk(dst) } else { Op::Return(dst) });
+                self.emit(match self.kind() {
+                    Kind::Method => Op::Return(dst),
+                    Kind::Block => Op::TryReturnBlk(dst),
+                    Kind::Top | Kind::Class => Op::TryFail(dst),
+                });
                 self.patch(pass);
             }
             Node::Return(v) => {
