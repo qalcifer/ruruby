@@ -1307,10 +1307,24 @@ impl Vm {
     }
 
     pub fn is_a(&self, v: &Value, cls: &ClassRef) -> bool {
-        self.ancestors(&self.dispatch_class(v))
-            .iter()
-            .any(|c| c == cls)
+        let mut c = Some(self.dispatch_class(v));
+        while let Some(k) = c {
+            if k == *cls || self.has_module(k, *cls) {
+                return true;
+            }
+            c = self.heap[k].superclass;
+        }
+        false
     }
+
+    /// Whether `m` is among `k`'s included or prepended modules (at any
+    /// depth): `ancestors` without building it.
+    fn has_module(&self, k: ClassRef, m: ClassRef) -> bool {
+        let kc = &self.heap[k];
+        let found = |list: &ModuleList| list.borrow().iter().any(|x| *x == m || self.has_module(*x, m));
+        found(&kc.includes) || found(&kc.prepends)
+    }
+
 
     fn find_super(
         &self,
