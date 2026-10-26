@@ -334,6 +334,10 @@ pub fn array_new_items(vm: &mut Vm, a: &[Value], b: Option<&Value>) -> Result<Ve
 
 fn class_new(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>) -> VmResult {
     let V::Class(cls) = vm.kind(*s) else { unreachable!() };
+    if vm.heap[cls].is_abstract.get() {
+        let n = vm.heap[cls].name();
+        return Err(vm.type_err(format!("{n} is abstract: create one of its subclasses")));
+    }
     if cls == vm.c.array {
         let v = array_new_items(vm, a, b)?;
         return Ok(vm.array(v));

@@ -187,6 +187,10 @@ pub struct RClass {
     pub file_module: Cell<bool>,
     /// lang-fork: set on an `interface` (a module with required methods).
     pub interface: RefCell<Option<InterfaceInfo>>,
+    /// lang-fork: an `abstract class` (no `new`; subclasses finish it).
+    pub is_abstract: Cell<bool>,
+    /// Its abstract methods (`fn speak()` without a body).
+    pub abstract_reqs: RefCell<Vec<Required>>,
 }
 
 /// lang-fork: what an `interface` requires. Its defaults are ordinary
@@ -227,6 +231,8 @@ impl RClass {
             frozen: Default::default(),
             file_module: Default::default(),
             interface: Default::default(),
+            is_abstract: Default::default(),
+            abstract_reqs: Default::default(),
         }
     }
 

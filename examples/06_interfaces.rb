@@ -55,6 +55,35 @@ class Cube {
 }
 p Cube.new(2).describe, Cube.new(2).is_a?(Shape)
 
+# Subclasses inherit their parent's interfaces. A method a class has (its
+# own or inherited) beats an interface default: "class wins"
+class Square < Rect {
+  fn initialize(side) = super(side, side)
+}
+class Labeled { fn name() = "labeled" }
+class Badge < Labeled {
+  fn area() = 1
+  impl Shape {}
+}
+p Square.new(3).describe, Badge.new.describe   # Badge keeps Labeled's name
+
+# An abstract class is a base to finish: no `new`; a `fn` without a body is
+# an abstract method, and its impl blocks may leave required methods to the
+# subclasses. Each concrete subclass is checked when its body ends.
+abstract class Widget {
+  fn initialize(text) = @text = text
+  fn draw()                              # abstract
+  fn render() = "<#{draw}>"
+  impl Shape {}                          # area() is the subclasses' job
+}
+
+class Button < Widget {
+  fn draw() = "button #{@text}"
+  fn area() = 4
+}
+p Button.new("ok").render, Button.new("ok").describe, Widget.abstract?
+p catch_panic { Widget.new("x") }.err.message
+
 # The contract is checked when the impl block ends, so a mistake stops the
 # program at once, with the reason:
 class Draft { }

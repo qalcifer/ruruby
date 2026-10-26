@@ -161,6 +161,83 @@ fn inheritance() {
     ]);
 }
 
+/// `abstract class`: no `new`; bodiless `fn`s are abstract methods; its
+/// impl blocks may leave required methods to subclasses. A concrete
+/// subclass must provide them all by the end of its class body.
+#[test]
+fn abstract_classes() {
+    let out = run(&format!("{SHAPES}{}", r##"
+        abstract class Widget {
+          fn initialize(label) = @label = label
+          attr_reader :label
+          fn draw()                          # abstract
+          fn self.kind()                     # abstract class method
+          fn render() = "[#{draw}]"
+          impl Shape {}                      # area() left to subclasses
+        }
+        class Button < Widget {
+          fn draw() = "button #{label}"
+          fn area() = 4
+          fn self.kind() = :control
+        }
+        abstract class Panel < Widget {      # still abstract: provides some
+          fn area() = 0
+          fn self.kind() = :container
+        }
+        class Grid < Panel { fn draw() = "grid" }
+        b = Button.new("ok")
+        p b.render, b.describe, Grid.new("g").describe, Grid.kind, b.is_a?(Widget), b.is_a?(Shape)
+        p Widget.abstract?, Panel.abstract?, Button.abstract?, Grid.implements?(Shape)
+        p catch_panic { Widget.new("x") }.err.message, catch_panic { Panel.new("x") }.err.message
+    "##));
+    assert_eq!(out.lines().collect::<Vec<_>>(), [
+        r#""[button ok]""#,
+        r#""Button: area 4""#,
+        r#""Grid: area 0""#,
+        ":container",
+        "true",
+        "true",
+        "true",
+        "true",
+        "false",
+        "true",
+        r#""Widget is abstract: create one of its subclasses""#,
+        r#""Panel is abstract: create one of its subclasses""#,
+    ]);
+    let head = format!("{SHAPES}{}", "
+        abstract class W {
+          fn draw()
+          impl Shape {}
+        }
+");
+    let cases = [
+        ("class L < W { fn area() = 1 }", "line 16: L doesn't implement abstract class W: missing draw()"),
+        ("class L < W { fn draw() = 1 }", "L doesn't implement Shape (from W): missing area()"),
+        ("class L < W {
+ fn draw(x) = 1
+ fn area() = 1
+}", "L#draw takes 1 argument, abstract class W declares draw()"),
+        ("abstract class V < W {}
+class L < V { fn area() = 1 }", "L doesn't implement abstract class W: missing draw()"),
+        ("abstract class X {
+ fn area(a, b) = 1
+ impl Shape {}
+}", "X#area takes 2 arguments, Shape declares area()"),
+    ];
+    for (src, want) in cases {
+        let err = run_capture(&format!("{head}{src}")).unwrap_err().to_string();
+        assert!(err.contains(want), "{src}:\n  {err}\n  wanted: {want}");
+    }
+    for (src, want) in [
+        ("abstract module M {}", "only classes can be abstract"),
+        ("abstract interface I {}", "only classes can be abstract"),
+        ("class C { fn f() }", "methods without a body go in an `interface` or `abstract class`"),
+    ] {
+        let err = run_capture(src).unwrap_err().to_string();
+        assert!(err.contains(want), "{src}:\n  {err}\n  wanted: {want}");
+    }
+}
+
 /// `impl I by @field`: the required methods go to the field; the
 /// defaults come from the interface and use them; the class can still
 /// define some itself.

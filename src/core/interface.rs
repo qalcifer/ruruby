@@ -97,6 +97,50 @@ fn core_interface(vm: &mut Vm, i: ClassRef, name: &str, arity: i64, sig: &str) {
     *vm.heap[i].interface.borrow_mut() = Some(InterfaceInfo { required: vec![r] });
 }
 
+/// Checks that `cls` has each of `reqs` (declared by `owner`) with a
+/// fitting arity; Object's catch-alls (to_s, ==) don't count. With
+/// `allow_missing` (an abstract class) only the arity of the ones present.
+fn check_requirements(
+    vm: &mut Vm,
+    cls: ClassRef,
+    line: i64,
+    owner: &str,
+    reqs: &[Required],
+    allow_missing: bool,
+) -> Result<(), Unwind> {
+    let cname = vm.heap[cls].name();
+    let base = [vm.c.object, vm.c.basic_object, vm.c.kernel];
+    let mut missing = vec![];
+    for r in reqs {
+        let holder = if r.class_method { vm.singleton_class(&Value::from(cls))? } else { cls };
+        match vm.find_method(&holder, r.name) {
+            Some((_, o)) if base.contains(&o) => missing.push(r.sig.clone()),
+            None => missing.push(r.sig.clone()),
+            Some((Method::Forward(_), _)) => {}
+            Some(_) => {
+                let actual = method_arity(vm, holder, r.name);
+                if actual != -1 && !arity_fits(r.arity, actual) {
+                    let n = vm.sym_name(r.name).to_string();
+                    let sep = if r.class_method { "." } else { "#" };
+                    return Err(fail(
+                        vm,
+                        line,
+                        format!(
+                            "{cname} doesn't implement {owner}: {cname}{sep}{n} takes {}, {owner} declares {}",
+                            arity_desc(actual),
+                            r.sig
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+    if !missing.is_empty() && !allow_missing {
+        return Err(fail(vm, line, format!("{cname} doesn't implement {owner}: missing {}", missing.join(", "))));
+    }
+    Ok(())
+}
+
 pub fn init(vm: &mut Vm) {
     // their defaults are the native and prelude methods already defined
     core_interface(vm, vm.c.comparable, "<=>", 1, "<=>(other)");
@@ -143,11 +187,63 @@ pub fn init(vm: &mut Vm) {
             class_method: arg(a, 2).truthy(),
             sig: vm.heap[sig].borrow().clone(),
         };
+        if vm.heap[i].is_abstract.get() {
+            vm.heap[i].abstract_reqs.borrow_mut().push(r);
+            return Ok(Value::NIL);
+        }
         match vm.heap[i].interface.borrow_mut().as_mut() {
             Some(info) => info.required.push(r),
             None => return Err(vm.type_err("__require outside an interface")),
         }
         Ok(Value::NIL)
+    });
+    // `abstract class C {`: self is the class
+    vm.def(&m, "__abstract", |vm, s, a, _| {
+        let line = int_arg(vm, a, 0);
+        let Some(c) = class_of_value(vm, s) else {
+            return Err(vm.type_err("__abstract outside a class"));
+        };
+        if vm.heap[c].is_module {
+            let n = vm.heap[c].name();
+            return Err(fail(vm, line, format!("{n} is a module: only classes can be abstract")));
+        }
+        vm.heap[c].is_abstract.set(true);
+        Ok(Value::NIL)
+    });
+    // the end of `class C < Super { }`: a concrete class must finish what
+    // its abstract ancestors left open
+    vm.def(&m, "__class_end", |vm, s, a, _| {
+        let line = int_arg(vm, a, 0);
+        let Some(cls) = class_of_value(vm, s) else {
+            return Ok(*s);
+        };
+        if vm.heap[cls].is_abstract.get() {
+            return Ok(*s);
+        }
+        let mut c = vm.heap[cls].superclass;
+        while let Some(k) = c {
+            if vm.heap[k].is_abstract.get() {
+                let kname = vm.heap[k].name();
+                let own = vm.heap[k].abstract_reqs.borrow().clone();
+                check_requirements(vm, cls, line, &format!("abstract class {kname}"), &own, false)?;
+                let mut ifaces = vec![];
+                let incs: Vec<ClassRef> = vm.heap[k].includes.borrow().clone();
+                for i in incs {
+                    if is_interface(vm, i) {
+                        with_supers(vm, i, &mut ifaces);
+                    }
+                }
+                for i in ifaces {
+                    let iname = vm.heap[i].name();
+                    check_requirements(vm, cls, line, &format!("{iname} (from {kname})"), &required(vm, i), false)?;
+                }
+            }
+            c = vm.heap[k].superclass;
+        }
+        Ok(*s)
+    });
+    vm.def(&m, "abstract?", |vm, s, _, _| {
+        Ok(Value::bool(class_of_value(vm, s).is_some_and(|c| vm.heap[c].is_abstract.get())))
     });
     vm.def(&m, "implements?", |vm, s, a, _| {
         let (Some(c), Some(i)) = (class_of_value(vm, s), class_of_value(vm, &arg(a, 0))) else {
@@ -246,40 +342,14 @@ pub fn init(vm: &mut Vm) {
                 }
             }
         }
-        // every requirement met, by the class, a superclass or another impl
-        // (not by Object's catch-alls like to_s or ==)
-        let base = [vm.c.object, vm.c.basic_object, vm.c.kernel];
+        // every requirement met, by the class, a superclass or another impl;
+        // an abstract class may leave them to its subclasses
+        let is_abstract = vm.heap[cls].is_abstract.get();
         for &i in &all {
             let iname = vm.heap[i].name();
-            let mut missing = vec![];
-            for r in required(vm, i) {
-                let holder = if r.class_method { vm.singleton_class(&target)? } else { cls };
-                match vm.find_method(&holder, r.name) {
-                    Some((_, owner)) if base.contains(&owner) => missing.push(r.sig.clone()),
-                    None => missing.push(r.sig.clone()),
-                    Some((Method::Forward(_), _)) => {}
-                    Some(_) => {
-                        let actual = method_arity(vm, holder, r.name);
-                        if actual != -1 && !arity_fits(r.arity, actual) {
-                            let n = vm.sym_name(r.name).to_string();
-                            let sep = if r.class_method { "." } else { "#" };
-                            return Err(fail(
-                                vm,
-                                line,
-                                format!(
-                                    "{cname} doesn't implement {iname}: {cname}{sep}{n} takes {}, {iname} declares {}",
-                                    arity_desc(actual),
-                                    r.sig
-                                ),
-                            ));
-                        }
-                    }
-                }
-            }
-            if !missing.is_empty() {
-                return Err(fail(vm, line, format!("{cname} doesn't implement {iname}: missing {}", missing.join(", "))));
-            }
+            check_requirements(vm, cls, line, &iname, &required(vm, i), is_abstract)?;
         }
+        let base = [vm.c.object, vm.c.basic_object, vm.c.kernel];
         // two interfaces giving the class the same default: the class decides
         let mut mine = vec![];
         let own: Vec<ClassRef> = vm.heap[cls].includes.borrow().clone();

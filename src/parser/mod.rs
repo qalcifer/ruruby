@@ -1655,6 +1655,14 @@ impl Parser {
                 }
                 Ok(Node::Array(out))
             }
+            Tok::Ident(name) if name == "abstract" && matches!(self.peek2(), Tok::Kw(Kw::Module | Kw::Interface)) => {
+                Err(self.err("only classes can be abstract (an interface already is)"))
+            }
+            Tok::Ident(name) if name == "abstract" && matches!(self.peek2(), Tok::Kw(Kw::Class)) => {
+                self.advance();
+                self.advance();
+                self.parse_class_kind(false, true)
+            }
             Tok::Ident(name) => {
                 self.advance();
                 self.ident_primary(name, line)
@@ -2214,7 +2222,9 @@ impl Parser {
                 vec![Node::Sym(name), Node::Int(params_arity(&params)), bool_node(class_method), Node::Str(sig)],
             ));
         } else if !self.at(&Tok::Assign) {
-            return Err(self.err("fn: expected `(parameters)`, then `{ body }` or `= expression`"));
+            return Err(self.err(
+                "fn: expected `(parameters)`, then `{ body }` or `= expression` (methods without a body go in an `interface` or `abstract class`)",
+            ));
         } else {
             // endless def: `def m(a) = expr`
             self.advance();
@@ -2238,9 +2248,18 @@ impl Parser {
         })
     }
 
-    #[inline(never)]
     fn parse_class(&mut self, is_module: bool) -> PResult<Node> {
-        if !is_module && self.eat(&Tok::Shl) {
+        self.parse_class_kind(is_module, false)
+    }
+
+    /// `class`, `module`, lang-fork `abstract class`: a body starting with
+    /// `__abstract(line)` whose bodiless `fn`s are abstract methods. A class
+    /// with a superclass ends with `__class_end(line)`, which checks that it
+    /// finishes its abstract ancestors.
+    #[inline(never)]
+    fn parse_class_kind(&mut self, is_module: bool, is_abstract: bool) -> PResult<Node> {
+        let line = self.line();
+        if !is_module && !is_abstract && self.eat(&Tok::Shl) {
             // `class << obj`
             let target = self.header(|p| p.parse_expr())?;
             self.push_scope(true);
@@ -2257,8 +2276,21 @@ impl Parser {
         };
         self.push_scope(true);
         self.need_brace(if is_module { "module" } else { "class" })?;
-        let body = self.parse_brace_body()?;
+        let top = std::mem::replace(&mut self.interface_top, is_abstract);
+        let body = self.parse_brace_body();
+        self.interface_top = top;
+        let mut body = body?;
         let locals = self.pop_scope();
+        if is_abstract || superclass.is_some() {
+            let mut stmts = stmts_of(body);
+            if is_abstract {
+                stmts.insert(0, call(None, "__abstract", vec![Node::Int(line as i64)]));
+            }
+            if superclass.is_some() {
+                stmts.push(call(None, "__class_end", vec![Node::Int(line as i64)]));
+            }
+            body = Node::Seq(stmts);
+        }
         Ok(Node::Class {
             path: b(path),
             superclass,

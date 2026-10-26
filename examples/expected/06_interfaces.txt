@@ -6,7 +6,13 @@ true
 "integer with area 16"
 "cube with area 24, volume 8"
 true
-"line 61: Draft doesn't implement Shape: missing area()"
+"rectangle with area 9"
+"labeled with area 1"
+"<button ok>"
+"button with area 4"
+true
+"Widget is abstract: create one of its subclasses"
+"line 90: Draft doesn't implement Shape: missing area()"
 :build
 1
 false
