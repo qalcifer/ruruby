@@ -1437,6 +1437,35 @@ impl Parser {
                         p.required.push(t)
                     }
                 }
+                // `fn init(@name)`: the parameter `name`, stored in `@name`
+                Tok::IVar(iv) if !block => {
+                    if self.in_interface {
+                        self.pos -= 1;
+                        return Err(self.err(&format!("`{iv}` in an interface: interfaces have no state")));
+                    }
+                    let n = iv.trim_start_matches('@').to_string();
+                    if p.fields.contains(&n) {
+                        return Err(self.err(&format!("duplicate parameter `{iv}`")));
+                    }
+                    p.fields.push(n.clone());
+                    self.declare_here(&n);
+                    if self.eat(&Tok::Colon) {
+                        // `@name:` / `@name: default`, a keyword
+                        let default = if matches!(self.peek(), Tok::Comma | Tok::RParen | Tok::Newline | Tok::Semi) {
+                            None
+                        } else {
+                            Some(self.param_default(block)?)
+                        };
+                        p.kw.push((n, default));
+                    } else if self.eat(&Tok::Assign) {
+                        let default = self.param_default(block)?;
+                        p.optional.push((n, default));
+                    } else if p.rest.is_some() || !p.optional.is_empty() {
+                        p.post.push(ParamTarget::Name(n));
+                    } else {
+                        p.required.push(ParamTarget::Name(n));
+                    }
+                }
                 Tok::Ident(n) => {
                     self.declare_here(&n);
                     if self.eat(&Tok::Assign) {
@@ -2255,6 +2284,14 @@ impl Parser {
                 return Err(self.removed("rescue"));
             }
             e
+        };
+        let body = if params.fields.is_empty() {
+            body
+        } else {
+            let mut stmts: Vec<Node> =
+                params.fields.iter().map(|n| Node::IAsgn(format!("@{n}"), b(Node::LVar(n.clone())))).collect();
+            stmts.push(body);
+            Node::Seq(stmts)
         };
         let mut names = params.names();
         names.extend(destructured_names(&params));

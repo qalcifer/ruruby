@@ -169,6 +169,9 @@ pub struct Params {
     pub block: Option<String>,
     /// `|a, |` — a trailing comma makes a block splat its single array argument.
     pub trailing_comma: bool,
+    /// lang-fork `fn init(@name, @age = 0)`: parameters that also set the
+    /// instance variable of their name (the body starts with `@name = name`).
+    pub fields: Vec<String>,
 }
 
 impl Params {

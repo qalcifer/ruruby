@@ -2,9 +2,8 @@
 use models::person::Person
 
 class User < Person {
-  fn init(name, email) {
+  fn init(name, @email) {
     super(name)
-    @email = email
   }
 
   fn to_s = "#{name} <#{@email}>"

@@ -4,7 +4,7 @@ class Animal {
   # attr_reader makes `name` and `age` readable methods
   attr_reader :name, :age
 
-  # `new` calls init; @variables belong to the object
+  # `Animal::new(...)` calls init; @variables belong to the object
   fn init(name, age) {
     @name = name
     @age = age
@@ -20,9 +20,9 @@ class Animal {
 }
 
 class Dog < Animal {
-  fn init(name, age, breed = "mutt") {
+  # a parameter written `@breed` is stored in @breed: no `@breed = breed`
+  fn init(name, age, @breed = "mutt") {
     super(name, age)           # the parent's init
-    @breed = breed
   }
 
   fn speak = "Woof! I'm a #{@breed}"
@@ -41,10 +41,7 @@ p Dog.kingdom, Dog.superclass, Dog.new("x", 1).is_a?(Animal), Cat.ancestors.firs
 class Version {
   attr_reader :major, :minor
 
-  fn init(major, minor) {
-    @major = major
-    @minor = minor
-  }
+  fn init(@major, @minor) {}
 
   impl Comparable {
     fn <=>(other) = [major, minor] <=> [other.major, other.minor]
@@ -92,7 +89,7 @@ p special.greet
 # attr_accessor makes a reader and a writer
 class Point {
   attr_accessor :x, :y
-  fn init(x, y) { @x = x; @y = y }
+  fn init(@x, @y) {}
 }
 pt = Point.new(1, 2)
 pt.x = 10

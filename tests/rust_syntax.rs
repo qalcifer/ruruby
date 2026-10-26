@@ -283,3 +283,33 @@ fn modules_hold_functions() {
     ]);
     assert!(err("module M { module_function\n fn f = 1 }").contains("`module_function` was removed"));
 }
+
+/// `fn init(@name, @age = 0)`: a parameter written as a field is stored in
+/// it (Crystal's shorthand); positional, optional and keyword forms, in any
+/// fn; the local is there too.
+#[test]
+fn field_parameters() {
+    let out = run(r##"
+        class Person {
+          attr_reader :name, :age
+          fn init(@name, @age = 0, @tags: []) { p [name, age] }
+          fn rename(@name) = self
+        }
+        class Point { fn init(@x, @y) {} }
+        a = Person::new("Ann", 3)
+        p a, Person::new("Bob", tags: [:x]), a.rename("Cy").name, Point::new(1, 2)
+        p catch_panic { Point::new(1) }.err.message
+    "##);
+    assert_eq!(out.lines().collect::<Vec<_>>(), [
+        r#"["Ann", 3]"#,
+        r#"["Bob", 0]"#,
+        r#"#<Person @name="Cy", @age=3, @tags=[]>"#,
+        r#"#<Person @name="Bob", @age=0, @tags=[:x]>"#,
+        r#""Cy""#,
+        "#<Point @x=1, @y=2>",
+        r#""wrong number of arguments (given 1, expected 2)""#,
+    ]);
+    assert!(err("fn f(@a, @a) = 1").contains("duplicate parameter `@a`"));
+    assert!(err("interface I { fn f(@a) = 1 }").contains("interfaces have no state"));
+    assert!(err("[1].each { |@a| a }").contains("unexpected token in parameter list"));
+}

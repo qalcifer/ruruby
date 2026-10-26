@@ -45,6 +45,9 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
   `Ok(...)`); `value?` returns an `Err` (or `none`) from the function.
   A bug is a `panic`, which ends the program.
 - **`none`** is the absent value (falsy, like `false`).
+- **Classes**: the constructor is `fn init(...)`; a parameter written as a field
+  is stored in it: `fn init(@name, @age = 0) {}`. Create objects with
+  `Person::new("Ann")`.
 - **Interfaces** name a contract: `interface Shape { fn area(); fn name() = "s" }`
   (no body: required; a body: a default). `impl Shape for Circle { fn area() = ... }`
   or `impl Shape { ... }` inside the class; checked when the block ends.
