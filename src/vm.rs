@@ -258,6 +258,8 @@ pub struct Vm {
     pub prop_initializing: Vec<Value>,
     /// lang-fork-ui: effects, bindings and what they read (src/reactive.rs).
     pub rx: crate::reactive::Reactive,
+    /// lang-fork-ui: the element tree's changes for a renderer.
+    pub ui: crate::ui::UiLog,
     /// `home` of the files' top-level frames running now (a `?` that would
     /// return from one panics).
     top_homes: Vec<usize>,
@@ -592,6 +594,7 @@ impl Vm {
             results: None,
             prop_initializing: Vec::new(),
             rx: Default::default(),
+            ui: Default::default(),
             top_homes: Vec::new(),
         };
         crate::core::init(&mut vm);
@@ -2180,6 +2183,38 @@ impl Vm {
         self.ivar_set_slow(obj, iv, v)
     }
 
+    /// A UI element's prop changed: a `Set` for the renderer (if it's in
+    /// the tree; `@__` fields are the tree's own).
+    #[cold]
+    fn record_prop(&mut self, o: ObjRef, iv: Sym, v: Value) {
+        let Some(id) = self.ui.node(o.id()) else { return };
+        let name = self.sym_name(iv);
+        if name.starts_with("@__") {
+            return;
+        }
+        let prop = name.trim_start_matches('@').to_string();
+        let value = self.prop_value(&v);
+        self.ui.set(id, &prop, value);
+    }
+
+    /// A value as a renderer sees it.
+    pub fn prop_value(&mut self, v: &Value) -> crate::ui::PropValue {
+        use crate::ui::PropValue as P;
+        match self.kind(*v) {
+            V::Nil => P::None,
+            V::Bool(b) => P::Bool(b),
+            V::Int(n) => P::Int(n),
+            V::Float(f) => P::Float(f),
+            V::Str(s) => P::Str(self.heap[s].borrow().clone()),
+            V::Sym(s) => P::Sym(self.sym_name(s).to_string()),
+            V::Array(a) => {
+                let items = self.heap[a].borrow().clone();
+                P::List(items.iter().map(|x| self.prop_value(x)).collect())
+            }
+            _ => P::Other(self.inspect(v).unwrap_or_default()),
+        }
+    }
+
     /// A write to an object computations read: they run again if the value
     /// changed (another object, or another immediate).
     #[cold]
@@ -2189,6 +2224,9 @@ impl Vm {
         self.heap[o].ivars.borrow_mut().set(iv, v);
         if old.is_some_and(|old| self.heap.identical(&old, &v)) {
             return Ok(());
+        }
+        if self.heap[o].element.get() {
+            self.record_prop(o, iv, v);
         }
         if self.rx.rt.write_key(crate::reactive::key(o.id(), iv)) {
             crate::core::reactive::flush(self)?;

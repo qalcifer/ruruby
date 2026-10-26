@@ -35,3 +35,17 @@ TodoApp(todos: [#<Todo @title="buy milk", @done=true>, #<Todo @title="write docs
         Text(text: "write docs", color: :black)
     Text(id: :left, text: "1 left", color: :black)
 "1 left"
+[:set, 15, :checked, true]
+[:set, 16, :color, :gray]
+[:set, 17, :text, "0 left"]
+Column(spacing: 8, padding: 0)
+  Row(spacing: 0, padding: 0)
+    TextInput(id: :input, text: "", placeholder: "What needs doing?")
+    Button(id: :add, text: "Add", enabled: false)
+  Row(spacing: 4, padding: 0)
+    CheckBox(checked: true, text: "")
+    Text(text: "buy milk", color: :gray)
+  Row(spacing: 4, padding: 0)
+    CheckBox(checked: true, text: "")
+    Text(text: "write docs", color: :gray)
+  Text(id: :left, text: "0 left", color: :black)

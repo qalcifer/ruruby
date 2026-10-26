@@ -16,6 +16,11 @@
 # `dump` shows it and `emit` plays events.
 
 module UI {
+  # The tree's changes for a renderer since the last call: [:create, id,
+  # kind], [:set, id, prop, value], [:insert, parent, index, child],
+  # [:remove, parent, child] (src/ui.rs; Rust: Interpreter::take_ui_mutations).
+  fn mutations() = __ui_mutations
+
   # What happens to an element, given to its handlers: `on(:click) { |e| e.x }`
   # (or `on(Event::Click)`). The renderer (Rust) makes them.
   enum Event {
@@ -45,7 +50,77 @@ module UI {
     fn __ui_add(child) {
       @__children = untracked { __ui_raw } + [child]
       child.__ui_set_parent(self)
+      untracked { __ui_attached(child) }
       child
+    }
+
+    # -- the renderer's view (src/ui.rs) --
+
+    # an if/for part or a component: not a node of its own for a renderer
+    fn __ui_transparent?() = false
+
+    # the nodes under this one a renderer sees (through transparent ones)
+    fn host_children() = __ui_raw.flat_map(|c| if c.__ui_transparent? { c.host_children } else { [c] })
+
+    # the node a renderer puts this one in: the nearest visible ancestor,
+    # or the top of the tree
+    fn host_parent() {
+      p = parent
+      while p && p.__ui_transparent? && p.parent { p = p.parent }
+      p
+    }
+
+    # whether a renderer has this node: announced, or the top of a tree made
+    # with `new` (a component there is a Root)
+    fn __ui_shown?() {
+      return true if __ui_log_node(self)
+      return false if parent || @__member
+      if __ui_transparent? { __ui_log_create(self, "Root", []) } else { __ui_announce }
+      true
+    }
+
+    # the child's nodes go to the renderer, if this part is shown
+    fn __ui_attached(child) {
+      host = if __ui_transparent? { host_parent || self } else { self }
+      return none unless host.__ui_shown?
+      nodes = if child.__ui_transparent? { child.host_children } else { [child] }
+      siblings = host.host_children
+      nodes.each { |n|
+        n.__ui_announce
+        __ui_log_insert(host, siblings.index(n), n)
+      }
+      none
+    }
+
+    # Create, its props, and its children (once)
+    fn __ui_announce() {
+      return none if __ui_log_node(self)
+      props = self.class.props.filter_map(|n| if n == :id && id.none? { none } else { [n, send(n)] })
+      __ui_log_create(self, kind, props)
+      host_children.each_with_index { |c, i|
+        c.__ui_announce
+        __ui_log_insert(self, i, c)
+      }
+      none
+    }
+
+    # the tree as a renderer has it (no components or if/for parts)
+    fn host_dump(indent = 0) {
+      if __ui_transparent? {
+        return host_children.map(|c| c.host_dump(indent)).join("\n")
+      }
+      shown = self.class.props.filter_map(|name| {
+        v = send(name)
+        if name == :id && v.none? { none } else { "#{name}: #{v.inspect}" }
+      })
+      line = "  " * indent + kind + "(#{shown.join(", ")})"
+      ([line] + host_children.map(|c| c.host_dump(indent + 1))).join("\n")
+    }
+
+    # this node and what it shows aren't nodes any more
+    fn __ui_forget() {
+      __ui_log_forget(self)
+      host_children.each(&:__ui_forget)
     }
     fn __ui_set_parent(p) = @__parent = p
 
@@ -129,12 +204,28 @@ module UI {
   # The part of a tree an `if` or `for` makes: rebuilt when what it depends
   # on changes; transparent (its children count as its parent's).
   class Fragment < Element {
-    fn __ui_clear() = @__children = []
+    fn __ui_transparent?() = true
+
+    # before a rebuild: what it showed leaves the renderer's tree
+    fn __ui_clear() {
+      untracked {
+        host = host_parent
+        if host && __ui_log_node(host) {
+          host_children.each { |c|
+            __ui_log_remove(host, c)
+            c.__ui_forget
+          }
+        }
+      }
+      @__children = []
+    }
   }
 
   # what `component Name { }` makes: its props are its state, its tree its
   # children
-  class Component < Element { }
+  class Component < Element {
+    fn __ui_transparent?() = true
+  }
 
   class Window < Element {
     prop mut title: String = ""

@@ -27,7 +27,7 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
 | [13_enums.rb](13_enums.rb) | `enum`: unit, tuple and struct variants, methods, equality and order, matching, a state machine, `Result` as an enum |
 | [14_props.rb](14_props.rb) | `prop` and `prop mut`, defaults, types, the init props give a class, `set`/`changed`/`get`, props in interfaces |
 | [15_reactive.rb](15_reactive.rb) | `effect { }`, `bind(obj, :prop) { }`, `batch`, `untracked`: code that re-runs when the props it read change |
-| [16_components.rb](16_components.rb) | `component`, element trees (`use ui::{...}`), arguments as bindings, `<=>`, `on(:click)` handlers and the `Event` enum, `for`/`if` in trees, nested components |
+| [16_components.rb](16_components.rb) | `component`, element trees (`use ui::{...}`), arguments as bindings, `<=>`, `on(:click)` handlers and the `Event` enum, `for`/`if` in trees, nested components, the changes a renderer receives (`UI::mutations`) |
 
 ## The rules in brief
 

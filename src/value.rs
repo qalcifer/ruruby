@@ -334,6 +334,9 @@ pub struct RObject {
     /// lang-fork-ui: a computation read one of its fields, so writes notify
     /// (src/reactive.rs).
     pub observed: Cell<bool>,
+    /// lang-fork-ui: a UI element a renderer sees: its prop writes are
+    /// recorded (src/ui.rs).
+    pub element: Cell<bool>,
 }
 
 impl RObject {
@@ -344,6 +347,7 @@ impl RObject {
             singleton: Default::default(),
             frozen: Default::default(),
             observed: Default::default(),
+            element: Default::default(),
         }
     }
 }

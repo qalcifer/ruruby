@@ -27,6 +27,7 @@ pub mod parser;
 pub mod reactive;
 pub mod rhash;
 pub mod symbol;
+pub mod ui;
 pub mod value;
 pub mod vm;
 
@@ -126,6 +127,12 @@ impl Interpreter {
     /// Redirects `puts`/`print`/`p` into a buffer (see [`Interpreter::take_output`]).
     pub fn capture_output(&mut self) {
         self.vm.capture = Some(String::new());
+    }
+
+    /// lang-fork-ui: the element tree's changes since the last call, for a
+    /// renderer (see [`ui`]).
+    pub fn take_ui_mutations(&mut self) -> Vec<ui::Mutation> {
+        self.vm.ui.take()
     }
 
     pub fn take_output(&mut self) -> String {

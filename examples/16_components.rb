@@ -63,3 +63,11 @@ puts "", app.dump
 app.todos[0].done = true
 puts "", app.dump
 p app.find(:left).text
+
+# What a renderer receives (Rust: Interpreter::take_ui_mutations): the
+# changes since last time, for the nodes it shows — components and if/for
+# parts are transparent, so it only sees Column, Row, Text, ...
+UI::mutations                      # everything so far: as if applied
+app.todos[1].done = true
+UI::mutations.each { |m| p m }
+puts app.host_dump                  # the tree as the renderer has it
