@@ -45,7 +45,7 @@ fn instances_of_builtin_subclasses() {
         }
         e = Entries[[1, :a], [2, :b]]
         p e.class, e.keys, e.to_s
-        h = Class::new(Hash) { attr_accessor :foo }.new(0)
+        h = Class::new(Hash) { prop mut foo }.new(0)
         h.foo = 5
         h[:x] = 1
         p h.foo, h[:x], h[:nope], h.class.superclass
@@ -84,7 +84,7 @@ fn copies_keep_class_and_ivars() {
         e.instance_variable_set(:@t, 1)
         d = e.dup
         p d.class, d.hi, d.instance_variable_get(:@t), d.reverse!.class, d, e, e.clone.class
-        c = Class::new(Hash) { attr_accessor :foo }
+        c = Class::new(Hash) { prop mut foo }
         h = c.new(0)
         h.foo = :iv
         h[:a] = 1

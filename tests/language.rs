@@ -144,7 +144,7 @@ fn classes_modules_super() {
           }
         }
         class Base {
-          attr_accessor :name
+          prop mut name
           impl Named {}
           fn init(name) {
             @name = name
@@ -178,7 +178,7 @@ fn classes_modules_super() {
 fn user_defined_enumerable_and_comparable() {
     let src = r##"
         class Version {
-          attr_reader :major, :minor
+          prop major; prop minor
           fn init(major, minor) {
             @major = major
             @minor = minor

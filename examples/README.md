@@ -25,6 +25,7 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
 | [11_strings.rb](11_strings.rb) | String methods, formatting, mutation and freezing, `to_s` in interpolation, heredocs, symbols |
 | [12_program.rb](12_program.rb) | a small complete program: an inventory driven by text commands |
 | [13_enums.rb](13_enums.rb) | `enum`: unit, tuple and struct variants, methods, equality and order, matching, a state machine, `Result` as an enum |
+| [14_props.rb](14_props.rb) | `prop` and `prop mut`, defaults, types, the init props give a class, `set`/`changed`/`get`, props in interfaces |
 
 ## The rules in brief
 
@@ -47,7 +48,9 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
   A bug is a `panic`, which ends the program.
 - **`none`** is the absent value (falsy, like `false`).
 - **Classes**: the constructor is `fn init(...)`; a parameter written as a field
-  is stored in it: `fn init(@name, @age = 0) {}`. Create objects with
+  is stored in it: `fn init(@name, @age = 0) {}`. Properties are `prop name`
+  (read outside) and `prop mut age = 0` (written outside too); a class with props
+  and no init is created by name: `Task::new(title: "x")`. Create objects with
   `Person::new("Ann")`. `Type::func(...)` calls a class's or module's own
   functions, `value.method` calls on values (`Type.func` works too).
 - **Interfaces** name a contract: `interface Shape { fn area(); fn name() = "s" }`
@@ -65,7 +68,7 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
   `fn f` in `module M { }` is called as `M::f(...)` (`private fn` keeps it internal).
 
 Removed from Ruby: `def`/`end`, `do ... end`, `->`, `elsif`, `then`, `begin`, `? :`,
-`nil`, `raise`/`rescue`/`ensure`/`retry`, `include`/`extend`/`prepend`/`module_function` (modules are
+`nil`, `raise`/`rescue`/`ensure`/`retry`, `attr_reader`/`attr_accessor`/`attr_writer` (use `prop`), `include`/`extend`/`prepend`/`module_function` (modules are
 namespaces; shared behaviour is an `interface`). Each is a compile error that says
 what to write instead.
 

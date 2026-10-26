@@ -1,5 +1,5 @@
 class Person {
-  attr_reader :name
+  prop name
   fn init(@name) {}
   fn to_s = name
 }

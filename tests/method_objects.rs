@@ -42,7 +42,7 @@ fn bound_methods() {
 #[test]
 fn unbound_methods() {
     let out = run(r##"
-        class A { fn hi(x) = "A#hi #{x}"; attr_accessor :v }
+        class A { fn hi(x) = "A#hi #{x}"; prop mut v = none }
         class B < A { fn hi(x) = "B#hi #{x}" }
         u = A.instance_method(:hi)
         p u, u.arity, u.owner, u.name, u.bind(B.new).call(1), u.bind_call(B.new, 2), B.new.hi(3)

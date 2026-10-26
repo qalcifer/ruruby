@@ -244,10 +244,6 @@ fn init_module(vm: &mut Vm) {
         let meta = vm.singleton_class(s)?;
         set_vis(vm, &Value::from(meta), a, Vis::Public)
     });
-    vm.def(&m, "attr", |vm, s, a, _| {
-        let attr_reader = vm.intern("attr_reader");
-        vm.call_method(s, attr_reader, a.to_vec(), None)
-    });
     vm.def(&m, "class_variable_get", |vm, s, a, _| {
         let cls = this_class(vm, s)?;
         let n = sym_of(vm, &arg(a, 0))?;

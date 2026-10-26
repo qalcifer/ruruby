@@ -82,7 +82,7 @@ fn meeting_requirements() {
         }
         class Person {
           fn init(name) = @name = name
-          impl Named { attr_reader :name }
+          impl Named { prop name }
         }
         class Base { fn area() = 9 }
         class Tile < Base { impl Shape {} }
@@ -93,7 +93,7 @@ fn meeting_requirements() {
         }
         class Num {
           fn init(n) = @n = n
-          attr_reader :n
+          prop n
           impl Parse {
             fn self.parse(s) = new(s.to_i)
           }
@@ -169,7 +169,7 @@ fn abstract_classes() {
     let out = run(&format!("{SHAPES}{}", r##"
         abstract class Widget {
           fn init(label) = @label = label
-          attr_reader :label
+          prop label
           fn draw()                          # abstract
           fn self.kind()                     # abstract class method
           fn render() = "[#{draw}]"

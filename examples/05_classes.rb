@@ -1,8 +1,9 @@
 # 05 — Classes and objects
 
 class Animal {
-  # attr_reader makes `name` and `age` readable methods
-  attr_reader :name, :age
+  # props: `name` and `age` can be read from outside (see 14_props.rb)
+  prop name
+  prop age
 
   # `Animal::new(...)` calls init; @variables belong to the object
   fn init(name, age) {
@@ -42,7 +43,8 @@ p Dog::kingdom, Dog::superclass, Dog::new("x", 1).is_a?(Animal), Cat::ancestors.
 # Operators are methods; implementing the Comparable interface (its one
 # required method is <=>) gives <, >, between?, clamp... (see 06_interfaces.rb)
 class Version {
-  attr_reader :major, :minor
+  prop major
+  prop minor
 
   fn init(@major, @minor) {}
 
@@ -59,9 +61,7 @@ p v1 < v2, [v2, v1].max.to_s, v1.between?(v1, v2), (v1 + v2).to_s
 
 # Visibility: private methods are called without a receiver
 class Account {
-  attr_reader :balance
-
-  fn init = @balance = 0
+  prop balance = 0               # a default; no init needed
 
   fn deposit(amount) {
     check(amount)
@@ -89,9 +89,10 @@ special = Object::new
 fn special.greet = "only me"
 p special.greet
 
-# attr_accessor makes a reader and a writer
+# `prop mut` can also be written from outside
 class Point {
-  attr_accessor :x, :y
+  prop mut x
+  prop mut y
   fn init(@x, @y) {}
 }
 pt = Point::new(1, 2)

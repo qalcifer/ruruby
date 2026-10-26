@@ -1029,6 +1029,9 @@ impl Codegen<'_> {
         if recv.is_none() && name == "raise" {
             return Err("`raise` was removed: return Err(...) for expected failures, panic(...) for bugs".into());
         }
+        if recv.is_none() && matches!(name, "attr_reader" | "attr_writer" | "attr_accessor" | "attr") {
+            return Err(format!("`{name}` was removed: use `prop name` (`prop mut name` to write it from outside)"));
+        }
         if recv.is_none() && name == "module_function" {
             return Err("`module_function` was removed: a module's `fn`s are already its functions (`M.f`)".into());
         }

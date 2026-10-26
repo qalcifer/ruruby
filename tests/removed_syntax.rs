@@ -61,6 +61,8 @@ fn ruby_block_forms_are_compile_errors() {
         ("p(true ? 1 : 2)", "`? :` was removed"),
         ("class C { fn initialize(a) = a }", "`fn initialize` was removed: the constructor hook is `fn init(...)`"),
         ("class C { fn initialize_copy(o) = o }", "`fn init_copy(...)`"),
+        ("class C { attr_reader :a }", "`attr_reader` was removed: use `prop name` (`prop mut name` to write it from outside)"),
+        ("class C { attr_accessor :a, :b }", "`attr_accessor` was removed"),
         ("class C { include Comparable }", "`include` was removed: implement an interface with `impl I { ... }`"),
         ("class C { prepend M::N }", "`prepend` was removed"),
         ("o = 1\nextend Enumerable", "`extend` was removed"),

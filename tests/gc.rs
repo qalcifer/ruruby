@@ -15,7 +15,7 @@ fn run(src: &str) -> String {
 #[test]
 fn cyclic_garbage_is_freed() {
     let out = run(r#"
-        class Node { attr_accessor :other }
+        class Node { prop mut other = none }
         fn make_proc = (x = proc { x })
         keep = []
         i = 0

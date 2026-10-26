@@ -2760,27 +2760,28 @@ impl Parser {
         let body = stmts_of(body?);
         // the methods the block defines, for the strictness check
         let (mut names, mut class_names) = (vec![], vec![]);
+        let mut prop_fns: Vec<String> = vec![];
         for st in &body {
             match st {
+                Node::Def { recv: None, name, .. } if prop_fns.contains(name) => {}
                 Node::Def { recv: None, name, .. } => names.push(Node::Sym(name.clone())),
                 Node::Def { recv: Some(r), name, .. } if matches!(**r, Node::SelfRef) => {
                     class_names.push(Node::Sym(name.clone()))
                 }
-                Node::Call { recv: None, name, args, .. }
-                    if matches!(name.as_str(), "attr_reader" | "attr_writer" | "attr_accessor") =>
-                {
-                    for a in args {
-                        let Node::Sym(s) = a else {
-                            return Err(format!("syntax error, line {line}: impl: `{name}` takes symbols here"));
-                        };
-                        if name != "attr_writer" {
-                            names.push(Node::Sym(s.clone()));
-                        }
-                        if name != "attr_reader" {
+                // `prop name` / `prop mut name` (see parse_prop), and the
+                // accessors it generates
+                Node::Call { recv: None, name, args, .. } if name == "__prop" => {
+                    if let [Node::Sym(s), m, ..] = args.as_slice() {
+                        names.push(Node::Sym(s.clone()));
+                        if matches!(m, Node::True) {
                             names.push(Node::Sym(format!("{s}=")));
                         }
+                        prop_fns.extend([format!("{s}="), format!("__changed_{s}")]);
                     }
                 }
+                Node::Call { recv: None, name, args, .. }
+                    if name == "private"
+                        && matches!(args.as_slice(), [Node::Def { name, .. }] if prop_fns.contains(name)) => {}
                 Node::CAsgn(..) => {}
                 _ => {
                     return Err(format!(

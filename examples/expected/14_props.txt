@@ -1,0 +1,16 @@
+#<Task @title="write docs", @done=false, @priority=3, @tags=[]>
+"write docs"
+false
+[:title, :done, :priority, :tags]
+true
+1
+[]
+"Task::new is missing title"
+"Task has no prop :owner to set"
+"Task#priority expects Integer, got \"high\""
+"private method 'title=' called for an instance of Task"
+  20.0 -> 25.0
+77.0
+"below absolute zero: -300.0"
+#<Point @x=4, @y=6>
+"hello, Ada"

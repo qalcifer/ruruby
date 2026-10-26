@@ -121,7 +121,7 @@ fn deletes_leave_no_trace() {
 
 const POINT: &str = r#"
     class Pt {
-      attr_reader :x, :y
+      prop x; prop y
       fn init(x, y) = (@x = x; @y = y)
       fn eql?(o) = o.is_a?(Pt) && x == o.x && y == o.y
       fn hash = [x, y].hash
@@ -183,7 +183,7 @@ fn eql_callbacks_that_change_the_hash() {
 fn uniq_uses_custom_eql() {
     let out = run(r##"
         class K {
-          attr_reader :v
+          prop v
           fn init(@v) {}
           fn eql?(o) = o.is_a?(K) && v == o.v
           fn hash = v.hash

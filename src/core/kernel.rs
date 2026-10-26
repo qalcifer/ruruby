@@ -404,34 +404,6 @@ fn class_new(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>) -> VmResult
     Ok(obj)
 }
 
-/// `attr_reader` & co.; returns the names of the methods defined (so
-/// `private attr_accessor :a` works).
-fn attr(vm: &mut Vm, s: &Value, a: &[Value], reader: bool, writer: bool) -> VmResult {
-    vm.check_frozen(s)?;
-    let V::Class(cls) = vm.kind(*s) else { unreachable!() };
-    // under module_function: private, and no module method is made
-    let vis = match vm.scope_vis(cls) {
-        Vis::ModuleFunction => Vis::Private,
-        v => v,
-    };
-    let mut defined = Vec::new();
-    for name in a {
-        let n = sym_of(vm, name)?;
-        let n = vm.sym_name(n).to_string();
-        let iv = vm.intern(&format!("@{n}"));
-        if reader {
-            let m = vm.intern(&n);
-            vm.heap[cls].methods.insert_vis(m, Method::AttrReader(iv), vis);
-            defined.push(Value::sym(m));
-        }
-        if writer {
-            let m = vm.intern(&format!("{n}="));
-            vm.heap[cls].methods.insert_vis(m, Method::AttrWriter(iv), vis);
-            defined.push(Value::sym(m));
-        }
-    }
-    Ok(vm.array(defined))
-}
 
 fn init_module(vm: &mut Vm) {
     let m = vm.c.module;
@@ -442,11 +414,6 @@ fn init_module(vm: &mut Vm) {
     vm.def(&m, "name", name);
     vm.def(&m, "to_s", name);
     vm.def(&m, "inspect", name);
-    vm.def(&m, "attr_accessor", |vm, s, a, _| {
-        attr(vm, s, a, true, true)
-    });
-    vm.def(&m, "attr_reader", |vm, s, a, _| attr(vm, s, a, true, false));
-    vm.def(&m, "attr_writer", |vm, s, a, _| attr(vm, s, a, false, true));
     vm.def(&m, "ancestors", |vm, s, _, _| {
         let V::Class(cls) = vm.kind(*s) else { unreachable!() };
         Ok(vm.array(

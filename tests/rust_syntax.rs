@@ -291,7 +291,7 @@ fn modules_hold_functions() {
 fn field_parameters() {
     let out = run(r##"
         class Person {
-          attr_reader :name, :age
+          prop name; prop age
           fn init(@name, @age = 0, @tags: []) { p [name, age] }
           fn rename(@name) = self
         }
@@ -322,7 +322,7 @@ fn path_calls() {
     let out = run(r##"
         class P {
           fn init(@a = 1) {}
-          attr_reader :a
+          prop a
           fn self.make(x) = yield(x)
           fn self.end = :end
         }

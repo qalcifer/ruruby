@@ -176,6 +176,7 @@ pub fn init(vm: &mut Vm) {
         let (Some(cls), V::Sym(name)) = (class_of_value(vm, s), vm.kind(arg(a, 0))) else {
             return Err(vm.type_err(format!("line {line}: prop belongs in a class body")));
         };
+        vm.check_frozen(s)?;
         let cname = vm.heap[cls].name();
         let pname = vm.sym_name(name).to_string();
         if vm.heap[cls].is_module {
@@ -207,8 +208,13 @@ pub fn init(vm: &mut Vm) {
         // a computed prop (`get` only) has its reader from the parser, no writer
         if default != PropDefault::Computed {
             let writer = vm.intern(&format!("{pname}="));
-            vm.heap[cls].methods.insert_vis(name, Method::AttrReader(ivar), Vis::Public);
-            let vis = if mutable { Vis::Public } else { Vis::Private };
+            // under `private`, a private prop
+            let scope = match vm.scope_vis(cls) {
+                Vis::Public | Vis::Protected => Vis::Public,
+                _ => Vis::Private,
+            };
+            vm.heap[cls].methods.insert_vis(name, Method::AttrReader(ivar), scope);
+            let vis = if mutable { scope } else { Vis::Private };
             vm.heap[cls].methods.insert_vis(writer, Method::AttrWriter(ivar), vis);
         }
         vm.heap[cls].props.borrow_mut().push(PropInfo { name, ivar, mutable, ty, default, default_key });

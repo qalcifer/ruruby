@@ -120,23 +120,23 @@ fn scope_default_visibility() {
 
 #[test]
 fn natives_that_define_methods_follow_the_scope() {
-    // attr_* and define_method called in a class body (or a block in it,
-    // or a class_eval block) under `private` define private methods; called
-    // on another class or from a method they define public ones
+    // prop and define_method called in a class body (or a block in it, or
+    // a class_eval block) under `private` define private methods; called on
+    // another class or from a method they define public ones
     let out = run(r##"
         fn err = catch_panic { yield }.unwrap_or(:private)
         other = Class::new
         c = Class::new {
           private
-          attr_accessor :a
+          prop mut a = 1
           [1].each { define_method(:d) { :d } }
-          other.attr_reader :pub
-          fn self.make = attr_reader(:from_cm)
+          other.define_method(:pub) { none }
+          fn self.make = define_method(:from_cm) { none }
         }
         c.make
         p err { c.new.a }, err { c.new.d }, other.new.pub, c.new.from_cm
         e = Class::new
-        e.class_eval { private; attr_reader :r; define_method(:m) { :m } }
+        e.class_eval { private; prop r = 1; define_method(:m) { :m } }
         p err { e.new.r }, err { e.new.m }, e.new.send(:m)
     "##);
     assert_eq!(
@@ -243,7 +243,7 @@ fn blocks_without_upvars_still_share_visibility() {
     // frame's code sets a default visibility
     let out = run(r##"
         c = Class::new {
-          blk = proc { attr_reader :late }
+          blk = proc { define_method(:late) { 1 } }
           private
           blk.call
           [1].each { fn in_block = 1 }

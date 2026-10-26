@@ -197,7 +197,7 @@ fn operands_in_place() {
         x = [5, 6]
         p x[(x = [7, 8]; 1)], x
         class Counter {
-          attr_reader :calls
+          prop calls
           fn init = @calls = 0
           fn size() {
             @calls += 1
