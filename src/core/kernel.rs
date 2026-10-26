@@ -334,6 +334,14 @@ pub fn array_new_items(vm: &mut Vm, a: &[Value], b: Option<&Value>) -> Result<Ve
 
 fn class_new(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>) -> VmResult {
     let V::Class(cls) = vm.kind(*s) else { unreachable!() };
+    if vm.heap[cls].enum_variants.borrow().is_some() {
+        let n = vm.heap[cls].name();
+        return Err(vm.type_err(format!("{n} is an enum: create one of its variants ({n}::Variant(...))")));
+    }
+    if vm.heap[cls].variant.borrow().as_ref().is_some_and(|v| v.unit) {
+        let n = vm.heap[cls].name();
+        return Err(vm.type_err(format!("{n} is a value without fields: use {n} itself")));
+    }
     if vm.heap[cls].is_abstract.get() {
         let n = vm.heap[cls].name();
         return Err(vm.type_err(format!("{n} is abstract: create one of its subclasses")));

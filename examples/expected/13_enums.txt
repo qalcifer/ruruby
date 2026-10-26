@@ -1,0 +1,30 @@
+Center
+true
+[Start, Center, End]
+Ok(Center)
+Err("Align has no variant :middle without fields")
+Circle(1)
+Rect(w: 2, h: 3)
+Empty
+3.14
+Rect(w: 4, h: 6)
+2
+true
+:Circle
+true
+"unit circle"
+true
+a circle of radius 1
+a big circle
+a square of side 2
+a 2x3 rectangle
+nothing
+On(100)
+Off
+On(100)
+[Result::Ok, Result::Err]
+true
+"no"
+"Shape::Circle takes 1 field, given 2"
+"Shape::Rect is missing h"
+"Shape is an enum: create one of its variants (Shape::Variant(...))"

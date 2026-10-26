@@ -55,9 +55,10 @@ pub struct Codegen<'a> {
     scopes: Vec<Scope>,
     /// The source file (for `require_relative`).
     file: &'a str,
-    /// lang-fork: functions this file imports with `use file::Module::f`;
-    /// a call `f(...)` without a receiver goes to the module, which `use`
-    /// stores in the file's namespace under the (lowercase) name `f`.
+    /// lang-fork: functions this file imports with `use file::Module::f`
+    /// (and enum constructors, `use file::Shape::Circle`); a call `f(...)`
+    /// without a receiver goes to the module, which `use` stores in the
+    /// file's namespace as the constant `f()` (a name code can't write).
     imported_fns: &'a [String],
 }
 
@@ -1020,7 +1021,7 @@ impl Codegen<'_> {
     ) -> CResult<()> {
         let module;
         let recv = if recv.is_none() && self.imported_fns.iter().any(|f| f == name) {
-            module = Node::Const(name.to_string());
+            module = Node::Const(format!("{name}()"));
             Some(&module)
         } else {
             recv

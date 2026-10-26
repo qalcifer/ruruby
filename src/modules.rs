@@ -63,6 +63,9 @@ pub enum Export {
     Unknown,
     /// A module's public function (`fn f` in `module M { }`).
     Fn,
+    /// An enum variant with fields: a constant (its class) and a
+    /// constructor function (`Circle(2)`).
+    Variant,
 }
 
 impl Exports {
@@ -84,6 +87,12 @@ impl Exports {
                 }
                 Node::Def { recv, name, .. } if module && public && recv.as_deref().is_none_or(|r| matches!(r, Node::SelfRef)) => {
                     out.names.insert(name.clone(), Export::Fn);
+                }
+                // an enum's variants (see `Parser::parse_enum`)
+                Node::Call { recv: None, name, args, .. } if name == "__variant" => {
+                    if let [Node::Sym(v), _, Node::Int(kind)] = args.as_slice() {
+                        out.names.insert(v.clone(), if *kind == 0 { Export::Value } else { Export::Variant });
+                    }
                 }
                 // `private` / `public` on a line of their own
                 Node::Call { recv: None, name, args, .. } if args.is_empty() && (name == "private" || name == "public") => {
@@ -121,6 +130,7 @@ impl Exports {
                 Some(Export::Value) => return Err(format!("defines {name} as a value, not a module or class")),
                 Some(Export::Unknown) => return Ok(None),
                 Some(Export::Fn) => return Err(format!("defines {name} as a function, not a module or class")),
+                Some(Export::Variant) => return Err(format!("defines {name} as an enum variant, not a module")),
                 Some(Export::Scope(e)) => cur = e,
             }
         }
@@ -201,11 +211,17 @@ fn prepare_uses(vm: &mut Vm, prog: &Program, stack: &mut Vec<String>) -> Result<
             let what = if missing.starts_with(char::is_lowercase) { " (a public fn of the module)" } else { "" };
             return Err(format!("{} {shown}: {key}.rb doesn't define {name}{what}", at(line)));
         }
+        // the functions it brings: a module's fns, an enum's constructors
+        let callable = |e: Option<&Export>| matches!(e, Some(Export::Fn | Export::Variant));
         let new: Vec<String> = match (items, scope) {
-            (Some(items), _) => items.iter().filter(|i| i.starts_with(|c: char| !c.is_uppercase())).cloned().collect(),
+            (Some(items), scope) => items
+                .iter()
+                .filter(|i| i.starts_with(|c: char| !c.is_uppercase()) || scope.is_some_and(|s| callable(s.names.get(*i))))
+                .cloned()
+                .collect(),
             (None, Some(scope)) => {
                 let mut v: Vec<String> =
-                    scope.names.iter().filter(|(_, e)| matches!(e, Export::Fn)).map(|(n, _)| n.clone()).collect();
+                    scope.names.iter().filter(|(_, e)| callable(Some(e))).map(|(n, _)| n.clone()).collect();
                 v.sort();
                 v
             }

@@ -285,3 +285,39 @@ fn use_function_errors() {
         assert!(err.contains(want), "{main}:\n  {err}\n  wanted: {want}");
     }
 }
+
+/// An enum's variants are imported like constants; a variant with fields
+/// also as its constructor: `use shapes::Shape::*` then `Circle(2)`.
+#[test]
+fn use_imports_enum_variants() {
+    let shapes = "
+enum Shape {
+  Circle(r)
+  Rect { w, h }
+  Empty
+  fn area() = case self { in Circle(r) { 3 * r * r } in Rect(w:, h:) { w * h } in Empty { 0 } }
+}
+";
+    let dir = project(
+        "enums",
+        &[
+            ("shapes.rb", shapes),
+            ("other.rb", "use shapes::Shape::{Circle, Empty}\nfn small = [Circle(1), Empty]\n"),
+            (
+                "main.rb",
+                r#"
+use shapes::Shape::*
+use shapes::Shape
+use other::*
+fn kind(s) = case s { in Circle(_) { :circle } in Empty { :empty } else { :other } }
+p Circle(2).area, Rect(w: 2, h: 3), Empty, kind(Circle(1)), kind(Empty), kind(Shape::Rect(w: 1, h: 1)), small
+"#,
+            ),
+        ],
+    );
+    assert_eq!(run(&dir).unwrap(), "12\nRect(w: 2, h: 3)\nEmpty\n:circle\n:empty\n:other\n[Circle(1), Empty]\n");
+    let dir = project("enumerr", &[("shapes.rb", shapes), ("main.rb", "use shapes::Shape::Square\n")]);
+    assert!(run(&dir).unwrap_err().contains("shapes.rb doesn't define Shape::Square"));
+    let dir = project("enumerr2", &[("shapes.rb", shapes), ("main.rb", "use shapes::Shape::Circle::X\n")]);
+    assert!(run(&dir).unwrap_err().contains("defines Shape::Circle as an enum variant"));
+}

@@ -39,6 +39,9 @@ pub enum Method {
     /// lang-fork `impl I by @field`: calls the method of the same name on
     /// the object in the instance variable.
     Forward(Sym),
+    /// lang-fork `Shape::Circle(2)`: creates that variant of an enum (calls
+    /// the variant class's `new`).
+    Variant(ClassRef),
 }
 
 /// Instance-variable table (mruby: `iv_tbl`). Small and ordered.
@@ -191,6 +194,24 @@ pub struct RClass {
     pub is_abstract: Cell<bool>,
     /// Its abstract methods (`fn speak()` without a body).
     pub abstract_reqs: RefCell<Vec<Required>>,
+    /// lang-fork: on an `enum`, its variants' names in order.
+    pub enum_variants: RefCell<Option<Vec<Sym>>>,
+    /// lang-fork: on an enum variant's class.
+    pub variant: RefCell<Option<Rc<VariantInfo>>>,
+}
+
+/// An enum variant: `Center`, `Circle(r)` or `Rect { w, h }`.
+pub struct VariantInfo {
+    pub name: Sym,
+    /// Field names, and the instance variables holding them.
+    pub fields: Vec<Sym>,
+    pub ivars: Vec<Sym>,
+    /// `Rect { w, h }`: created with keywords.
+    pub named: bool,
+    /// `Center`: one value, no fields.
+    pub unit: bool,
+    /// Its place among the enum's variants.
+    pub ordinal: usize,
 }
 
 /// lang-fork: what an `interface` requires. Its defaults are ordinary
@@ -233,6 +254,8 @@ impl RClass {
             interface: Default::default(),
             is_abstract: Default::default(),
             abstract_reqs: Default::default(),
+            enum_variants: Default::default(),
+            variant: Default::default(),
         }
     }
 

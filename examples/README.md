@@ -24,6 +24,7 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
 | [10_collections.rb](10_collections.rb) | Array, Hash and Range methods |
 | [11_strings.rb](11_strings.rb) | String methods, formatting, mutation and freezing, `to_s` in interpolation, heredocs, symbols |
 | [12_program.rb](12_program.rb) | a small complete program: an inventory driven by text commands |
+| [13_enums.rb](13_enums.rb) | `enum`: unit, tuple and struct variants, methods, equality and order, matching, a state machine, `Result` as an enum |
 
 ## The rules in brief
 
@@ -55,6 +56,9 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
   Interfaces hold no state; `impl I by @field` reuses a field's methods.
   A class's own or inherited method beats an interface default. `abstract class`
   holds bodiless `fn`s and partial impls for its subclasses to finish; it has no `new`.
+- **Enums** are Rust's: `enum Shape { Circle(r), Rect { w, h }, Empty }`; create
+  `Shape::Circle(2)`, `Shape::Rect(w: 2, h: 3)`, `Shape::Empty`; take apart with
+  `case s { in Shape::Circle(r) { ... } }`. Values are frozen and compare by value.
 - **Modules** are namespaces, like Rust's `mod`: constants, classes and functions;
   `fn f` in `module M { }` is called as `M::f(...)` (`private fn` keeps it internal).
 

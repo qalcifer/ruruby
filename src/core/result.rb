@@ -14,17 +14,20 @@
 # Absence is `none` (no Some wrapper); a bug is a `panic` (src/core/panic.rs),
 # which ends the program.
 
-class Result {
+enum Result {
+  Ok(value)
+  Err(error)
+
   fn ok? = false
   fn err? = false
 }
 
-class Ok < Result {
-  fn init(value) {
-    @value = value
-    freeze
-  }
+# `Ok(1)`, `in Ok(v)`, `x.is_a?(Ok)` without the `Result::`
+Ok = Result::Ok
+Err = Result::Err
 
+# Equality, hash, inspect (`Ok(2)`) and deconstruct come with the enum.
+class Ok {
   fn ok? = true
   # the value; for an Err: panics
   fn unwrap = @value
@@ -40,20 +43,9 @@ class Ok < Result {
   # the block returns the next Result
   fn and_then = yield(@value)
   fn or_else = self
-  fn deconstruct = [@value]
-  fn ==(other) = other.is_a?(Ok) && @value == other.ok
-  fn eql?(other) = other.is_a?(Ok) && @value.eql?(other.ok)
-  fn hash = [:ok, @value].hash
-  fn inspect = "Ok(#{@value.inspect})"
-  fn to_s = inspect
 }
 
-class Err < Result {
-  fn init(error) {
-    @error = error
-    freeze
-  }
-
+class Err {
   fn err? = true
   fn unwrap = panic("called unwrap on #{inspect}")
   fn expect(message) = panic("#{message}: #{@error.inspect}")
@@ -67,12 +59,6 @@ class Err < Result {
   fn and_then = self
   # the block returns the Result to use instead
   fn or_else = yield(@error)
-  fn deconstruct = [@error]
-  fn ==(other) = other.is_a?(Err) && @error == other.err
-  fn eql?(other) = other.is_a?(Err) && @error.eql?(other.err)
-  fn hash = [:err, @error].hash
-  fn inspect = "Err(#{@error.inspect})"
-  fn to_s = inspect
 }
 
 fn Ok(value) = Ok::new(value)

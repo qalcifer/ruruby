@@ -166,6 +166,7 @@ impl Classes {
 /// Pre-interned symbols (mruby: "presym").
 pub struct CommonSyms {
     pub initialize: Sym,
+    pub new: Sym,
     pub message: Sym,
     pub call: Sym,
     pub to_s: Sym,
@@ -522,6 +523,7 @@ impl Vm {
         }
         let s = CommonSyms {
             initialize: syms.intern("init"),
+            new: syms.intern("new"),
             message: syms.intern("@message"),
             call: syms.intern("call"),
             to_s: syms.intern("to_s"),
@@ -1335,7 +1337,6 @@ impl Vm {
         found(&kc.includes) || found(&kc.prepends)
     }
 
-
     fn find_super(
         &self,
         recv: &Value,
@@ -1631,6 +1632,14 @@ impl Vm {
             }
             Method::ProcCall => return self.start_proc(&recv, args, block, ProcCall::default()),
             Method::Undefined => return Err(self.no_method(&recv, mid)),
+            Method::Variant(c) => {
+                let cv = Value::from(c);
+                let new = self.s.new;
+                return match self.lookup(&cv, new) {
+                    Some((m, owner)) => self.start_invoke(m, owner, cv, new, args, block),
+                    None => Err(self.no_method(&cv, new)),
+                };
+            }
             Method::Forward(iv) => {
                 let to = self.ivar_get(&recv, iv);
                 let cls = self.class_of(&to);
@@ -3574,17 +3583,25 @@ impl Vm {
             }
             None => vec![],
         };
+        // a function `f` is imported as the constant `f()` (see Codegen::imported_fns)
         let mv = Value::from(module);
+        let fn_const = |vm: &mut Vm, s: Sym| {
+            let n = format!("{}()", vm.sym_name(s));
+            (vm.intern(&n), mv)
+        };
         let imports: Vec<(Sym, Value)> = match &decl.items {
             Some(items) => {
-                let consts = self.heap[module].consts.borrow();
                 let mut v = Vec::new();
                 for s in items {
-                    match consts.get(s) {
-                        Some(x) => v.push((*s, *x)),
-                        None if fns.contains(s) => v.push((*s, mv)),
+                    let found = self.heap[module].consts.borrow().get(s).copied();
+                    if fns.contains(s) {
+                        let f = fn_const(self, *s);
+                        v.push(f);
+                    }
+                    match found {
+                        Some(x) => v.push((*s, x)),
+                        None if fns.contains(s) => {}
                         None => {
-                            drop(consts);
                             let (file, name) = (decl.path.clone(), self.sym_name(*s).to_string());
                             return Err(self.name_err(format!("use: {file}.rb defines no {name}")));
                         }
@@ -3594,7 +3611,10 @@ impl Vm {
             }
             None => {
                 let mut v: Vec<(Sym, Value)> = self.heap[module].consts.borrow().iter().map(|(k, v)| (*k, *v)).collect();
-                v.extend(fns.iter().map(|s| (*s, mv)));
+                for s in &fns {
+                    let f = fn_const(self, *s);
+                    v.push(f);
+                }
                 v
             }
         };

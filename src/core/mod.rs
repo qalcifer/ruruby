@@ -5,6 +5,7 @@
 
 pub mod array;
 pub mod enumerable;
+pub mod enums;
 pub mod gc;
 pub mod hash;
 pub mod interface;
@@ -37,6 +38,7 @@ pub fn init(vm: &mut Vm) {
     load::init(vm);
     panic::init(vm);
     interface::init(vm);
+    enums::init_enums(vm);
 }
 
 /// Core methods written in Ruby (`prelude.rb`, then the lang-fork's

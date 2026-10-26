@@ -1701,6 +1701,7 @@ impl Parser {
                 }
                 Ok(Node::Array(out))
             }
+            Tok::Ident(name) if name == "enum" && matches!(self.peek2(), Tok::Const(_) | Tok::Colon2) => self.parse_enum(),
             Tok::Ident(name) if name == "abstract" && matches!(self.peek2(), Tok::Kw(Kw::Module | Kw::Interface)) => {
                 Err(self.err("only classes can be abstract (an interface already is)"))
             }
@@ -2437,6 +2438,87 @@ impl Parser {
             locals,
             is_module: true,
             interface: true,
+        })
+    }
+
+    /// lang-fork: `enum Name { A, B(x, y), C { x, y }, fn ... }` — a class
+    /// whose body starts with `__enum(line)` and one `__variant(:Name,
+    /// [:fields], kind)` per variant (kind 0: unit, 1: tuple, 2: struct);
+    /// the rest of the body is an ordinary class body.
+    #[inline(never)]
+    fn parse_enum(&mut self) -> PResult<Node> {
+        let line = self.line();
+        self.advance(); // `enum`
+        let path = self.header(|p| p.parse_cpath())?;
+        self.need_brace("enum")?;
+        self.advance();
+        self.push_scope(true);
+        let mut stmts = vec![call(None, "__enum", vec![Node::Int(line as i64)])];
+        self.stmts_level += 1;
+        let top = std::mem::replace(&mut self.interface_top, false);
+        let r = (|| -> PResult<()> {
+            loop {
+                self.skip_terms();
+                while self.eat(&Tok::Comma) {
+                    self.skip_terms();
+                }
+                if self.at(&Tok::RBrace) {
+                    return Ok(());
+                }
+                if let Tok::Const(name) = self.peek().clone()
+                    && matches!(
+                        self.peek2(),
+                        Tok::Newline | Tok::Semi | Tok::Comma | Tok::RBrace | Tok::LParen | Tok::LBrace
+                    )
+                {
+                    self.advance();
+                    let (close, kind) = match self.peek() {
+                        Tok::LParen => (Some(Tok::RParen), 1),
+                        Tok::LBrace => (Some(Tok::RBrace), 2),
+                        _ => (None, 0),
+                    };
+                    let mut fields = vec![];
+                    if let Some(close) = close {
+                        self.advance();
+                        loop {
+                            self.skip_nl();
+                            if self.eat(&close) {
+                                break;
+                            }
+                            let Tok::Ident(f) = self.peek().clone() else {
+                                return Err(self.err(&format!("enum: a field name of {name} (`{name}(a, b)` or `{name} {{ a, b }}`)")));
+                            };
+                            self.advance();
+                            fields.push(Node::Sym(f));
+                            self.skip_nl();
+                            if !self.eat(&Tok::Comma) {
+                                self.skip_nl();
+                                self.expect(&close)?;
+                                break;
+                            }
+                        }
+                    }
+                    stmts.push(call(None, "__variant", vec![Node::Sym(name), Node::Array(fields), Node::Int(kind)]));
+                    continue;
+                }
+                stmts.push(self.parse_stmt()?);
+                if !matches!(self.peek(), Tok::Newline | Tok::Semi | Tok::Comma | Tok::RBrace) {
+                    return Err(self.err("unexpected token"));
+                }
+            }
+        })();
+        self.interface_top = top;
+        self.stmts_level -= 1;
+        r?;
+        self.expect(&Tok::RBrace)?;
+        let locals = self.pop_scope();
+        Ok(Node::Class {
+            path: b(path),
+            superclass: None,
+            body: b(Node::Seq(stmts)),
+            locals,
+            is_module: false,
+            interface: false,
         })
     }
 
