@@ -1,0 +1,16 @@
+count is 0
+"Count: 0 (step 1)"
+count is 1
+count is 6
+"Count: 6 (step 5)"
+count is 100
+"Count: 100 (step 10)"
+5.0 km
+3.2 mi
+count 100, step was 10
+count is 1
+count 1, step was 2
+count 2, step was 2
+#<Effect stopped>
+[3, 4]
+"reactive cycle: a computation ran 100 times for one change (does a binding feed its own input?)"

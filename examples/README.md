@@ -26,6 +26,7 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
 | [12_program.rb](12_program.rb) | a small complete program: an inventory driven by text commands |
 | [13_enums.rb](13_enums.rb) | `enum`: unit, tuple and struct variants, methods, equality and order, matching, a state machine, `Result` as an enum |
 | [14_props.rb](14_props.rb) | `prop` and `prop mut`, defaults, types, the init props give a class, `set`/`changed`/`get`, props in interfaces |
+| [15_reactive.rb](15_reactive.rb) | `effect { }`, `bind(obj, :prop) { }`, `batch`, `untracked`: code that re-runs when the props it read change |
 
 ## The rules in brief
 
@@ -59,6 +60,9 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
   Interfaces hold no state; `impl I by @field` reuses a field's methods.
   A class's own or inherited method beats an interface default. `abstract class`
   holds bodiless `fn`s and partial impls for its subclasses to finish; it has no `new`.
+- **Reactivity**: `effect { ... }` re-runs when a prop it read changes;
+  `bind(label, :text) { "n=#{c.count}" }` keeps a prop up to date; `batch { }`
+  groups changes. Dependencies are whatever the block read.
 - **Enums** are Rust's: `enum Shape { Circle(r), Rect { w, h }, Empty }`; create
   `Shape::Circle(2)`, `Shape::Rect(w: 2, h: 3)`, `Shape::Empty`; take apart with
   `case s { in Shape::Circle(r) { ... } }`, which must handle every variant (or

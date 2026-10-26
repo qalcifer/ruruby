@@ -13,7 +13,7 @@
 //! * mruby unwinds with `setjmp/longjmp`; here unwinding is `Result<_, Unwind>`
 //!   propagated with `?`, and each frame consults its irep's catch table.
 
-use crate::gc::{ArrayRef, ClassRef, EnvRef, HashRef, Heap, Marker};
+use crate::gc::{ArrayRef, ClassRef, EnvRef, HashRef, Heap, Marker, ObjRef};
 use crate::rhash::stored_hash;
 use crate::opcode::{ArgSpec, CallCache, DefinedKind, Irep, Literal, Op, Reg};
 use crate::symbol::{Sym, SymMap, SymbolTable};
@@ -256,6 +256,8 @@ pub struct Vm {
     /// lang-fork-ui: objects whose generated init is setting their props
     /// (their `changed` hooks don't run yet).
     pub prop_initializing: Vec<Value>,
+    /// lang-fork-ui: effects, bindings and what they read (src/reactive.rs).
+    pub rx: crate::reactive::Reactive,
     /// `home` of the files' top-level frames running now (a `?` that would
     /// return from one panics).
     top_homes: Vec<usize>,
@@ -589,6 +591,7 @@ impl Vm {
             module_root: None,
             results: None,
             prop_initializing: Vec::new(),
+            rx: Default::default(),
             top_homes: Vec::new(),
         };
         crate::core::init(&mut vm);
@@ -2011,7 +2014,23 @@ impl Vm {
     }
 
     pub fn ivar_get(&self, obj: &Value, iv: Sym) -> Value {
+        if self.rx.tracking.get() {
+            self.track_read(obj, iv);
+        }
         self.ivar_lookup(obj, iv).unwrap_or(Value::NIL)
+    }
+
+    /// A computation is running: it depends on this field (an object's that
+    /// can change).
+    #[cold]
+    #[inline(never)]
+    fn track_read(&self, obj: &Value, iv: Sym) {
+        if let V::Object(o) = self.kind(*obj)
+            && !self.heap[o].frozen.get()
+        {
+            self.heap[o].observed.set(true);
+            self.rx.track((o.id(), iv));
+        }
     }
 
     pub fn ivar_lookup(&self, obj: &Value, iv: Sym) -> Option<Value> {
@@ -2148,14 +2167,33 @@ impl Vm {
 
     #[inline]
     pub fn ivar_set(&mut self, obj: &Value, iv: Sym, v: Value) -> Result<(), Unwind> {
-        if let V::Object(o) = self.kind(*obj) {
-            let o = &self.heap[o];
+        if let V::Object(r) = self.kind(*obj) {
+            let o = &self.heap[r];
             if !o.frozen.get() {
+                if o.observed.get() {
+                    return self.ivar_set_observed(r, iv, v);
+                }
                 o.ivars.borrow_mut().set(iv, v);
                 return Ok(());
             }
         }
         self.ivar_set_slow(obj, iv, v)
+    }
+
+    /// A write to an object computations read: they run again if the value
+    /// changed (another object, or another immediate).
+    #[cold]
+    #[inline(never)]
+    fn ivar_set_observed(&mut self, o: ObjRef, iv: Sym, v: Value) -> Result<(), Unwind> {
+        let old = self.heap[o].ivars.borrow().get(iv);
+        self.heap[o].ivars.borrow_mut().set(iv, v);
+        if old.is_some_and(|old| self.heap.identical(&old, &v)) {
+            return Ok(());
+        }
+        if self.rx.changed((o.id(), iv)) {
+            crate::core::reactive::flush(self)?;
+        }
+        Ok(())
     }
 
     #[inline(never)]
@@ -2334,6 +2372,9 @@ impl Vm {
         }
         for c in self.c.all() {
             m.class(c);
+        }
+        for v in self.rx.roots() {
+            m.value(&v);
         }
         // the namespaces of used files (their classes are reachable only there)
         for u in self.units.values() {

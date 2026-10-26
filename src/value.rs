@@ -327,6 +327,9 @@ pub struct RObject {
     /// Per-object singleton class (`def obj.m`, `obj.extend(M)`).
     pub singleton: Cell<Option<ClassRef>>,
     pub frozen: Cell<bool>,
+    /// lang-fork-ui: a computation read one of its fields, so writes notify
+    /// (src/reactive.rs).
+    pub observed: Cell<bool>,
 }
 
 impl RObject {
@@ -336,6 +339,7 @@ impl RObject {
             ivars: Default::default(),
             singleton: Default::default(),
             frozen: Default::default(),
+            observed: Default::default(),
         }
     }
 }

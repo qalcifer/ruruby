@@ -24,6 +24,7 @@ pub mod lexer;
 pub mod modules;
 pub mod opcode;
 pub mod parser;
+pub mod reactive;
 pub mod rhash;
 pub mod symbol;
 pub mod value;
