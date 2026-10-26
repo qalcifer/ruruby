@@ -18,7 +18,8 @@ cargo run -- -e 'puts (1..10).select(&:even?).map(|x| x * x).sum'
 cargo run -- --dump -e 'p [1, 2].map(|x| x + 1)'     # print bytecode, like `mruby -v`
 cargo run -- -c file.rb                            # check syntax only
 cargo run                                          # REPL
-cargo test
+cargo test --workspace
+cargo run --release -p ruruby-egui -- examples/ui/todo.rb   # lang-fork-ui: a UI in a window (egui)
 cargo run --release --bin mrbtest   # run mruby's own test suite (needs ./mruby)
 ```
 
@@ -35,6 +36,9 @@ cargo run --release --bin mrbtest   # run mruby's own test suite (needs ./mruby)
 | `src/symbol.rs` | Symbol interning | `src/symbol.c` |
 | `src/core/` | Built-in classes and methods (`reflect.rs`: singleton classes, `define_method`, `class_eval`, …; `prelude.rb`: iterators written in Ruby) | `src/{kernel,numeric,string,array,hash,range}.c`, `mrblib/`, default gems |
 | `src/main.rs` | CLI + REPL | `mruby`, `mirb` |
+| `reactive/` | `ruruby-reactive`: signals, memos, effects, push-pull updates (lang-fork-ui) | — |
+| `src/ui.rs`, `src/core/ui.rb` | the declarative UI's elements and the changes a renderer applies (lang-fork-ui) | — |
+| `backends/egui/` | `ruruby-ui`: a first renderer, on egui (lang-fork-ui) | — |
 
 See **[docs/MRUBY_TO_RUST.md](docs/MRUBY_TO_RUST.md)** for the mruby analysis, the
 C-to-Rust mapping, what's implemented, and the roadmap.

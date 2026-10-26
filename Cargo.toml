@@ -10,7 +10,7 @@ default-run = "ruruby"
 ruruby-reactive = { path = "reactive" }
 
 [workspace]
-members = [".", "reactive"]
+members = [".", "reactive", "backends/egui"]
 
 [profile.release]
 codegen-units = 1

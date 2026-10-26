@@ -29,6 +29,13 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
 | [15_reactive.rb](15_reactive.rb) | `effect { }`, `bind(obj, :prop) { }`, `batch`, `untracked`: code that re-runs when the props it read change |
 | [16_components.rb](16_components.rb) | `component`, element trees (`use ui::{...}`), arguments as bindings, `<=>`, `on(:click)` handlers and the `Event` enum, `for`/`if` in trees, nested components, the changes a renderer receives (`UI::mutations`) |
 
+**In a window**: [ui/](ui/) holds UI programs for the first renderer (egui,
+`backends/egui`), e.g.
+
+```sh
+cargo run --release -p ruruby-egui -- examples/ui/todo.rb
+```
+
 ## The rules in brief
 
 - **Functions** are `fn name(params) { body }`; the last expression is the

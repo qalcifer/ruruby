@@ -1,0 +1,14 @@
+[package]
+name = "ruruby-egui"
+version = "0.1.0"
+edition = "2024"
+description = "A first renderer for ruruby's declarative UI, on egui"
+license = "MIT"
+
+[[bin]]
+name = "ruruby-ui"
+path = "src/main.rs"
+
+[dependencies]
+ruruby = { path = "../.." }
+eframe = "0.37"
