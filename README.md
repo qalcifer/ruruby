@@ -9,7 +9,7 @@ mruby's source files.
 
 On the `lang-fork` branch the language has its own syntax (`fn`, braces,
 closures `|x| ...`, files as modules with `use`, `Ok`/`Err` and `?` instead of
-exceptions, `none` instead of nil); **[examples/](examples/README.md)** is a
+exceptions, `none` instead of nil, `interface`/`impl` instead of mixins); **[examples/](examples/README.md)** is a
 guided tour of it.
 
 ```sh

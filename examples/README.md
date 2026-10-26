@@ -50,8 +50,9 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
   Interfaces hold no state; `impl I by @field` reuses a field's methods.
 
 Removed from Ruby: `def`/`end`, `do ... end`, `->`, `elsif`, `then`, `begin`, `? :`,
-`nil`, `raise`/`rescue`/`ensure`/`retry`. Each is a compile error that says what
-to write instead.
+`nil`, `raise`/`rescue`/`ensure`/`retry`, `include`/`extend`/`prepend` (modules are
+namespaces; shared behaviour is an `interface`). Each is a compile error that says
+what to write instead.
 
 ## Keeping the examples right
 
