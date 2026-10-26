@@ -325,7 +325,7 @@ fn immediate_operands() {
     // take the ordinary path
     let src = r##"
         class Meters {
-          fn initialize(n) = @n = n
+          fn init(n) = @n = n
           fn +(o) = "#{@n + o}m"
         }
         big = 9223372036854775807
@@ -414,7 +414,7 @@ fn fused_comparisons_keep_their_meaning() {
         p lit(1), lit(2), lit(2.0), lit(2**62)
         nan = 0.0 / 0.0
         p cmp(nan, 1.0), (if nan < 2 { :t } else { :f })
-        class V { attr_reader :v; fn initialize(v) = @v = v; impl Comparable { fn <=>(o) = v <=> o.v } }
+        class V { attr_reader :v; fn init(v) = @v = v; impl Comparable { fn <=>(o) = v <=> o.v } }
         x, y = V.new(1), V.new(2)
         p cmp(x, y)
         i = 0; n = 5; s = 0

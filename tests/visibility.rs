@@ -83,12 +83,12 @@ fn scope_default_visibility() {
           fn c = :c
           public
           fn d = "#{b} #{c}"
-          fn initialize = none
+          fn init = none
           private
           fn self.cm = :cm
         }
         x = A.new
-        p x.a, x.d, err { x.b }, err { x.c }, err { x.initialize }, A.cm
+        p x.a, x.d, err { x.b }, err { x.c }, err { x.init }, A.cm
         class A { fn e = :e }
         p x.e
         module M {
@@ -113,7 +113,7 @@ fn scope_default_visibility() {
         out,
         ":a\n\"b c\"\n\"private method 'b' called for an instance of A\"\n\
          \"protected method 'c' called for an instance of A\"\n\
-         \"private method 'initialize' called for an instance of A\"\n:cm\n:e\n:f\n:g\n\"private method 'g' called for module M\"\n\
+         \"private method 'init' called for an instance of A\"\n:cm\n:e\n:f\n:g\n\"private method 'g' called for module M\"\n\
          \"private method 'k' called for module M\"\n[]\n:inner\n:m\n:nested\n"
     );
 }
@@ -158,7 +158,7 @@ fn aliases_and_builtin_private_methods() {
         }
         a = A.new
         p err { a.priv2 }, err { a.priv3 }, a.pub2, a.send(:priv2)
-        p err { Object.new.initialize }, err { Object.new.respond_to_missing?(:x, false) }
+        p err { Object.new.init }, err { Object.new.respond_to_missing?(:x, false) }
     "##);
     assert_eq!(out, ":private\n:private\n:pub\n:priv\n:private\n:private\n");
 }
@@ -175,7 +175,7 @@ fn respond_to_and_public_send() {
         }
         r = R.new
         p r.respond_to?(:pub), r.respond_to?(:priv), r.respond_to?(:priv, true)
-        p r.respond_to?(:prot), r.respond_to?(:prot, true), r.respond_to?(:initialize)
+        p r.respond_to?(:prot), r.respond_to?(:prot, true), r.respond_to?(:init)
         p r.respond_to?(:ghost), r.asked, r.respond_to?(:nope, true), r.asked
         p r.public_send(:pub), catch_panic { r.public_send(:priv) }.err.message
         p (catch_panic { r.respond_to? }.err && :argc)

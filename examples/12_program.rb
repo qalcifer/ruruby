@@ -4,7 +4,7 @@
 # matching, hashes and string formatting.
 
 class Inventory {
-  fn initialize = @items = Hash.new(0)
+  fn init = @items = Hash.new(0)
 
   fn add(name, count) {
     return Err("count must be positive") unless count > 0

@@ -39,7 +39,7 @@ fn instances_of_builtin_subclasses() {
         p a.class, a, a.is_a?(Array), a.size, a.map { _1 * 2 }.class
         class Entries < Array {
           self.class.alias_method :[], :new
-          fn initialize(entries) = replace(entries)
+          fn init(entries) = replace(entries)
           fn keys = map { |k, v| k }
           fn to_s = "#{self.class}#{super}"
         }
@@ -51,7 +51,7 @@ fn instances_of_builtin_subclasses() {
         p h.foo, h[:x], h[:nope], h.class.superclass
         s = Class.new(String) { fn shout = upcase + "!" }.new("hi")
         p s.shout, s.class.superclass, (s + "x").class
-        c = Class.new(Array) { fn initialize(n) = super(n) { |i| i * i } }
+        c = Class.new(Array) { fn init(n) = super(n) { |i| i * i } }
         p c.new(4), Class.new(Hash)[a: 1].class.superclass
     "##);
     assert_eq!(

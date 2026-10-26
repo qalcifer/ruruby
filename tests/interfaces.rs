@@ -27,13 +27,13 @@ const SHAPES: &str = r##"
 fn implementing_interfaces() {
     let out = run(&format!("{SHAPES}{}", r##"
         class Circle {
-          fn initialize(r) = @r = r
+          fn init(r) = @r = r
         }
         impl Shape for Circle {
           fn area() = 3 * @r * @r
         }
         class Square {
-          fn initialize(side) = @side = side
+          fn init(side) = @side = side
           impl Shape {
             fn area() = @side * @side
             fn name() = "square"
@@ -43,7 +43,7 @@ fn implementing_interfaces() {
           fn area() = self * self
         }
         class Cube {
-          fn initialize(s) = @s = s
+          fn init(s) = @s = s
           impl Solid {
             fn area() = 6 * @s * @s
             fn volume() = @s * @s * @s
@@ -81,7 +81,7 @@ fn meeting_requirements() {
           fn greet() = "hi #{name}"
         }
         class Person {
-          fn initialize(name) = @name = name
+          fn init(name) = @name = name
           impl Named { attr_reader :name }
         }
         class Base { fn area() = 9 }
@@ -92,7 +92,7 @@ fn meeting_requirements() {
           fn twice() = [self, self]
         }
         class Num {
-          fn initialize(n) = @n = n
+          fn init(n) = @n = n
           attr_reader :n
           impl Parse {
             fn self.parse(s) = new(s.to_i)
@@ -127,11 +127,11 @@ fn meeting_requirements() {
 fn inheritance() {
     let out = run(&format!("{SHAPES}{}", r##"
         class Rect {
-          fn initialize(w, h) { @w = w; @h = h }
+          fn init(w, h) { @w = w; @h = h }
           impl Shape { fn area() = @w * @h }
         }
         class Square < Rect {
-          fn initialize(s) = super(s, s)
+          fn init(s) = super(s, s)
           fn area() = super + 1
         }
         class Big < Rect {
@@ -168,7 +168,7 @@ fn inheritance() {
 fn abstract_classes() {
     let out = run(&format!("{SHAPES}{}", r##"
         abstract class Widget {
-          fn initialize(label) = @label = label
+          fn init(label) = @label = label
           attr_reader :label
           fn draw()                          # abstract
           fn self.kind()                     # abstract class method
@@ -252,7 +252,7 @@ fn delegation() {
           fn top_or(d) = if empty { d } else { last }
         }
         class History {
-          fn initialize() = @items = []
+          fn init() = @items = []
           impl Stack by @items {
             fn size() = @items.size * 10
           }
@@ -289,7 +289,7 @@ fn contract_errors() {
     ];
     let head = format!("{SHAPES}{}", "
         interface Named { fn name() = \"n\" }
-        class C { fn initialize() = none }
+        class C { fn init() = none }
 ");
     for (src, want) in cases {
         let err = run_capture(&format!("{head}{src}")).unwrap_err().to_string();
@@ -303,8 +303,8 @@ fn syntax_errors() {
     let cases = [
         ("interface Bad { @x = 1 }", "`@x` in an interface: interfaces have no state"),
         ("interface Bad { fn f() = @x + 1 }", "`@x` in an interface"),
-        ("interface Bad { fn initialize() }", "interfaces have no `initialize`"),
-        ("interface Bad { fn initialize(a) = a }", "interfaces have no `initialize`"),
+        ("interface Bad { fn init() }", "interfaces have no `init`"),
+        ("interface Bad { fn init(a) = a }", "interfaces have no `init`"),
         ("interface Bad { p 1 }", "an interface holds `fn` declarations and constants"),
         ("interface Bad { fn self.f() = 1 }", "default class methods aren't supported yet"),
         ("interface bad {}", "interface name must be a CONSTANT"),

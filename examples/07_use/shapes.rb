@@ -2,12 +2,12 @@
 
 module Shapes {
   class Circle {
-    fn initialize(r) = @r = r
+    fn init(r) = @r = r
     fn area = (3.14159 * @r * @r).round(2)
   }
 
   class Square {
-    fn initialize(side) = @side = side
+    fn init(side) = @side = side
     fn area = @side * @side
   }
 }

@@ -13,7 +13,7 @@ fn get_idx_and_size() {
         h = {a: 1, "s" => 2}
         p h[:a], h["s"], h[:zz], Hash.new(7)[:x], Hash.new { |hh, k| k.to_s }[:y]
         class Key {
-          fn initialize(n) = @n = n
+          fn init(n) = @n = n
           fn hash = 1
           fn eql?(o) = true
         }
@@ -198,7 +198,7 @@ fn operands_in_place() {
         p x[(x = [7, 8]; 1)], x
         class Counter {
           attr_reader :calls
-          fn initialize = @calls = 0
+          fn init = @calls = 0
           fn size() {
             @calls += 1
             2.5

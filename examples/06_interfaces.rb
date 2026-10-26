@@ -12,7 +12,7 @@ interface Shape {
 
 # `impl Interface for Class { }` holds the contract's methods together
 class Circle {
-  fn initialize(r) = @r = r
+  fn init(r) = @r = r
 }
 
 impl Shape for Circle {
@@ -21,7 +21,7 @@ impl Shape for Circle {
 
 # ...or, inside the class, `impl Interface { }`
 class Rect {
-  fn initialize(w, h) { @w = w; @h = h }
+  fn init(w, h) { @w = w; @h = h }
 
   impl Shape {
     fn area() = @w * @h
@@ -46,7 +46,7 @@ interface Solid: Shape {
 }
 
 class Cube {
-  fn initialize(side) = @side = side
+  fn init(side) = @side = side
 
   impl Solid {
     fn area() = 6 * @side * @side
@@ -58,7 +58,7 @@ p Cube.new(2).describe, Cube.new(2).is_a?(Shape)
 # Subclasses inherit their parent's interfaces. A method a class has (its
 # own or inherited) beats an interface default: "class wins"
 class Square < Rect {
-  fn initialize(side) = super(side, side)
+  fn init(side) = super(side, side)
 }
 class Labeled { fn name() = "labeled" }
 class Badge < Labeled {
@@ -71,7 +71,7 @@ p Square.new(3).describe, Badge.new.describe   # Badge keeps Labeled's name
 # an abstract method, and its impl blocks may leave required methods to the
 # subclasses. Each concrete subclass is checked when its body ends.
 abstract class Widget {
-  fn initialize(text) = @text = text
+  fn init(text) = @text = text
   fn draw()                              # abstract
   fn render() = "<#{draw}>"
   impl Shape {}                          # area() is the subclasses' job
@@ -99,7 +99,7 @@ interface Queue {
 }
 
 class Jobs {
-  fn initialize() = @list = []
+  fn init() = @list = []
   impl Queue by @list
 }
 jobs = Jobs.new
@@ -109,7 +109,7 @@ p jobs.shift, jobs.size, jobs.empty
 
 # The core interfaces: Comparable requires <=>, Enumerable requires each
 class NumberBag {
-  fn initialize(*numbers) = @numbers = numbers
+  fn init(*numbers) = @numbers = numbers
 
   impl Enumerable {
     fn each() {
@@ -130,7 +130,7 @@ module Geometry {
   private fn round2(x) = x.round(2)   # only for the module's own functions
 
   class Square {
-    fn initialize(side) = @side = side
+    fn init(side) = @side = side
     fn area = @side * @side
   }
 }

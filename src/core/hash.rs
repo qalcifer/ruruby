@@ -22,7 +22,7 @@ pub fn init(vm: &mut Vm) {
     let c = vm.c.hash;
     vm.heap[c].includes.push(vm.c.enumerable);
     // Hash.new(default) { |h, k| }, and a subclass's `super` in initialize
-    vm.def(&c, "initialize", |vm, s, a, b| {
+    vm.def(&c, "init", |vm, s, a, b| {
         vm.check_frozen(s)?;
         check_argc(vm, a, 0, 1)?;
         if b.is_some() && !a.is_empty() {

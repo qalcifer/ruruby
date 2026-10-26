@@ -27,7 +27,7 @@ fn run(dir: &Path) -> Result<String, String> {
 
 const PERSON: &str = "
 class Person {
-  fn initialize(name) = @name = name
+  fn init(name) = @name = name
   fn to_s = \"Person(#{@name})\"
 }
 HELPER = 42
@@ -98,12 +98,12 @@ fn use_errors_are_compile_errors() {
 const GEOMETRY: &str = "
 module Shapes {
   class Circle {
-    fn initialize(r) = @r = r
+    fn init(r) = @r = r
     fn area = 3 * @r * @r
     KIND = :round
   }
   class Square {
-    fn initialize(s) = @s = s
+    fn init(s) = @s = s
     fn area = @s * @s
   }
 }

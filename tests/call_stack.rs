@@ -29,7 +29,7 @@ fn deep_ruby_recursion_needs_no_native_stack() {
             fn via_yield(n) = if n == 0 { 0 } else { twice { 1 + via_yield(n - 1) } }
             fn twice = yield
             class Num {
-              fn initialize(n) = @n = n
+              fn init(n) = @n = n
               fn +(o) = if @n == 0 { o } else { Num.new(@n - 1) + (o + 1) }
             }
             # each/map/times are written in Ruby (prelude.rb), so recursing

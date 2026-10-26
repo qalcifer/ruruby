@@ -146,7 +146,7 @@ fn classes_modules_super() {
         class Base {
           attr_accessor :name
           impl Named {}
-          fn initialize(name) {
+          fn init(name) {
             @name = name
           }
           fn describe() {
@@ -179,7 +179,7 @@ fn user_defined_enumerable_and_comparable() {
     let src = r##"
         class Version {
           attr_reader :major, :minor
-          fn initialize(major, minor) {
+          fn init(major, minor) {
             @major = major
             @minor = minor
           }
@@ -193,7 +193,7 @@ fn user_defined_enumerable_and_comparable() {
           }
         }
         class Shelf {
-          fn initialize(items) {
+          fn init(items) {
             @items = items
           }
           impl Enumerable {

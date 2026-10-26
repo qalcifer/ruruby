@@ -31,7 +31,7 @@ fn fn_definitions() {
         fn none_args { :no_params }
         fn empty() {}
         class V {
-          fn initialize(n) = @n = n
+          fn init(n) = @n = n
           fn self.make(n) { new(n) }
           fn ==(o) { o.is_a?(V) && o.n == n }
           fn n = @n
@@ -118,7 +118,7 @@ fn braces_for_every_construct() {
         }
         p show(Ok(50)), show(Ok(1)), show(Err(:x))
         class Animal {
-          fn initialize(name) { @name = name }
+          fn init(name) { @name = name }
           fn speak = "..."
           fn to_s { "#{self.class.name}(#{@name}): #{speak}" }
         }
@@ -258,7 +258,7 @@ fn modules_hold_functions() {
           private fn round1(x) = x.round(1)
           module Format { fn show(c) = "#{c}°C = #{Temp.to_f(c)}°F" }
           class Reading {
-            fn initialize(c) = @c = c
+            fn init(c) = @c = c
             fn hot? = @c * SCALE > 50
           }
         }

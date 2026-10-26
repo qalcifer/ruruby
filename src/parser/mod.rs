@@ -2213,6 +2213,10 @@ impl Parser {
                 name.push('=');
             }
         }
+        if name == "initialize" || name == "initialize_copy" {
+            let new = name.replacen("initialize", "init", 1);
+            return Err(self.gone(&format!("fn {name}"), &format!("the constructor hook is `fn {new}(...)`")));
+        }
         self.push_scope(true);
         let params = if self.at(&Tok::LParen) {
             self.advance();
@@ -2372,11 +2376,11 @@ impl Parser {
         let mut stmts = vec![call(None, "__interface", iface_args)];
         for st in stmts_of(body) {
             match &st {
-                Node::Def { name, .. } if name == "initialize" => {
-                    return Err(iface_err("interfaces have no `initialize`: state and construction belong in the class"));
+                Node::Def { name, .. } if name == "init" => {
+                    return Err(iface_err("interfaces have no `init`: state and construction belong in the class"));
                 }
-                Node::Call { name, args, .. } if name == "__require" && matches!(&args[0], Node::Sym(s) if s == "initialize") => {
-                    return Err(iface_err("interfaces have no `initialize`: state and construction belong in the class"));
+                Node::Call { name, args, .. } if name == "__require" && matches!(&args[0], Node::Sym(s) if s == "init") => {
+                    return Err(iface_err("interfaces have no `init`: state and construction belong in the class"));
                 }
                 Node::Def { recv: Some(_), .. } => {
                     return Err(iface_err(

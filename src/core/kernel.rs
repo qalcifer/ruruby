@@ -89,7 +89,7 @@ fn init_object(vm: &mut Vm) {
             }),
         _ => Ok(Value::float(float_of(vm, &arg(a, 0))?)),
     });
-    vm.def(&o, "initialize", |_, _, _, _| Ok(Value::NIL));
+    vm.def(&o, "init", |_, _, _, _| Ok(Value::NIL));
     vm.def(&o, "class", |vm, s, _, _| Ok(Value::from(vm.class_of(s))));
     vm.def(&o, "to_s", |vm, s, _, _| {
         if vm.heap.identical(s, &vm.main_obj) {
@@ -472,7 +472,7 @@ fn init_module(vm: &mut Vm) {
 
 fn init_exception(vm: &mut Vm) {
     let e = vm.c.exception;
-    vm.def(&e, "initialize", |vm, s, a, _| {
+    vm.def(&e, "init", |vm, s, a, _| {
         let msg = match vm.kind(arg(a, 0)) {
             V::Nil => vm.str(vm.class_name(s)),
             _ => arg(a, 0),
@@ -482,7 +482,7 @@ fn init_exception(vm: &mut Vm) {
     });
     // NameError.new(msg = nil, name = nil), NoMethodError.new(msg, name, args = [])
     let ne = vm.c.name_error;
-    vm.def(&ne, "initialize", |vm, s, a, _| {
+    vm.def(&ne, "init", |vm, s, a, _| {
         let msg = match vm.kind(arg(a, 0)) {
             V::Nil => vm.str(vm.class_name(s)),
             _ => arg(a, 0),

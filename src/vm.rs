@@ -521,7 +521,7 @@ impl Vm {
             heap[c.object].consts.borrow_mut().insert(s, Value::from(cls));
         }
         let s = CommonSyms {
-            initialize: syms.intern("initialize"),
+            initialize: syms.intern("init"),
             message: syms.intern("@message"),
             call: syms.intern("call"),
             to_s: syms.intern("to_s"),
@@ -545,7 +545,7 @@ impl Vm {
             to_ary: syms.intern("to_ary"),
             hash: syms.intern("hash"),
             eql: syms.intern("eql?"),
-            initialize_copy: syms.intern("initialize_copy"),
+            initialize_copy: syms.intern("init_copy"),
             respond_to_missing: syms.intern("respond_to_missing?"),
             m_recv: syms.intern("__recv"),
             m_owner: syms.intern("__owner"),

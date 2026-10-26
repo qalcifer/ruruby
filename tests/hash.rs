@@ -122,7 +122,7 @@ fn deletes_leave_no_trace() {
 const POINT: &str = r#"
     class Pt {
       attr_reader :x, :y
-      fn initialize(x, y) = (@x = x; @y = y)
+      fn init(x, y) = (@x = x; @y = y)
       fn eql?(o) = o.is_a?(Pt) && x == o.x && y == o.y
       fn hash = [x, y].hash
     }
@@ -158,7 +158,7 @@ fn eql_callbacks_that_change_the_hash() {
     // a lookup that ran Ruby code checks the hash didn't change under it
     let out = run(r#"
         class Evil {
-          fn initialize(h) = @h = h
+          fn init(h) = @h = h
           fn eql?(o) = (@h.delete("b"); false)
           fn hash = 0
         }

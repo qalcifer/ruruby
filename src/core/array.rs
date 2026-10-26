@@ -16,7 +16,7 @@ pub fn init(vm: &mut Vm) {
     let c = vm.c.array;
     vm.heap[c].includes.push(vm.c.enumerable);
     // what Array.new and a subclass's `super` in initialize run
-    vm.def(&c, "initialize", |vm, s, a, b| {
+    vm.def(&c, "init", |vm, s, a, b| {
         vm.check_frozen(s)?;
         let items = super::kernel::array_new_items(vm, a, b)?;
         *vm.heap[this_ary(vm, s)?].borrow_mut() = items;
@@ -620,7 +620,7 @@ pub fn init_more(vm: &mut Vm) {
         }
         Ok(Value::NIL)
     });
-    vm.def(&c, "initialize_copy", |vm, s, a, _| {
+    vm.def(&c, "init_copy", |vm, s, a, _| {
         vm.check_frozen(s)?;
         let src = this_ary(vm, &arg(a, 0))?;
         let v = vm.heap[src].borrow().clone();

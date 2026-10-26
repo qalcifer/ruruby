@@ -31,7 +31,7 @@ pub fn init(vm: &mut Vm) {
     init_mutators(vm);
     let c = vm.c.string;
     // String.new(str), and a subclass's `super` in initialize
-    vm.def(&c, "initialize", |vm, s, a, _| {
+    vm.def(&c, "init", |vm, s, a, _| {
         vm.check_frozen(s)?;
         check_argc(vm, a, 0, 1)?;
         if let [x] = a {
@@ -635,7 +635,7 @@ fn init_mutators(vm: &mut Vm) {
     vm.def(&c, "next!", |vm, s, a, b| bang(vm, s, a, b, "succ", true));
     vm.def(&c, "[]=", aset);
     vm.def(&c, "rindex", rindex);
-    vm.def(&c, "initialize_copy", |vm, s, a, _| {
+    vm.def(&c, "init_copy", |vm, s, a, _| {
         vm.check_frozen(s)?;
         let text = str_arg(vm, &arg(a, 0))?;
         set_contents(vm, s, text)?;

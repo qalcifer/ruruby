@@ -88,7 +88,7 @@ fn string_search_bytes_and_substitution() {
 #[test]
 fn array_methods() {
     let out = run(r##"
-        p [].send(:initialize, 2), [1, 2, 3].shift(2), [1, 2, 3].pop(2), [].shift(1)
+        p [].send(:init, 2), [1, 2, 3].shift(2), [1, 2, 3].pop(2), [].shift(1)
         a = ["a", "b"]
         p a.delete("x") { _1 + "!" }, a.delete("a"), a
         p [1, 2].eql?([1, 2]), [1, 2].eql?([1.0, 2.0]), [1, 2] == [1.0, 2.0], {[1] => :a}[[1.0]]
@@ -98,7 +98,7 @@ fn array_methods() {
         p [1, 2, 1].rindex(1), [1, 2, 3].rindex { _1 < 3 }, [1, :a, "s", 2].grep(Integer), [1, :a].grep_v(Integer)
         p (1..6).find_all(&:even?), [1, 2].grep(Integer) { _1 * 10 }
         x = [1]
-        x.send(:initialize_copy, [7, 8])
+        x.send(:init_copy, [7, 8])
         p x, (catch_panic { [1][Float::NAN] }.err && :range)
     "##);
     assert_eq!(

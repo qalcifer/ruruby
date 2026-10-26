@@ -18,7 +18,7 @@ p catch_panic { "x".freeze << "y" }.err.class
 
 # Interpolation calls to_s
 class Temp {
-  fn initialize(deg) = @deg = deg
+  fn init(deg) = @deg = deg
   fn to_s = "#{@deg}°C"
 }
 puts "It is #{Temp.new(21)} with #{3 + 4} clouds and #{none.inspect} wind"

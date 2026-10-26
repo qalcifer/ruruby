@@ -4,8 +4,8 @@ class Animal {
   # attr_reader makes `name` and `age` readable methods
   attr_reader :name, :age
 
-  # `new` calls initialize; @variables belong to the object
-  fn initialize(name, age) {
+  # `new` calls init; @variables belong to the object
+  fn init(name, age) {
     @name = name
     @age = age
   }
@@ -20,8 +20,8 @@ class Animal {
 }
 
 class Dog < Animal {
-  fn initialize(name, age, breed = "mutt") {
-    super(name, age)           # the parent's initialize
+  fn init(name, age, breed = "mutt") {
+    super(name, age)           # the parent's init
     @breed = breed
   }
 
@@ -41,7 +41,7 @@ p Dog.kingdom, Dog.superclass, Dog.new("x", 1).is_a?(Animal), Cat.ancestors.firs
 class Version {
   attr_reader :major, :minor
 
-  fn initialize(major, minor) {
+  fn init(major, minor) {
     @major = major
     @minor = minor
   }
@@ -61,7 +61,7 @@ p v1 < v2, [v2, v1].max.to_s, v1.between?(v1, v2), (v1 + v2).to_s
 class Account {
   attr_reader :balance
 
-  fn initialize = @balance = 0
+  fn init = @balance = 0
 
   fn deposit(amount) {
     check(amount)
@@ -92,7 +92,7 @@ p special.greet
 # attr_accessor makes a reader and a writer
 class Point {
   attr_accessor :x, :y
-  fn initialize(x, y) { @x = x; @y = y }
+  fn init(x, y) { @x = x; @y = y }
 }
 pt = Point.new(1, 2)
 pt.x = 10

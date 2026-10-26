@@ -20,7 +20,7 @@ class Result {
 }
 
 class Ok < Result {
-  fn initialize(value) {
+  fn init(value) {
     @value = value
     freeze
   }
@@ -49,7 +49,7 @@ class Ok < Result {
 }
 
 class Err < Result {
-  fn initialize(error) {
+  fn init(error) {
     @error = error
     freeze
   }

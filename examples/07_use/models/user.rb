@@ -2,7 +2,7 @@
 use models::person::Person
 
 class User < Person {
-  fn initialize(name, email) {
+  fn init(name, email) {
     super(name)
     @email = email
   }
