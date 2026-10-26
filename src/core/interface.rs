@@ -90,7 +90,17 @@ fn arity_desc(a: i64) -> String {
     }
 }
 
+/// Makes a core module an interface requiring `name`.
+fn core_interface(vm: &mut Vm, i: ClassRef, name: &str, arity: i64, sig: &str) {
+    let name = vm.intern(name);
+    let r = Required { name, arity, class_method: false, sig: sig.into() };
+    *vm.heap[i].interface.borrow_mut() = Some(InterfaceInfo { required: vec![r] });
+}
+
 pub fn init(vm: &mut Vm) {
+    // their defaults are the native and prelude methods already defined
+    core_interface(vm, vm.c.comparable, "<=>", 1, "<=>(other)");
+    core_interface(vm, vm.c.enumerable, "each", 0, "each(&block)");
     let m = vm.c.module;
     // `interface I: Supers {` — self is the new module
     vm.def(&m, "__interface", |vm, s, a, _| {

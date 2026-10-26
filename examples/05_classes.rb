@@ -36,9 +36,9 @@ animals = [Dog.new("Rex", 5, "beagle"), Cat.new("Tom", 3), Dog.new("Fido", 7)]
 animals.each { |a| puts a }
 p Dog.kingdom, Dog.superclass, Dog.new("x", 1).is_a?(Animal), Cat.ancestors.first(2)
 
-# Operators are methods; including Comparable gives <, >, between?, clamp...
+# Operators are methods; implementing the Comparable interface (its one
+# required method is <=>) gives <, >, between?, clamp... (see 06_interfaces.rb)
 class Version {
-  include Comparable
   attr_reader :major, :minor
 
   fn initialize(major, minor) {
@@ -46,7 +46,9 @@ class Version {
     @minor = minor
   }
 
-  fn <=>(other) = [major, minor] <=> [other.major, other.minor]
+  impl Comparable {
+    fn <=>(other) = [major, minor] <=> [other.major, other.minor]
+  }
   fn to_s = "#{major}.#{minor}"
   fn +(other) = Version.new(major + other.major, minor + other.minor)
 }

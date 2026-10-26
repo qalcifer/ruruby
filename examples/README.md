@@ -16,8 +16,8 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
 | [02_functions.rb](02_functions.rb) | `fn name(args) { }` and `fn name(args) = expr`, return values, defaults, keyword and rest arguments, spreading, recursion |
 | [03_control_flow.rb](03_control_flow.rb) | `if` / `else if` / `else`, `unless`, `while`, `until`, `for`, `loop`, `break`/`next`, `case`/`when`, modifiers, `if` as a value |
 | [04_closures.rb](04_closures.rb) | closures `\|x\| ...`, capturing, closures as a call's last argument, blocks, `yield`, `&f`, `&:sym` |
-| [05_classes.rb](05_classes.rb) | classes, `initialize`, attributes, inheritance and `super`, class methods, operators, `Comparable`, `private fn`, reopening classes |
-| [06_modules.rb](06_modules.rb) | modules as mixins (`include`), as namespaces, `Enumerable` from `each` |
+| [05_classes.rb](05_classes.rb) | classes, `initialize`, attributes, inheritance and `super`, class methods, operators, `impl Comparable`, `private fn`, reopening classes |
+| [06_interfaces.rb](06_interfaces.rb) | `interface` with required and default methods, `impl I for C` and `impl I` in a class, built-in classes, super-interfaces, contract errors, `impl I by @field`, `Comparable`/`Enumerable`, modules as namespaces |
 | [07_use/](07_use/main.rb) | files as modules: `use file::Name`, `use file::Module::{A, B}`, `use file::*`, nested directories |
 | [08_errors.rb](08_errors.rb) | `Ok`/`Err`, `?`, matching on results, `fetch` and `Integer()` returning results, `none` with `?`, panics and `catch_panic` |
 | [09_pattern_matching.rb](09_pattern_matching.rb) | `case`/`in`: types, alternatives, arrays with splats, hashes, guards, binding with `=>`, `in` as a test |
@@ -44,6 +44,10 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
   `Ok(...)`); `value?` returns an `Err` (or `none`) from the function.
   A bug is a `panic`, which ends the program.
 - **`none`** is the absent value (falsy, like `false`).
+- **Interfaces** name a contract: `interface Shape { fn area(); fn name() = "s" }`
+  (no body: required; a body: a default). `impl Shape for Circle { fn area() = ... }`
+  or `impl Shape { ... }` inside the class; checked when the block ends.
+  Interfaces hold no state; `impl I by @field` reuses a field's methods.
 
 Removed from Ruby: `def`/`end`, `do ... end`, `->`, `elsif`, `then`, `begin`, `? :`,
 `nil`, `raise`/`rescue`/`ensure`/`retry`. Each is a compile error that says what

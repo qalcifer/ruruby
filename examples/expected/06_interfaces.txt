@@ -1,0 +1,20 @@
+circle with area 3.14
+rectangle with area 6
+true
+true
+9.14
+"integer with area 16"
+"cube with area 24, volume 8"
+true
+"line 61: Draft doesn't implement Shape: missing area()"
+:build
+1
+false
+[3, 5, 8]
+[10, 6, 16]
+3
+true
+[5, 8]
+3.14159
+12.57
+9
