@@ -34,7 +34,10 @@ p c.area, r.scale(2), r.w, c.is_a?(Shape), c.variant
 # Values are frozen and compare by value, so they work as Hash keys
 p c == Shape::Circle(1), {c => "unit circle"}[Shape::Circle(1)], c.frozen?
 
-# Pattern matching takes variants apart; a guard refines a branch
+# Pattern matching takes variants apart; a guard refines a branch. As in
+# Rust, a `case` must handle every variant (or have an `else`): leaving one
+# out is an error before the program runs, e.g.
+#   line 34: this case on Shape doesn't handle Empty: add an `in` branch for it or an `else`
 fn describe(s) = case s {
   in Shape::Circle(r) if r > 10 { "a big circle" }
   in Shape::Circle(r) { "a circle of radius #{r}" }
@@ -58,7 +61,7 @@ state = Light::Off
 [1, 2, 3].each { state = state.press; p state }
 
 # Result is an enum too: Ok(value) | Err(error)
-p Result::variants, Ok(1).is_a?(Result), (case Err("no") { in Err(e) { e } })
+p Result::variants, Ok(1).is_a?(Result), (case Err("no") { in Ok(v) { v } in Err(e) { e } })
 
 # Mistakes are caught when the value is made
 p catch_panic { Shape::Circle(1, 2) }.err.message

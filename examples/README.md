@@ -58,7 +58,9 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
   holds bodiless `fn`s and partial impls for its subclasses to finish; it has no `new`.
 - **Enums** are Rust's: `enum Shape { Circle(r), Rect { w, h }, Empty }`; create
   `Shape::Circle(2)`, `Shape::Rect(w: 2, h: 3)`, `Shape::Empty`; take apart with
-  `case s { in Shape::Circle(r) { ... } }`. Values are frozen and compare by value.
+  `case s { in Shape::Circle(r) { ... } }`, which must handle every variant (or
+  have an `else`), checked before the program runs. Values are frozen and
+  compare by value.
 - **Modules** are namespaces, like Rust's `mod`: constants, classes and functions;
   `fn f` in `module M { }` is called as `M::f(...)` (`private fn` keeps it internal).
 

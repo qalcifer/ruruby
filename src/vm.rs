@@ -265,6 +265,8 @@ pub struct Unit {
     pub exports: crate::modules::Exports,
     /// Its namespace, once it ran.
     pub module: Option<ClassRef>,
+    /// The enums it declares (for the exhaustiveness check of its users).
+    pub enums: Vec<crate::ast::EnumDecl>,
 }
 
 /// The built-in methods [`Op::GetIdx`] and [`Op::Size`] answer in place

@@ -5,7 +5,7 @@
 //! find patterns. The code generator and VM need nothing special.
 
 use super::{PREC_ADD, PResult, Parser, b};
-use crate::ast::{self, Node};
+use crate::ast::{self, CaseHead, CaseInfo, Node};
 use crate::lexer::{Kw, Tok};
 
 enum Pat {
@@ -65,14 +65,14 @@ fn call(recv: Node, name: &str, args: Vec<Node>) -> Node {
 impl Parser {
     /// `case subject; in pat [if guard] then body ... else ... end`
     #[inline(never)]
-    pub(super) fn parse_case_in(&mut self, subject: Node, braced: bool) -> PResult<Node> {
+    pub(super) fn parse_case_in(&mut self, subject: Node, braced: bool, line: u32) -> PResult<Node> {
         let tmp = self.fresh("pm");
         self.declare_here(&tmp);
         let (cache, flag) = (self.fresh("pmd"), self.fresh("pmf"));
         self.declare_here(&cache);
         self.declare_here(&flag);
         let saved = self.pm_cache.replace((tmp.clone(), cache, flag.clone()));
-        let r = self.case_in_clauses(&tmp, braced);
+        let r = self.case_in_clauses(&tmp, braced, line);
         self.pm_cache = saved;
         let chain = r?;
         Ok(Node::Seq(vec![
@@ -82,12 +82,16 @@ impl Parser {
         ]))
     }
 
-    fn case_in_clauses(&mut self, tmp: &str, braced: bool) -> PResult<Node> {
+    /// `line`: the `case`'s, for the exhaustiveness check.
+    fn case_in_clauses(&mut self, tmp: &str, braced: bool, line: u32) -> PResult<Node> {
         let tmp = tmp.to_string();
         let mut clauses = Vec::new();
+        let mut heads = Vec::new();
         while self.eat_kw(Kw::In) {
             let pat = self.parse_top_pattern()?;
             let mut test = self.pattern_test(&pat, lvar(&tmp));
+            let guarded = matches!(self.peek(), Tok::Kw(Kw::If | Kw::Unless));
+            heads.extend(heads_of(&pat, guarded));
             if self.eat_kw(Kw::If) {
                 test = Node::And(b(test), b(self.header(|p| p.parse_expr())?));
             } else if self.eat_kw(Kw::Unless) {
@@ -99,6 +103,8 @@ impl Parser {
         let mut chain = if self.eat_kw(Kw::Else) {
             self.clause_body(braced)?
         } else {
+            let in_enum = self.enum_stack.last().cloned();
+            self.cases.push(CaseInfo { line, in_enum, heads });
             no_match(&tmp)
         };
         self.end_clauses(braced)?;
@@ -641,6 +647,50 @@ impl Item {
         match self {
             Item::Pat(p) => p,
             Item::Splat(_) => unreachable!(),
+        }
+    }
+}
+
+/// `Shape::Circle` as `["Shape", "Circle"]`.
+fn const_path(n: &Node) -> Option<Vec<String>> {
+    match n {
+        Node::Const(c) | Node::Colon3(c) => Some(vec![c.clone()]),
+        Node::Colon2(base, c) => {
+            let mut p = const_path(base)?;
+            p.push(c.clone());
+            Some(p)
+        }
+        _ => None,
+    }
+}
+
+/// A pattern that matches any value.
+fn irrefutable(p: &Pat) -> bool {
+    match p {
+        Pat::Bind(_) => true,
+        Pat::Capture(inner, _) => irrefutable(inner),
+        _ => false,
+    }
+}
+
+/// What a branch's pattern tells the exhaustiveness check (see [`CaseHead`]).
+fn heads_of(p: &Pat, guarded: bool) -> Vec<Option<CaseHead>> {
+    let path = |k: &Option<Node>, full: bool| k.as_ref().and_then(const_path).map(|p| CaseHead::Path(p, full && !guarded));
+    match p {
+        Pat::Bind(_) if guarded => vec![Some(CaseHead::Partial)],
+        Pat::Bind(_) => vec![Some(CaseHead::Any)],
+        Pat::Capture(inner, _) => heads_of(inner, guarded),
+        Pat::Alt(alts) => alts.iter().flat_map(|a| heads_of(a, guarded)).collect(),
+        Pat::Value(n) => vec![const_path(n).map(|p| CaseHead::Path(p, !guarded))],
+        Pat::Array { konst, pre, rest, post } => {
+            // `Circle(r)`: the count is the variant's own, so only the items matter
+            let _ = rest;
+            vec![path(konst, pre.iter().chain(post).all(irrefutable))]
+        }
+        Pat::Find { konst, .. } => vec![path(konst, false)],
+        Pat::Hash { konst, pairs, rest } => {
+            let all = pairs.iter().all(|(_, p)| p.as_ref().is_none_or(irrefutable)) && !matches!(rest, HashRest::NoRest);
+            vec![path(konst, all)]
         }
     }
 }

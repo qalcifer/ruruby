@@ -14,7 +14,7 @@
 //! Paths are relative to the program root: the directory of the first file
 //! compiled with a name (the main script), else the working directory.
 
-use crate::ast::{Node, Program};
+use crate::ast::{CaseHead, EnumDecl, Node, Program};
 use crate::opcode::Irep;
 use crate::vm::{Unit, Vm};
 use std::collections::HashMap;
@@ -31,7 +31,115 @@ pub fn compile_program(vm: &mut Vm, prog: &Program) -> Result<Rc<Irep>, String> 
         vm.module_root = Some(dir.filter(|d| !d.as_os_str().is_empty()).unwrap_or_else(|| PathBuf::from(".")));
     }
     let fns = prepare_uses(vm, prog, &mut Vec::new())?;
+    check_cases(prog, &known_enums(vm, prog)).map_err(|e| format!("line {e}"))?;
     crate::codegen::compile_with(prog, &mut vm.syms, &fns)
+}
+
+/// The enums a file can name: by name, and the variants it can name bare.
+struct Known {
+    enums: HashMap<String, Vec<String>>,
+    bare: HashMap<String, String>,
+}
+
+/// Its own enums, the ones it imports (and their variants imported bare),
+/// and Result (Ok/Err).
+fn known_enums(vm: &Vm, prog: &Program) -> Known {
+    let mut k = Known { enums: HashMap::new(), bare: HashMap::new() };
+    k.enums.insert("Result".into(), vec!["Ok".into(), "Err".into()]);
+    k.bare.insert("Ok".into(), "Result".into());
+    k.bare.insert("Err".into(), "Result".into());
+    // two enums of one name: neither is checked
+    let add = |k: &mut Known, e: &EnumDecl| match k.enums.get(&e.name) {
+        Some(v) if *v != e.variants => _ = k.enums.insert(e.name.clone(), vec![]),
+        _ => _ = k.enums.insert(e.name.clone(), e.variants.clone()),
+    };
+    for e in &prog.enums {
+        add(&mut k, e);
+    }
+    for (path, inner, items, _) in uses(prog) {
+        let Some(unit) = vm.units.get(&path.join("/")) else { continue };
+        let of = |name: &str| unit.enums.iter().find(|e| e.name == name);
+        // `use f::Shape::{Circle, Empty}` / `use f::Shape::*`: variants, bare
+        let owner = inner.last().and_then(|n| of(n));
+        match items {
+            Some(items) => {
+                for i in items {
+                    if let Some(e) = of(i) {
+                        add(&mut k, e);
+                    }
+                    if let Some(e) = owner
+                        && e.variants.contains(i)
+                    {
+                        add(&mut k, e);
+                        k.bare.insert(i.clone(), e.name.clone());
+                    }
+                }
+            }
+            None => match owner {
+                Some(e) => {
+                    add(&mut k, e);
+                    for v in &e.variants {
+                        k.bare.insert(v.clone(), e.name.clone());
+                    }
+                }
+                None => {
+                    for e in &unit.enums {
+                        add(&mut k, e);
+                    }
+                }
+            },
+        }
+    }
+    k
+}
+
+/// Rust's exhaustiveness check, where it can be decided: a `case/in`
+/// without `else` whose branches all name variants of one known enum must
+/// cover every variant (a guarded branch or one with a pattern inside the
+/// fields doesn't count). Errors start with the line number.
+fn check_cases(prog: &Program, known: &Known) -> Result<(), String> {
+    'cases: for case in &prog.cases {
+        let mut target: Option<&str> = None;
+        let mut covered: Vec<&str> = vec![];
+        for head in &case.heads {
+            let (path, full) = match head {
+                None | Some(CaseHead::Any) => continue 'cases,
+                Some(CaseHead::Partial) => continue,
+                Some(CaseHead::Path(p, full)) => (p, *full),
+            };
+            let (e, v) = match path.as_slice() {
+                [.., e, v] => (e.as_str(), v.as_str()),
+                [v] => {
+                    let own = case.in_enum.as_deref().filter(|e| known.enums.get(*e).is_some_and(|vs| vs.contains(v)));
+                    match own.or(known.bare.get(v).map(String::as_str)) {
+                        Some(e) => (e, v.as_str()),
+                        None => continue 'cases,
+                    }
+                }
+                [] => continue 'cases,
+            };
+            let Some(variants) = known.enums.get(e) else { continue 'cases };
+            if !variants.iter().any(|x| x == v) || target.is_some_and(|t| t != e) {
+                continue 'cases;
+            }
+            target = Some(e);
+            if full {
+                covered.push(v);
+            }
+        }
+        let Some(e) = target else { continue };
+        let missing: Vec<&str> =
+            known.enums[e].iter().map(String::as_str).filter(|v| !covered.contains(v)).collect();
+        if !missing.is_empty() {
+            let fix = if missing.len() == 1 { "an `in` branch for it" } else { "`in` branches for them" };
+            return Err(format!(
+                "{}: this case on {e} doesn't handle {}: add {fix} or an `else`",
+                case.line,
+                missing.join(", ")
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// A `use` statement: file path, modules inside it, imported names
@@ -199,8 +307,10 @@ fn prepare_uses(vm: &mut Vm, prog: &Program, stack: &mut Vec<String>) -> Result<
             let r = prepare_uses(vm, &used, stack);
             stack.pop();
             let used_fns = r?;
+            check_cases(&used, &known_enums(vm, &used)).map_err(|e| format!("{key}.rb:{e}"))?;
             let irep = crate::codegen::compile_with(&used, &mut vm.syms, &used_fns).map_err(|e| format!("{key}.rb: {e}"))?;
-            vm.units.insert(key.clone(), Unit { irep, exports: Exports::of(&used.body, false), module: None });
+            let unit = Unit { irep, exports: Exports::of(&used.body, false), module: None, enums: used.enums.clone() };
+            vm.units.insert(key.clone(), unit);
         }
         let unit = &vm.units[&key];
         let scope = unit.exports.find(inner).map_err(|e| format!("{} {shown}: {key}.rb {e}", at(line)))?;

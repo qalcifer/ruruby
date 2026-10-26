@@ -199,6 +199,7 @@ fn results_nest_compare_and_combine() {
           in Ok(Integer => n) if n > 10 { "big #{n}" }
           in Ok(Integer => n) { "small #{n}" }
           in Ok([a, b]) { "pair #{a},#{b}" }
+          in Ok(_) { "other" }
           in Err(String => msg) { "error #{msg}" }
           in Err(_) { "other error" }
           }

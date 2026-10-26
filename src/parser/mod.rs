@@ -51,6 +51,11 @@ pub struct Parser {
     /// Directly in an `interface` body: a `fn` without a body declares a
     /// required method.
     interface_top: bool,
+    /// lang-fork: see [`Program::enums`], [`Program::cases`]; the enums being
+    /// parsed (innermost last).
+    enums: Vec<EnumDecl>,
+    cases: Vec<CaseInfo>,
+    enum_stack: Vec<String>,
 }
 
 /// Deepest nesting accepted, by the parser and by the lexer for `#{}`.
@@ -87,13 +92,16 @@ pub fn parse_file(src: &str, file: &str, line: u32) -> PResult<Program> {
         stmts_level: 0,
         in_interface: false,
         interface_top: false,
+        enums: vec![],
+        cases: vec![],
+        enum_stack: vec![],
     };
     let body = p.parse_stmts()?;
     if !p.at(&Tok::Eof) {
         return Err(p.err("unexpected token"));
     }
     let locals = p.scopes.pop().unwrap().locals;
-    Ok(Program { body, locals, file: p.file.clone() })
+    Ok(Program { body, locals, file: p.file.clone(), enums: p.enums, cases: p.cases })
 }
 
 impl Scope {
@@ -2082,6 +2090,7 @@ impl Parser {
     /// `case/when` is desugared into an `if` chain using `===`, as Ruby defines it.
     #[inline(never)]
     fn parse_case(&mut self) -> PResult<Node> {
+        let line = self.line();
         let subject = if matches!(self.peek(), Tok::Newline | Tok::Semi | Tok::LBrace) {
             None
         } else {
@@ -2093,7 +2102,7 @@ impl Parser {
         self.skip_terms();
         if self.at_kw(Kw::In) {
             let subject = subject.ok_or_else(|| self.err("case/in needs a subject"))?;
-            return self.parse_case_in(subject, braced);
+            return self.parse_case_in(subject, braced, line);
         }
         let tmp = self.fresh("case");
         if subject.is_some() {
@@ -2454,6 +2463,12 @@ impl Parser {
         self.advance();
         self.push_scope(true);
         let mut stmts = vec![call(None, "__enum", vec![Node::Int(line as i64)])];
+        let ename = match &path {
+            Node::Const(n) | Node::Colon2(_, n) | Node::Colon3(n) => n.clone(),
+            _ => String::new(),
+        };
+        let mut variants: Vec<String> = vec![];
+        self.enum_stack.push(ename.clone());
         self.stmts_level += 1;
         let top = std::mem::replace(&mut self.interface_top, false);
         let r = (|| -> PResult<()> {
@@ -2498,6 +2513,7 @@ impl Parser {
                             }
                         }
                     }
+                    variants.push(name.clone());
                     stmts.push(call(None, "__variant", vec![Node::Sym(name), Node::Array(fields), Node::Int(kind)]));
                     continue;
                 }
@@ -2509,7 +2525,9 @@ impl Parser {
         })();
         self.interface_top = top;
         self.stmts_level -= 1;
+        self.enum_stack.pop();
         r?;
+        self.enums.push(EnumDecl { name: ename, variants });
         self.expect(&Tok::RBrace)?;
         let locals = self.pop_scope();
         Ok(Node::Class {

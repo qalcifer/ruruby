@@ -321,3 +321,24 @@ p Circle(2).area, Rect(w: 2, h: 3), Empty, kind(Circle(1)), kind(Empty), kind(Sh
     let dir = project("enumerr2", &[("shapes.rb", shapes), ("main.rb", "use shapes::Shape::Circle::X\n")]);
     assert!(run(&dir).unwrap_err().contains("defines Shape::Circle as an enum variant"));
 }
+
+/// The exhaustiveness check knows the enums a file imports, and checks the
+/// used files themselves.
+#[test]
+fn use_checks_cases_on_imported_enums() {
+    let shapes = "enum Shape {\n  Circle(r)\n  Empty\n}\n";
+    let cases = [
+        ("use shapes::Shape\nfn f(s) = case s { in Shape::Circle(r) { r } }\n", "line 2: this case on Shape doesn't handle Empty"),
+        ("use shapes::Shape::*\nfn f(s) = case s { in Empty { 0 } }\n", "line 2: this case on Shape doesn't handle Circle"),
+        ("use shapes::Shape::{Circle}\nfn f(s) = case s { in Circle(r) { r } }\n", "line 2: this case on Shape doesn't handle Empty"),
+        ("use other::Thing\n", "other.rb:3: this case on Shape doesn't handle Empty"),
+    ];
+    let other = "use shapes::Shape\nclass Thing {\n  fn f(s) = case s { in Shape::Circle(r) { r } }\n}\n";
+    for (i, (main, want)) in cases.iter().enumerate() {
+        let dir = project(&format!("exh{i}"), &[("shapes.rb", shapes), ("other.rb", other), ("main.rb", main)]);
+        let err = run(&dir).unwrap_err();
+        assert!(err.contains(want), "{main}:\n  {err}\n  wanted: {want}");
+    }
+    let dir = project("exhok", &[("shapes.rb", shapes), ("main.rb", "use shapes::Shape::*\nfn f(s) = case s { in Circle(r) { r } in Empty { 0 } }\np f(Circle(4))\n")]);
+    assert_eq!(run(&dir).unwrap(), "4\n");
+}

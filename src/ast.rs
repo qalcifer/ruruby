@@ -237,6 +237,39 @@ pub struct Program {
     /// The file it was parsed from (`-` for stdin, `-e`): `require_relative`
     /// resolves against it.
     pub file: String,
+    /// lang-fork: the enums it declares and its `case/in`s without `else`,
+    /// for the exhaustiveness check (src/modules.rs).
+    pub enums: Vec<EnumDecl>,
+    pub cases: Vec<CaseInfo>,
+}
+
+/// An `enum` a file declares.
+#[derive(Debug, Clone)]
+pub struct EnumDecl {
+    pub name: String,
+    pub variants: Vec<String>,
+}
+
+/// A `case/in` without `else`.
+#[derive(Debug, Clone)]
+pub struct CaseInfo {
+    pub line: u32,
+    /// The enum whose body it's in: its variants can be named bare there.
+    pub in_enum: Option<String>,
+    /// What each branch matches (an `a | b` branch gives several); `None`:
+    /// a pattern the check doesn't follow, which turns it off.
+    pub heads: Vec<Option<CaseHead>>,
+}
+
+#[derive(Debug, Clone)]
+pub enum CaseHead {
+    /// `in x`, `in _`: anything; the case is exhaustive.
+    Any,
+    /// `in x if ...`: covers nothing for sure.
+    Partial,
+    /// `in Shape::Circle(r)`, `in Empty`: a constant path; `full` when every
+    /// value of it matches (no guard, only bindings inside).
+    Path(Vec<String>, bool),
 }
 
 pub fn call(recv: Option<Node>, name: &str, args: Vec<Node>) -> Node {

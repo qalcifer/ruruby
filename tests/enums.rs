@@ -147,7 +147,7 @@ fn enums_are_classes() {
         p Dir::N.turn, Dir::W.turn, Dir::S.describe, "#{Dir::E}", Dir::N.inspect, Dir::implements?(Describe)
         p Ok(1), Err("x"), Ok(1).is_a?(Result), Ok(1).class, Ok(2) == Ok(2), Result::variants
         r = Result::Ok(3)
-        p r.unwrap, (case r { in Ok(v) { v } })
+        p r.unwrap, (case r { in Ok(v) { v } in Err(e) { e } })
     "##);
     assert_eq!(out.lines().collect::<Vec<_>>(), [
         "E",
@@ -191,4 +191,45 @@ fn errors() {
     }
     let err = run_capture("enum E { A(1) }").unwrap_err().to_string();
     assert!(err.contains("enum: a field name of A"), "{err}");
+}
+
+/// A `case/in` without `else` whose branches all name variants of one known
+/// enum must handle every variant, checked before the program runs (Rust's
+/// exhaustiveness); a guarded branch or a pattern inside the fields doesn't
+/// count, a catch-all or any other pattern turns the check off.
+#[test]
+fn exhaustiveness() {
+    let missing = [
+        ("case s { in Shape::Circle(r) { 1 } in Shape::Empty { 2 } }", "line 19: this case on Shape doesn't handle Rect: add an `in` branch for it or an `else`"),
+        ("case s { in Shape::Circle(r) { 1 } }", "doesn't handle Rect, Empty: add `in` branches for them or an `else`"),
+        ("case s { in Shape::Circle(0) { 1 } in Shape::Rect(w:, h:) { 2 } in Shape::Empty { 3 } }", "doesn't handle Circle:"),
+        ("case s { in Shape::Circle(r) if r > 1 { 1 } in Shape::Rect(_, _) { 2 } in Shape::Empty { 3 } }", "doesn't handle Circle:"),
+        ("case s { in Shape::Rect(w: 1, h:) { 1 } in Shape::Circle { 2 } in Shape::Empty { 3 } }", "doesn't handle Rect:"),
+        ("case s { in Align::Start { 1 } in Align::End { 2 } }", "this case on Align doesn't handle Center"),
+        ("case s { in Ok(v) { v } }", "this case on Result doesn't handle Err"),
+        ("x = 1\nfn f(s) = case s {\n  in Err(e) { e }\n}", "line 20: this case on Result doesn't handle Ok"),
+    ];
+    for (case, want) in missing {
+        let src = format!("{SHAPE}fn f(s) = {case}\n");
+        let src = if case.starts_with("x = 1") { format!("{SHAPE}{case}\n") } else { src };
+        let err = run_capture(&src).unwrap_err().to_string();
+        assert!(err.contains(want), "{case}:\n  {err}\n  wanted: {want}");
+    }
+    let fine = [
+        "case s { in Shape::Circle(r) | Shape::Rect(w:, h:) { 1 } in Shape::Empty { 2 } }",
+        "case s { in Shape::Circle(r) => c { 1 } in Shape::Rect { 2 } in Shape::Empty { 3 } }",
+        "case s { in Shape::Circle(r) if r > 1 { 1 } in Shape::Circle(_) { 2 } in Shape::Rect(w, h) { 3 } in Shape::Empty { 4 } }",
+        "case s { in Shape::Circle(r) { 1 } else { 2 } }",
+        "case s { in Shape::Circle(r) { 1 } in other { 2 } }",
+        "case s { in Shape::Circle(r) { 1 } in 5 { 2 } }",
+        "case s { in Shape::Circle(r) { 1 } in Align::Start { 2 } }",
+        "case s { in Ok(v) { v } in Err(e) { e } }",
+        "case s { in [a, b] { 1 } }",
+    ];
+    for case in fine {
+        run(&format!("{SHAPE}fn f(s) = {case}\np :ok\n"));
+    }
+    // inside the enum, its variants are named bare
+    let err = run_capture("enum E {\n  A\n  B(x)\n  fn f() = case self { in A { 1 } }\n}").unwrap_err().to_string();
+    assert!(err.contains("line 4: this case on E doesn't handle B"), "{err}");
 }
