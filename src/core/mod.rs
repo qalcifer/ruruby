@@ -13,6 +13,7 @@ pub mod kernel;
 pub mod load;
 pub mod numeric;
 pub mod panic;
+pub mod props;
 pub mod range;
 pub mod reflect;
 pub mod string;
@@ -39,6 +40,7 @@ pub fn init(vm: &mut Vm) {
     panic::init(vm);
     interface::init(vm);
     enums::init_enums(vm);
+    props::init(vm);
 }
 
 /// Core methods written in Ruby (`prelude.rb`, then the lang-fork's

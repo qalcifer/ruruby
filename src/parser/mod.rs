@@ -1710,6 +1710,7 @@ impl Parser {
                 Ok(Node::Array(out))
             }
             Tok::Ident(name) if name == "enum" && matches!(self.peek2(), Tok::Const(_) | Tok::Colon2) => self.parse_enum(),
+            Tok::Ident(name) if name == "prop" && matches!(self.peek2(), Tok::Ident(_) | Tok::Label(_)) => self.parse_prop(),
             Tok::Ident(name) if name == "abstract" && matches!(self.peek2(), Tok::Kw(Kw::Module | Kw::Interface)) => {
                 Err(self.err("only classes can be abstract (an interface already is)"))
             }
@@ -2436,6 +2437,8 @@ impl Parser {
                 }
                 Node::Def { .. } | Node::CAsgn(..) => {}
                 Node::Call { name, .. } if name == "__require" => {}
+                // `prop name` / `prop mut name`
+                Node::Seq(v) if v.iter().all(|n| matches!(n, Node::Call { name, .. } if name == "__require")) => {}
                 _ => return Err(iface_err("an interface holds `fn` declarations and constants")),
             }
             stmts.push(st);
@@ -2448,6 +2451,178 @@ impl Parser {
             is_module: true,
             interface: true,
         })
+    }
+
+    /// lang-fork-ui: `prop [mut] name [: Type] [= default] [{ get() ...
+    /// set(v) ... changed(old) ... }]` in a class body: `__prop(:name, mut,
+    /// Type, default kind, default, line)` (see src/core/props.rs), then the
+    /// accessor `fn`s it needs — `name=` checking the type and running
+    /// `set`/`changed`, `name` from `get`. In an interface: required
+    /// methods (`name`, and `name=` for `prop mut`).
+    #[inline(never)]
+    fn parse_prop(&mut self) -> PResult<Node> {
+        let line = self.line();
+        self.advance(); // `prop`
+        let mutable = matches!(self.peek(), Tok::Ident(m) if m == "mut") && matches!(self.peek2(), Tok::Ident(_) | Tok::Label(_));
+        if mutable {
+            self.advance();
+        }
+        // `age: Integer` lexes as the label `age:`
+        let (name, typed) = match self.advance() {
+            Tok::Ident(n) => (n, false),
+            Tok::Label(n) => (n, true),
+            _ => {
+                self.pos -= 1;
+                return Err(self.err("prop: expected a name"));
+            }
+        };
+        if !is_ident_name(&name) || name.ends_with(['?', '!']) {
+            return Err(self.err(&format!("prop: `{name}` can't be a prop name")));
+        }
+        if self.in_interface {
+            let mut reqs = vec![call(
+                None,
+                "__require",
+                vec![
+                    Node::Sym(name.clone()),
+                    Node::Int(0),
+                    Node::False,
+                    Node::Str(format!("prop {}{name}", if mutable { "mut " } else { "" })),
+                ],
+            )];
+            if mutable {
+                reqs.push(call(
+                    None,
+                    "__require",
+                    vec![Node::Sym(format!("{name}=")), Node::Int(1), Node::False, Node::Str(format!("prop mut {name}"))],
+                ));
+            }
+            if typed || self.at(&Tok::Assign) || self.at(&Tok::LBrace) {
+                return Err(self.err("interface: a prop there is a requirement: `prop name` or `prop mut name`, without type, default or accessors"));
+            }
+            return Ok(Node::Seq(reqs));
+        }
+        if typed && !matches!(self.peek(), Tok::Const(_) | Tok::Colon2) {
+            return Err(self.err(&format!("prop {name}: the type is a class or interface name (`prop {name}: String`)")));
+        }
+        let ty = if typed { self.header(|p| p.parse_cpath())? } else { Node::Nil };
+        // a default: a literal value, else a closure run on each new object
+        let (kind, default) = if self.eat(&Tok::Assign) {
+            self.skip_nl();
+            self.push_scope(false);
+            let e = self.header(|p| p.parse_expr());
+            let locals = self.pop_scope();
+            let e = e?;
+            if matches!(e, Node::Int(_) | Node::Float(_) | Node::Sym(_) | Node::True | Node::False | Node::Nil) {
+                (1, e)
+            } else {
+                let block = Block { params: Params::default(), body: e, locals, for_loop: false };
+                (2, Node::Closure(Box::new(block)))
+            }
+        } else {
+            (0, Node::Nil)
+        };
+        let (mut get, mut set, mut changed) = (None, None, None);
+        if self.eat(&Tok::LBrace) {
+            loop {
+                self.skip_terms();
+                if self.eat(&Tok::RBrace) {
+                    break;
+                }
+                let Tok::Ident(which) = self.peek().clone() else {
+                    return Err(self.err("prop: expected `get()`, `set(v)` or `changed(old)`"));
+                };
+                let (slot, arity) = match which.as_str() {
+                    "get" => (&mut get, 0),
+                    "set" => (&mut set, 1),
+                    "changed" => (&mut changed, 1),
+                    _ => return Err(self.err("prop: expected `get()`, `set(v)` or `changed(old)`")),
+                };
+                if slot.is_some() {
+                    return Err(self.err(&format!("prop {name}: `{which}` given twice")));
+                }
+                self.advance();
+                let acc = self.parse_accessor()?;
+                if acc.0.required.len() != arity || acc.0.names().len() != arity {
+                    let want = if arity == 0 { format!("{which}()") } else { format!("{which}(value)") };
+                    return Err(self.err(&format!("prop {name}: write `{want}`")));
+                }
+                *slot = Some(acc);
+            }
+        }
+        let computed = get.is_some() && set.is_none() && changed.is_none() && kind == 0;
+        if computed && mutable {
+            return Err(self.err(&format!("prop mut {name}: a prop with only `get` is computed; give it a `set(v)` to make it writable")));
+        }
+        let (kind, default) = if computed { (3, Node::Nil) } else { (kind, default) };
+        let ivar = format!("@{name}");
+        let mut out = vec![call(
+            None,
+            "__prop",
+            vec![Node::Sym(name.clone()), bool_node(mutable), ty.clone(), Node::Int(kind), default, Node::Int(line as i64)],
+        )];
+        if typed || set.is_some() || changed.is_some() {
+            // `fn name=(v) { check; had = defined?; old = @name; set body or @name = v; changed }`
+            let (params, body, mut locals) = match set {
+                Some(s) => s,
+                None => {
+                    let params = Params { required: vec![ParamTarget::Name("%v".into())], ..Default::default() };
+                    (params, Node::IAsgn(ivar.clone(), b(Node::LVar("%v".into()))), vec!["%v".into()])
+                }
+            };
+            let v = params.required[0].name().to_string();
+            let mut stmts = vec![];
+            if typed {
+                stmts.push(call(None, "__prop_check", vec![Node::Sym(name.clone()), Node::LVar(v.clone())]));
+            }
+            if changed.is_some() {
+                locals.extend(["%had".to_string(), "%old".to_string()]);
+                let defined = call(None, "__prop_live", vec![Node::Sym(ivar.clone())]);
+                stmts.push(Node::LAsgn("%had".into(), b(defined)));
+                stmts.push(Node::LAsgn("%old".into(), b(Node::IVar(ivar.clone()))));
+            }
+            stmts.push(body);
+            if changed.is_some() {
+                let same = ast::call(Some(Node::LVar("%old".into())), "==", vec![Node::IVar(ivar.clone())]);
+                let fire = call(None, &format!("__changed_{name}"), vec![Node::LVar("%old".into())]);
+                let cond = Node::And(b(Node::LVar("%had".into())), b(Node::Not(b(same))));
+                stmts.push(Node::If(b(cond), b(fire), b(Node::Nil)));
+            }
+            let def = Node::Def { recv: None, name: format!("{name}="), params: b_params(params), body: b(Node::Seq(stmts)), locals };
+            out.push(if mutable { def } else { call(None, "private", vec![def]) });
+        }
+        if let Some((params, body, locals)) = changed {
+            let def = Node::Def { recv: None, name: format!("__changed_{name}"), params: b_params(params), body: b(body), locals };
+            out.push(call(None, "private", vec![def]));
+        }
+        if let Some((params, body, locals)) = get {
+            out.push(Node::Def { recv: None, name, params: b_params(params), body: b(body), locals });
+        }
+        Ok(Node::Seq(out))
+    }
+
+    /// An accessor in a prop's `{ }`: `(params)`, then `{ body }` or `= expr`.
+    fn parse_accessor(&mut self) -> PResult<(Params, Node, Vec<String>)> {
+        self.push_scope(true);
+        let params = if self.eat(&Tok::LParen) {
+            let p = self.parse_params(Some(Tok::RParen), false)?;
+            self.expect(&Tok::RParen)?;
+            p
+        } else {
+            Params::default()
+        };
+        let body = if self.at(&Tok::LBrace) {
+            self.parse_code_body()?
+        } else if self.eat(&Tok::Assign) {
+            self.skip_nl();
+            self.parse_expr()?
+        } else {
+            return Err(self.err("prop accessor: expected `{ body }` or `= expression`"));
+        };
+        let names = params.names();
+        self.reorder_locals(&names);
+        let locals = self.pop_scope();
+        Ok((params, body, locals))
     }
 
     /// lang-fork: `enum Name { A, B(x, y), C { x, y }, fn ... }` — a class
@@ -2946,6 +3121,10 @@ fn any_matches(list: Node, subject: Node, w: String) -> Node {
 }
 
 /// Names bound by destructuring parameters, in order.
+fn b_params(p: Params) -> Box<Params> {
+    Box::new(p)
+}
+
 fn bool_node(v: bool) -> Node {
     if v { Node::True } else { Node::False }
 }

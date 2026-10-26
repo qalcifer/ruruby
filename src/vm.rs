@@ -253,6 +253,9 @@ pub struct Vm {
     pub module_root: Option<std::path::PathBuf>,
     /// `Ok`, `Err` (from result.rb) and the ivar holding an Ok's value, for `?`.
     pub results: Option<(ClassRef, ClassRef, Sym)>,
+    /// lang-fork-ui: objects whose generated init is setting their props
+    /// (their `changed` hooks don't run yet).
+    pub prop_initializing: Vec<Value>,
     /// `home` of the files' top-level frames running now (a `?` that would
     /// return from one panics).
     top_homes: Vec<usize>,
@@ -585,6 +588,7 @@ impl Vm {
             units: HashMap::new(),
             module_root: None,
             results: None,
+            prop_initializing: Vec::new(),
             top_homes: Vec::new(),
         };
         crate::core::init(&mut vm);

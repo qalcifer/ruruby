@@ -197,10 +197,37 @@ pub struct RClass {
     /// How many times a `class`/`module` body has run for it (an `enum`
     /// must be new: its body is the first).
     pub bodies: Cell<u32>,
+    /// lang-fork-ui: the `prop`s the class declares (not inherited ones).
+    pub props: RefCell<Vec<PropInfo>>,
     /// lang-fork: on an `enum`, its variants' names in order.
     pub enum_variants: RefCell<Option<Vec<Sym>>>,
     /// lang-fork: on an enum variant's class.
     pub variant: RefCell<Option<Rc<VariantInfo>>>,
+}
+
+/// A `prop` (lang-fork-ui): `prop [mut] name [: Type] [= default]`.
+#[derive(Clone)]
+pub struct PropInfo {
+    pub name: Sym,
+    /// Its storage, `@name`.
+    pub ivar: Sym,
+    /// `prop mut`: writable from outside.
+    pub mutable: bool,
+    pub ty: Option<ClassRef>,
+    /// The default: none (required by the generated init), a value, or a
+    /// closure run on each new object (`prop items = []`). Kept in the
+    /// class's instance variable `default_key`, so the GC sees it.
+    pub default: PropDefault,
+    pub default_key: Sym,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum PropDefault {
+    None,
+    Value,
+    Closure,
+    /// `prop x { get() ... }` only: no storage, nothing to set.
+    Computed,
 }
 
 /// An enum variant: `Center`, `Circle(r)` or `Rect { w, h }`.
@@ -258,6 +285,7 @@ impl RClass {
             is_abstract: Default::default(),
             abstract_reqs: Default::default(),
             bodies: Default::default(),
+            props: Default::default(),
             enum_variants: Default::default(),
             variant: Default::default(),
         }

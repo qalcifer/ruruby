@@ -135,6 +135,9 @@ fn check_requirements(
             }
         }
     }
+    // `prop mut x` requires `x` and `x=` under one name
+    let mut seen = vec![];
+    missing.retain(|m| if seen.contains(m) { false } else { seen.push(m.clone()); true });
     if !missing.is_empty() && !allow_missing {
         return Err(fail(vm, line, format!("{cname} doesn't implement {owner}: missing {}", missing.join(", "))));
     }

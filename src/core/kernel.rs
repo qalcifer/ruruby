@@ -399,6 +399,7 @@ fn class_new(vm: &mut Vm, s: &Value, a: &[Value], b: Option<&Value>) -> VmResult
         return Err(vm.type_err("can't create instance of singleton class"));
     }
     let obj = vm.object(RObject::new(cls));
+    super::props::apply_defaults(vm, &obj, cls)?;
     vm.call_with_block(&obj, vm.s.initialize, a.to_vec(), b.cloned())?;
     Ok(obj)
 }
