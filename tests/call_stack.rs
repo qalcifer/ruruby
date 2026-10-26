@@ -169,17 +169,16 @@ fn method_caches_see_every_change() {
         out = [call(a)]
         class A { fn hi = "A2" }
         out << call(a)
-        module M { fn hi = "M" }
-        class A { include M }
+        interface M { fn hi() = "M" }
+        impl M for A {}
         out << call(a)
-        module P { fn hi = "P" }
-        class A { prepend P }
+        class A { remove_method :hi }
         out << call(a)
         fn a.hi = "singleton"
         out << call(a)
         b = A.new
         out << call(b)
-        b.extend(Module.new { define_method(:hi) { "extended" } })
+        class << b { fn hi = "extended" }
         out << call(b)
         class B { fn hi = "B" }
         out << call(B.new)
@@ -195,7 +194,7 @@ fn method_caches_see_every_change() {
     "#;
     assert_eq!(
         run(src),
-        "[\"A\", \"A2\", \"A2\", \"P\", \"singleton\", \"P\", \"extended\", \"B\", \"none\", \"defined\", \"none\", \"B\"]\n\
+        "[\"A\", \"A2\", \"A2\", \"M\", \"singleton\", \"M\", \"extended\", \"B\", \"none\", \"defined\", \"none\", \"B\"]\n\
          [\"1\", \"s\", \"y\", \"\", \"2.0\"]\n"
     );
 }

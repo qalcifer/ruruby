@@ -59,6 +59,9 @@ fn ruby_block_forms_are_compile_errors() {
         ("x = nil", "`nil` was removed: use `none`"),
         ("x = 1 > 0 ? :a : :b", "`? :` was removed: use `if cond { a } else { b }`"),
         ("p(true ? 1 : 2)", "`? :` was removed"),
+        ("class C { include Comparable }", "`include` was removed: implement an interface with `impl I { ... }`"),
+        ("class C { prepend M::N }", "`prepend` was removed"),
+        ("o = 1\nextend Enumerable", "`extend` was removed"),
     ];
     for (src, expected) in cases {
         let e = err(src);
@@ -89,9 +92,14 @@ fn look_alikes_still_work() {
         i = 0
         i += 1 while i < 5
         p i
+        # modules are namespaces: no include/extend/prepend methods, but
+        # Array#prepend and String#prepend are unrelated and stay
+        p [2].prepend(1), "b".prepend("a"), Module.respond_to?(:include), 1.respond_to?(:extend)
+        m = Module.new
+        p catch_panic { Class.new { include m } }.err.class
     "#);
     assert_eq!(
         out,
-        "2\n:b\n5\n3\n2\n[1]\n\"custom 1\"\n4\n1\nNoMatchingPatternError\n:out\n1\nnone\n:t\n5\n"
+        "2\n:b\n5\n3\n2\n[1]\n\"custom 1\"\n4\n1\nNoMatchingPatternError\n:out\n1\nnone\n:t\n5\n[1, 2]\n\"ab\"\nfalse\nfalse\nNoMethodError\n"
     );
 }

@@ -137,14 +137,15 @@ fn blocks_closures_break_and_return() {
 #[test]
 fn classes_modules_super() {
     let src = r##"
-        module Named {
+        interface Named {
+          fn name()
           fn label() {
             "<#{name}>"
           }
         }
         class Base {
-          include Named
           attr_accessor :name
+          impl Named {}
           fn initialize(name) {
             @name = name
           }
@@ -177,26 +178,28 @@ fn classes_modules_super() {
 fn user_defined_enumerable_and_comparable() {
     let src = r##"
         class Version {
-          include Comparable
           attr_reader :major, :minor
           fn initialize(major, minor) {
             @major = major
             @minor = minor
           }
-          fn <=>(o) {
-            [major, minor] <=> [o.major, o.minor]
+          impl Comparable {
+            fn <=>(o) {
+              [major, minor] <=> [o.major, o.minor]
+            }
           }
           fn to_s() {
             "#{major}.#{minor}"
           }
         }
         class Shelf {
-          include Enumerable
           fn initialize(items) {
             @items = items
           }
-          fn each() {
-            @items.each { |i| yield i }
+          impl Enumerable {
+            fn each() {
+              @items.each { |i| yield i }
+            }
           }
         }
         vs = [Version.new(1, 2), Version.new(0, 9), Version.new(1, 10)]

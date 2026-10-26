@@ -68,18 +68,6 @@ fn init_kernel(vm: &mut Vm) {
     vm.def(&k, "singleton_class", |vm, s, _, _| {
         Ok(Value::from(vm.singleton_class(s)?))
     });
-    vm.def(&k, "extend", |vm, s, a, _| {
-        vm.check_frozen(s)?;
-        let sc = vm.singleton_class(s)?;
-        for m in a.iter().rev() {
-            let m = module_arg(vm, m)?;
-            if !vm.heap[sc].includes.borrow().contains(&m) {
-                vm.heap[sc].includes.push(m);
-            }
-            hook(vm, &Value::from(m), "extended", *s)?;
-        }
-        Ok(*s)
-    });
     vm.def(&k, "instance_eval", |vm, s, _, b| {
         let b = need_block(vm, b)?;
         let target = vm.singleton_class(s).unwrap_or_else(|_| vm.class_of(s));
@@ -155,41 +143,13 @@ fn init_module(vm: &mut Vm) {
     vm.def(&m, "to_s", to_s);
     vm.def(&m, "inspect", to_s);
     for name in [
-        "included",
-        "extended",
-        "prepended",
         "inherited",
         "method_added",
         "const_added",
     ] {
         vm.def(&m, name, |_, _, _, _| Ok(Value::NIL));
     }
-    vm.def(&m, "include", |vm, s, a, _| {
-        vm.check_frozen(s)?;
-        let cls = this_class(vm, s)?;
-        for v in a.iter().rev() {
-            let module = module_arg(vm, v)?;
-            if vm.ancestors(&cls).contains(&module) {
-                continue;
-            }
-            vm.heap[cls].includes.push(module);
-            hook(vm, v, "included", *s)?;
-        }
-        Ok(*s)
-    });
-    vm.def(&m, "prepend", |vm, s, a, _| {
-        vm.check_frozen(s)?;
-        let cls = this_class(vm, s)?;
-        for v in a.iter().rev() {
-            let module = module_arg(vm, v)?;
-            if vm.heap[cls].prepends.borrow().contains(&module) {
-                continue;
-            }
-            vm.heap[cls].prepends.push(module);
-            hook(vm, v, "prepended", *s)?;
-        }
-        Ok(*s)
-    });
+    // lang-fork: no include/prepend/extend; interfaces are attached by `impl`
     vm.def(&m, "include?", |vm, s, a, _| {
         let cls = this_class(vm, s)?;
         let module = module_arg(vm, &arg(a, 0))?;

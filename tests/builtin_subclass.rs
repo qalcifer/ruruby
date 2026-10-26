@@ -107,12 +107,11 @@ fn singleton_methods_on_builtin_values() {
         s = "abc"
         fn s.shout = upcase
         a = [1, 2]
-        module Sum { fn total = sum }
-        a.extend(Sum)
+        class << a { fn total = sum }
         h = {k: 1}
         class << h { fn keyz = keys }
         GC.start
-        p s.shout, a.total, h.keyz, s.singleton_methods, s.class, a.is_a?(Sum)
+        p s.shout, a.total, h.keyz, s.singleton_methods, s.class, a.singleton_methods == [:total]
         p "x".respond_to?(:shout), s.dup.respond_to?(:shout)
         p catch_panic { 1.singleton_class }.err.message
         p [0, 1, 2].map { |i| t = "t#{i}"; fn t.m = self * 2; t.m }

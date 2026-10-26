@@ -1006,6 +1006,16 @@ impl Codegen<'_> {
         if recv.is_none() && name == "raise" {
             return Err("`raise` was removed: return Err(...) for expected failures, panic(...) for bugs".into());
         }
+        // `include M` (a constant argument: Array#prepend(x) still works)
+        if recv.is_none()
+            && matches!(name, "include" | "extend" | "prepend")
+            && !args.is_empty()
+            && args.iter().all(|a| matches!(a, Node::Const(_) | Node::Colon2(..) | Node::Colon3(_)))
+        {
+            return Err(format!(
+                "`{name}` was removed: implement an interface with `impl I {{ ... }}` (modules are namespaces)"
+            ));
+        }
         // `require_relative path`: the calling file goes along as a hidden
         // second argument, so the native can resolve against it
         let with_file;

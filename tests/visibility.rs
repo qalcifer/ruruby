@@ -95,8 +95,7 @@ fn scope_default_visibility() {
           module_function
           fn f = :f
         }
-        class B { include M; fn g = f }
-        p M.f, B.new.g, err { B.new.f }
+        p M.f, M.private_instance_methods(false), M.public_method_defined?(:f)
         class C {
           private
           class D { fn inner = :inner }
@@ -111,8 +110,7 @@ fn scope_default_visibility() {
         out,
         ":a\n\"b c\"\n\"private method 'b' called for an instance of A\"\n\
          \"protected method 'c' called for an instance of A\"\n\
-         \"private method 'initialize' called for an instance of A\"\n:cm\n:e\n:f\n:f\n\
-         \"private method 'f' called for an instance of B\"\n:inner\n:m\n:nested\n"
+         \"private method 'initialize' called for an instance of A\"\n:cm\n:e\n:f\n[:f]\nfalse\n:inner\n:m\n:nested\n"
     );
 }
 
@@ -141,19 +139,17 @@ fn natives_that_define_methods_follow_the_scope() {
           attr_reader :mf
           define_method(:dm) { :dm }
         }
-        k = Class.new { include mod; fn call = [mf, dm] }
-        p mod.respond_to?(:mf), mod.dm, k.new.call, err { k.new.dm }
+        p mod.respond_to?(:mf), mod.dm, mod.private_instance_methods(false).sort
         m2 = Module.new {
           fn f = :f
           module_function :f
         }
-        p m2.f, err { Class.new { include m2 }.new.f }
+        p m2.f, m2.private_instance_methods(false)
         p catch_panic { Module.new { module_function :nope } }.err.message.start_with?("undefined method 'nope' for module")
     "##);
     assert_eq!(
         out,
-        ":private\n:private\nnone\nnone\n:private\n:private\n:m\nfalse\n:dm\n[none, :dm]\n\
-         :private\n:f\n:private\ntrue\n"
+        ":private\n:private\nnone\nnone\n:private\n:private\n:m\nfalse\n:dm\n[:dm, :mf]\n:f\n[:f]\ntrue\n"
     );
 }
 
@@ -202,12 +198,11 @@ fn respond_to_and_public_send() {
 #[test]
 fn listings_by_visibility() {
     let out = run(r##"
-        module M {
+        class M {
           fn mpub = 1
           private fn mpriv = 1
         }
-        class A {
-          include M
+        class A < M {
           fn pub = 1
           private fn priv = 1
           protected fn prot = 1
