@@ -1098,8 +1098,20 @@ impl Vm {
                 out.push(k);
             }
         };
+        // lang-fork: interfaces come after the classes, before Object, so a
+        // method a class inherits beats an interface default ("class wins")
+        let mut deferred: Vec<ClassRef> = Vec::new();
+        let mut flushed = false;
         let mut c = Some(*cls);
         while let Some(k) = c {
+            if !flushed && self.is_root_class(k) {
+                for m in std::mem::take(&mut deferred) {
+                    for a in self.ancestors(&m) {
+                        add(&mut out, a);
+                    }
+                }
+                flushed = true;
+            }
             let kc = &self.heap[k];
             for p in kc.prepends.borrow().iter().rev() {
                 for a in self.ancestors(p) {
@@ -1108,13 +1120,32 @@ impl Vm {
             }
             add(&mut out, k);
             for m in kc.includes.borrow().iter().rev() {
+                if !flushed && self.is_interface(*m) {
+                    deferred.push(*m);
+                    continue;
+                }
                 for a in self.ancestors(m) {
                     add(&mut out, a);
                 }
             }
             c = kc.superclass;
         }
+        for m in deferred {
+            for a in self.ancestors(&m) {
+                add(&mut out, a);
+            }
+        }
         out
+    }
+
+    /// Object and BasicObject: where a class chain's interfaces are looked
+    /// up, before them.
+    fn is_root_class(&self, k: ClassRef) -> bool {
+        k == self.c.object || k == self.c.basic_object
+    }
+
+    pub fn is_interface(&self, k: ClassRef) -> bool {
+        self.heap[k].interface.borrow().is_some()
     }
 
     fn find_in_module(&self, k: ClassRef, mid: Sym) -> Option<Option<(Method, ClassRef, Vis)>> {
@@ -1145,12 +1176,63 @@ impl Vm {
 
     /// [`Vm::find_method`] with the method's visibility.
     pub fn find_method_vis(&self, cls: &ClassRef, mid: Sym) -> Option<(Method, ClassRef, Vis)> {
+        // the classes (and their non-interface modules) up to Object, then
+        // their interfaces, then Object and above: the order of `ancestors`
         let mut c = Some(*cls);
+        let mut interfaces = false;
+        while let Some(k) = c {
+            if self.is_root_class(k) {
+                break;
+            }
+            if let Some(found) = self.find_in_class(k, mid, &mut interfaces) {
+                return found;
+            }
+            c = self.heap[k].superclass;
+        }
+        if interfaces {
+            let mut d = Some(*cls);
+            while d != c {
+                let k = d.unwrap();
+                for inc in self.heap[k].includes.borrow().iter().rev() {
+                    if self.is_interface(*inc)
+                        && let Some(found) = self.find_in_module(*inc, mid)
+                    {
+                        return found;
+                    }
+                }
+                d = self.heap[k].superclass;
+            }
+        }
         while let Some(k) = c {
             if let Some(found) = self.find_in_module(k, mid) {
                 return found;
             }
             c = self.heap[k].superclass;
+        }
+        None
+    }
+
+    /// [`Vm::find_in_module`] for a class below Object, leaving out its
+    /// interfaces (noting whether it has any).
+    fn find_in_class(&self, k: ClassRef, mid: Sym, interfaces: &mut bool) -> Option<Option<(Method, ClassRef, Vis)>> {
+        let kc = &self.heap[k];
+        for p in kc.prepends.borrow().iter().rev() {
+            if let Some(found) = self.find_in_module(*p, mid) {
+                return Some(found);
+            }
+        }
+        if let Some(m) = kc.methods.borrow().get(&mid) {
+            return Some(match m {
+                Method::Undefined => None,
+                m => Some((m.clone(), k, kc.methods.vis(mid))),
+            });
+        }
+        for inc in kc.includes.borrow().iter().rev() {
+            if self.is_interface(*inc) {
+                *interfaces = true;
+            } else if let Some(found) = self.find_in_module(*inc, mid) {
+                return Some(found);
+            }
         }
         None
     }

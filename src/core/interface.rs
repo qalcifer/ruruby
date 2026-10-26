@@ -300,8 +300,12 @@ pub fn init(vm: &mut Vm) {
             if group.len() < 2 {
                 continue;
             }
+            // a method of the class or a superclass wins over defaults
             let name = vm.intern(&group[0].0);
-            if vm.heap[cls].methods.borrow().contains_key(&name) {
+            if let Some((_, owner)) = vm.find_method(&cls, name)
+                && !is_interface(vm, owner)
+                && !base.contains(&owner)
+            {
                 continue;
             }
             let owners: Vec<ClassRef> = group.iter().map(|(_, i)| *i).collect();

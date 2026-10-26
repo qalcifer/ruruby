@@ -119,6 +119,48 @@ fn meeting_requirements() {
     ]);
 }
 
+/// With inheritance: subclasses inherit their parent's interfaces and can
+/// override or re-impl; a method a class inherits beats an interface
+/// default ("class wins", as in Java and Kotlin); interfaces come after the
+/// classes in the ancestors, before Object.
+#[test]
+fn inheritance() {
+    let out = run(&format!("{SHAPES}{}", r##"
+        class Rect {
+          fn initialize(w, h) { @w = w; @h = h }
+          impl Shape { fn area() = @w * @h }
+        }
+        class Square < Rect {
+          fn initialize(s) = super(s, s)
+          fn area() = super + 1
+        }
+        class Big < Rect {
+          impl Shape { fn name() = "big #{super}" }
+        }
+        class Base { fn name() = "base" }
+        class Tile < Base {
+          fn area() = 1
+          impl Shape {}
+        }
+        interface Named { fn name() = "named" }
+        class Both < Base {
+          fn area() = 2
+          impl Shape, Named {}
+        }
+        p Square.new(2).describe, Square.implements?(Shape), Square.ancestors.take(4)
+        p Big.new(1, 1).describe, Tile.new.describe, Tile.ancestors.take(4), Both.new.name
+    "##));
+    assert_eq!(out.lines().collect::<Vec<_>>(), [
+        r#""Square: area 5""#,
+        "true",
+        "[Square, Rect, Shape, Object]",
+        r#""big Big: area 1""#,
+        r#""base: area 1""#,
+        "[Tile, Base, Shape, Object]",
+        r#""base""#,
+    ]);
+}
+
 /// `impl I by @field`: the required methods go to the field; the
 /// defaults come from the interface and use them; the class can still
 /// define some itself.
