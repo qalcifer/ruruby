@@ -3,7 +3,7 @@ name = "ruruby-egui"
 version = "0.1.0"
 edition = "2024"
 description = "A first renderer for ruruby's declarative UI, on egui"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 
 [[bin]]
 name = "ruruby-ui"

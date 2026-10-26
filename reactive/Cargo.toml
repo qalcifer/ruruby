@@ -3,6 +3,6 @@ name = "ruruby-reactive"
 version = "0.1.0"
 edition = "2024"
 description = "Fine-grained reactivity (signals, memos, effects) with push-pull updates, for ruruby and Rust code"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
