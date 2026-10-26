@@ -4,7 +4,10 @@ use ruruby::Interpreter;
 use std::path::{Path, PathBuf};
 
 fn project(name: &str, files: &[(&str, &str)]) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("ruruby-use-{}-{name}", std::process::id()));
+    // unique per call: tests run in parallel and may share a name
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("ruruby-use-{}-{n}-{name}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     for (path, src) in files {
         let p = dir.join(path);
