@@ -7,6 +7,10 @@ license = "MIT"
 default-run = "ruruby"
 
 [dependencies]
+ruruby-reactive = { path = "reactive" }
+
+[workspace]
+members = [".", "reactive"]
 
 [profile.release]
 codegen-units = 1
