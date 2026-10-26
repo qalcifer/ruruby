@@ -629,6 +629,7 @@ impl Codegen<'_> {
                 body,
                 locals,
                 is_module,
+                interface,
             } => {
                 let a = self.alloc();
                 let sup = self.alloc();
@@ -654,7 +655,11 @@ impl Codegen<'_> {
                 let s = self.sym(name);
                 self.emit(Op::Class(a, s, *is_module));
                 let idx = self.class_body(name, body, locals)?;
-                self.emit(Op::Exec(a, idx as u32));
+                self.emit(if *is_module && !*interface {
+                    Op::ExecMod(a, idx as u32)
+                } else {
+                    Op::Exec(a, idx as u32)
+                });
                 self.emit(Op::Move(dst, a));
                 self.free_to(a);
             }
@@ -1005,6 +1010,9 @@ impl Codegen<'_> {
     ) -> CResult<()> {
         if recv.is_none() && name == "raise" {
             return Err("`raise` was removed: return Err(...) for expected failures, panic(...) for bugs".into());
+        }
+        if recv.is_none() && name == "module_function" {
+            return Err("`module_function` was removed: a module's `fn`s are already its functions (`M.f`)".into());
         }
         // `include M` (a constant argument: Array#prepend(x) still works)
         if recv.is_none()

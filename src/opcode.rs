@@ -218,6 +218,10 @@ pub enum Op {
     SClass(Reg),
     /// R[a] = run Irep[b] with self = R[a] (class body)
     Exec(Reg, u32),
+    /// lang-fork: a module body: like `Exec`, but its `fn`s define the
+    /// module's own functions (the target is its singleton class), as in a
+    /// Rust `mod`
+    ExecMod(Reg, u32),
     /// alias_method(target_class, new, old)
     Alias(Sym, Sym),
     /// `expr?`: R[a] = v and jump to `t` for `Ok(v)` (or any value but an

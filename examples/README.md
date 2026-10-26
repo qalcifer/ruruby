@@ -17,7 +17,7 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
 | [03_control_flow.rb](03_control_flow.rb) | `if` / `else if` / `else`, `unless`, `while`, `until`, `for`, `loop`, `break`/`next`, `case`/`when`, modifiers, `if` as a value |
 | [04_closures.rb](04_closures.rb) | closures `\|x\| ...`, capturing, closures as a call's last argument, blocks, `yield`, `&f`, `&:sym` |
 | [05_classes.rb](05_classes.rb) | classes, `initialize`, attributes, inheritance and `super`, class methods, operators, `impl Comparable`, `private fn`, reopening classes |
-| [06_interfaces.rb](06_interfaces.rb) | `interface` with required and default methods, `impl I for C` and `impl I` in a class, built-in classes, super-interfaces, contract errors, `impl I by @field`, `Comparable`/`Enumerable`, modules as namespaces |
+| [06_interfaces.rb](06_interfaces.rb) | `interface` with required and default methods, `impl I for C` and `impl I` in a class, built-in classes, super-interfaces, contract errors, `impl I by @field`, `Comparable`/`Enumerable`, modules as namespaces with their own functions |
 | [07_use/](07_use/main.rb) | files as modules: `use file::Name`, `use file::Module::{A, B}`, `use file::*`, nested directories |
 | [08_errors.rb](08_errors.rb) | `Ok`/`Err`, `?`, matching on results, `fetch` and `Integer()` returning results, `none` with `?`, panics and `catch_panic` |
 | [09_pattern_matching.rb](09_pattern_matching.rb) | `case`/`in`: types, alternatives, arrays with splats, hashes, guards, binding with `=>`, `in` as a test |
@@ -48,9 +48,11 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
   (no body: required; a body: a default). `impl Shape for Circle { fn area() = ... }`
   or `impl Shape { ... }` inside the class; checked when the block ends.
   Interfaces hold no state; `impl I by @field` reuses a field's methods.
+- **Modules** are namespaces, like Rust's `mod`: constants, classes and functions;
+  `fn f` in `module M { }` is called as `M.f` (`private fn` keeps it internal).
 
 Removed from Ruby: `def`/`end`, `do ... end`, `->`, `elsif`, `then`, `begin`, `? :`,
-`nil`, `raise`/`rescue`/`ensure`/`retry`, `include`/`extend`/`prepend` (modules are
+`nil`, `raise`/`rescue`/`ensure`/`retry`, `include`/`extend`/`prepend`/`module_function` (modules are
 namespaces; shared behaviour is an `interface`). Each is a compile error that says
 what to write instead.
 

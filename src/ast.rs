@@ -91,6 +91,9 @@ pub enum Node {
         body: Box<Node>,
         locals: Vec<String>,
         is_module: bool,
+        /// lang-fork: an `interface` (its `fn`s are instance methods; a plain
+        /// module's are its own functions, `M.f`)
+        interface: bool,
     },
     /// `class << obj; body; end`
     SClass(Box<Node>, Box<Node>, Vec<String>),

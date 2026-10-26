@@ -3127,6 +3127,15 @@ impl Vm {
                 body.ret = a;
                 return Ok(Flow::Call(body));
             }
+            Op::ExecMod(a, idx) => {
+                let V::Class(m) = self.kind(self.reg(f, a)) else {
+                    unreachable!()
+                };
+                let target = self.singleton_class(&Value::from(m))?;
+                let mut body = self.body_frame(f.irep.reps[idx as usize].clone(), Value::from(m), target);
+                body.ret = a;
+                return Ok(Flow::Call(body));
+            }
             Op::Alias(new, old) => {
                 self.check_frozen(&Value::from(f.target))?;
                 self.alias_method(&f.target, new, old)?;

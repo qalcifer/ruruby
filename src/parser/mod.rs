@@ -2265,6 +2265,7 @@ impl Parser {
             body: b(body),
             locals,
             is_module,
+            interface: false,
         })
     }
 
@@ -2345,6 +2346,7 @@ impl Parser {
             body: b(Node::Seq(stmts)),
             locals,
             is_module: true,
+            interface: true,
         })
     }
 

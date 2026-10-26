@@ -243,3 +243,43 @@ fn closures() {
         r#"12"#,
     ]);
 }
+
+/// A module is a namespace, like a Rust `mod`: its `fn`s are its own
+/// functions (`M.f`), calling each other without a receiver; `private`
+/// ones are internal; constants, nested modules and classes as before.
+/// Interfaces keep instance methods.
+#[test]
+fn modules_hold_functions() {
+    let out = run(r##"
+        module Temp {
+          SCALE = 1.8
+          fn to_f(c) = round1(c * SCALE + 32)
+          fn self.to_c(f) = round1((f - 32) / SCALE)   # same thing, spelled out
+          private fn round1(x) = x.round(1)
+          module Format { fn show(c) = "#{c}°C = #{Temp.to_f(c)}°F" }
+          class Reading {
+            fn initialize(c) = @c = c
+            fn hot? = @c * SCALE > 50
+          }
+        }
+        module Temp { fn freezing = to_f(0) }    # reopened
+        p Temp.to_f(100), Temp.to_c(212.0), Temp.freezing, Temp::Format.show(10)
+        p Temp::Reading.new(30).hot?, Temp.singleton_methods.sort, Temp.instance_methods
+        p catch_panic { Temp.round1(1.25) }.err.message
+        interface Hello { fn hi() = "hi" }
+        p Hello.instance_methods, Hello.singleton_methods
+    "##);
+    assert_eq!(out.lines().collect::<Vec<_>>(), [
+        "212.0",
+        "100.0",
+        "32.0",
+        r#""10°C = 50.0°F""#,
+        "true",
+        "[:freezing, :to_c, :to_f]",
+        "[]",
+        r#""private method 'round1' called for module Temp""#,
+        "[:hi]",
+        "[]",
+    ]);
+    assert!(err("module M { module_function\n fn f = 1 }").contains("`module_function` was removed"));
+}

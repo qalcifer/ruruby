@@ -92,15 +92,17 @@ class NumberBag {
 bag = NumberBag.new(5, 3, 8)
 p bag.sort, bag.map(|n| n * 2), bag.min, bag.include?(8), bag.select(|n| n > 4)
 
-# Modules group constants and functions under a name
+# Modules group constants, functions and classes under a name, like a
+# Rust `mod`: a module's `fn`s are called on it (`Geometry.circle_area`)
 module Geometry {
   PI = 3.14159
 
-  fn self.circle_area(r) = PI * r * r
+  fn circle_area(r) = round2(PI * r * r)
+  private fn round2(x) = x.round(2)   # only for the module's own functions
 
   class Square {
     fn initialize(side) = @side = side
     fn area = @side * @side
   }
 }
-p Geometry::PI, Geometry.circle_area(2).round(2), Geometry::Square.new(3).area
+p Geometry::PI, Geometry.circle_area(2), Geometry::Square.new(3).area

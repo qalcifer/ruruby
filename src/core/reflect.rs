@@ -236,24 +236,6 @@ fn init_module(vm: &mut Vm) {
     vm.def(&m, "private", |vm, s, a, _| set_vis(vm, s, a, Vis::Private));
     vm.def(&m, "public", |vm, s, a, _| set_vis(vm, s, a, Vis::Public));
     vm.def(&m, "protected", |vm, s, a, _| set_vis(vm, s, a, Vis::Protected));
-    vm.def(&m, "module_function", |vm, s, a, _| {
-        vm.check_frozen(s)?;
-        // a public copy on the module, the instance method made private
-        let meta = vm.singleton_class(s)?;
-        let cls = this_class(vm, s)?;
-        for name in method_names(vm, a)? {
-            let Some((m, _)) = vm.find_method(&cls, name) else {
-                let msg = format!(
-                    "undefined method '{}' for module '{}'",
-                    vm.sym_name(name),
-                    vm.heap[cls].name()
-                );
-                return Err(vm.name_err(msg));
-            };
-            vm.heap[meta].methods.insert(name, m);
-        }
-        set_vis(vm, s, a, Vis::Private)
-    });
     vm.def(&m, "private_class_method", |vm, s, a, _| {
         let meta = vm.singleton_class(s)?;
         set_vis(vm, &Value::from(meta), a, Vis::Private)
@@ -512,8 +494,14 @@ fn set_vis(vm: &mut Vm, s: &Value, a: &[Value], vis: Vis) -> VmResult {
             vm.heap[cls].methods.borrow().get(&name),
             Some(m) if !matches!(m, Method::Undefined)
         );
+        // a module's functions (`fn f` in its body) are on its singleton class
+        let meta = vm.heap[cls].meta.get();
+        let own_fn = vm.heap[cls].is_module
+            && meta.is_some_and(|m| matches!(vm.heap[m].methods.borrow().get(&name), Some(m) if !matches!(m, Method::Undefined)));
         if own {
             vm.heap[cls].methods.set_vis(name, vis);
+        } else if own_fn {
+            vm.heap[meta.unwrap()].methods.set_vis(name, vis);
         } else if let Some((m, _)) = vm.find_method(&cls, name) {
             vm.heap[cls].methods.insert_vis(name, m, vis);
         } else {

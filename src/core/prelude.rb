@@ -137,7 +137,7 @@ class Range {
   }
 }
 
-module Kernel {
+class Object {
   # no StopIteration to end it: `break` does
   fn loop() {
     while true {
