@@ -333,3 +333,16 @@ fn path_calls() {
     "##);
     assert_eq!(out, "2\n3\n1\n8\n-5\n2\n2\nClass\n:end\n\"P\"\n0\n1\n");
 }
+
+/// A closure can be a keyword argument or a hash value (`on_delete: |x| ...`);
+/// `{a:}` alone is still `{a: a}`.
+#[test]
+fn closures_as_named_values() {
+    let out = run(r##"
+        fn apply(f:, x: 1) = f.call(x)
+        h = {double: |x| x * 2, inc: |x| { x + 1 }}
+        a = 7
+        p apply(f: |x| x * 10), apply(x: 2, f: |y| -y), h[:double].call(4), h[:inc].call(4), {a:}
+    "##);
+    assert_eq!(out, "10\n-2\n8\n5\n{a: 7}\n");
+}

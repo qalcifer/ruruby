@@ -1280,7 +1280,8 @@ impl Parser {
                 Tok::Label(k) => {
                     self.advance();
                     self.skip_nl();
-                    let v = if self.arg_ends() {
+                    // `a: |x| ...` is a closure value, not `{a:}`
+                    let v = if self.arg_ends() && !self.at(&Tok::Pipe) {
                         self.label_value(&k)
                     } else {
                         self.parse_arg()?
@@ -3155,7 +3156,8 @@ impl Parser {
                 Tok::Label(k) => {
                     self.advance();
                     self.skip_nl();
-                    let v = if self.arg_ends() {
+                    // `a: |x| ...` is a closure value, not `{a:}`
+                    let v = if self.arg_ends() && !self.at(&Tok::Pipe) {
                         self.label_value(&k)
                     } else {
                         self.parse_arg()?
