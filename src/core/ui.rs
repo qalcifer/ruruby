@@ -113,7 +113,7 @@ pub fn init(vm: &mut Vm) {
             return Ok(Value::NIL);
         };
         let kind = vm.heap[k].borrow().clone();
-        let Some(id) = vm.ui.create(object, &kind) else {
+        let Some(id) = vm.ui.create(object, el, &kind) else {
             return Ok(Value::NIL);
         };
         let props = match vm.kind(arg(a, 2)) {

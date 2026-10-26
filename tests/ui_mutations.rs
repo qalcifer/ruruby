@@ -169,3 +169,24 @@ fn only_changes_after_the_first_build() {
     assert!(ms.contains(&Mutation::Set { id: 4, prop: "text".into(), value: PropValue::Str("x".into()) }), "{ms:?}");
     assert!(ms.iter().any(|m| matches!(m, Mutation::Set { prop, value: PropValue::Bool(true), .. } if prop == "enabled")), "{ms:?}");
 }
+
+/// A renderer's events go back to the elements by node id.
+#[test]
+fn events_from_the_host() {
+    use ruruby::ui::UiEvent;
+    let mut i = Interpreter::new();
+    i.eval(APP).unwrap();
+    let mut m = Mirror::default();
+    m.apply(i.take_ui_mutations());
+    let node = |m: &Mirror, kind: &str| *m.nodes.iter().find(|(_, n)| n.0 == kind).unwrap().0;
+    let (input, add) = (node(&m, "TextInput"), node(&m, "Button"));
+    assert!(i.ui_event(input, UiEvent::Text("tea".into())).unwrap());
+    assert!(i.ui_event(add, UiEvent::Click { x: 1.0, y: 2.0, button: "left".into() }).unwrap());
+    m.apply(i.take_ui_mutations());
+    let shown = m.render();
+    assert!(shown.contains(r#"Text(text: "tea", color: :black)"#), "{shown}");
+    assert!(shown.contains(r#"Text(id: :left, text: "1 left", color: :black)"#), "{shown}");
+    assert!(!i.ui_event(9999, UiEvent::Submit).unwrap(), "an unknown node");
+    let err = i.ui_event(add, UiEvent::Submit).unwrap_err().to_string();
+    assert!(err.contains("Button doesn't emit Submit"), "{err}");
+}

@@ -2414,6 +2414,9 @@ impl Vm {
         for v in self.rx.roots() {
             m.value(&v);
         }
+        for v in self.ui.roots() {
+            m.value(v);
+        }
         // the namespaces of used files (their classes are reachable only there)
         for u in self.units.values() {
             if let Some(c) = u.module {

@@ -11,6 +11,7 @@
 //! children — when it's attached under an announced node; later writes of
 //! its props are `Set`s.
 
+use crate::value::Value;
 use std::collections::HashMap;
 
 /// A prop's value as a renderer sees it.
@@ -28,6 +29,19 @@ pub enum PropValue {
     Other(String),
 }
 
+/// What a renderer reports happened to a node (the script sees an
+/// `UI::Event` of the same name).
+#[derive(Clone, Debug, PartialEq)]
+pub enum UiEvent {
+    Click { x: f64, y: f64, button: String },
+    PointerMove { x: f64, y: f64 },
+    Scroll { dx: f64, dy: f64 },
+    Key { key: String, mods: Vec<String> },
+    Text(String),
+    Submit,
+    Focus(bool),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Mutation {
     Create { id: u64, kind: String },
@@ -41,6 +55,8 @@ pub struct UiLog {
     pub mutations: Vec<Mutation>,
     /// Announced elements, by object identity: their node id.
     nodes: HashMap<u64, u64>,
+    /// And back: each node's element (GC roots while shown).
+    elements: HashMap<u64, Value>,
     next: u64,
 }
 
@@ -49,13 +65,24 @@ impl UiLog {
         self.nodes.get(&object).copied()
     }
 
+    /// The element shown as node `id`.
+    pub fn element(&self, id: u64) -> Option<Value> {
+        self.elements.get(&id).copied()
+    }
+
+    /// For the GC: the shown elements (a Root may be referenced nowhere else).
+    pub fn roots(&self) -> impl Iterator<Item = &Value> {
+        self.elements.values()
+    }
+
     /// Announces an element: a new node id, and its `Create`.
-    pub fn create(&mut self, object: u64, kind: &str) -> Option<u64> {
+    pub fn create(&mut self, object: u64, element: Value, kind: &str) -> Option<u64> {
         if self.nodes.contains_key(&object) {
             return None;
         }
         self.next += 1;
         self.nodes.insert(object, self.next);
+        self.elements.insert(self.next, element);
         self.mutations.push(Mutation::Create { id: self.next, kind: kind.to_string() });
         Some(self.next)
     }
@@ -82,7 +109,9 @@ impl UiLog {
 
     /// An element left the tree: it's no node any more.
     pub fn forget(&mut self, object: u64) {
-        self.nodes.remove(&object);
+        if let Some(id) = self.nodes.remove(&object) {
+            self.elements.remove(&id);
+        }
     }
 
     pub fn take(&mut self) -> Vec<Mutation> {

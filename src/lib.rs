@@ -135,6 +135,44 @@ impl Interpreter {
         self.vm.ui.take()
     }
 
+    /// lang-fork-ui: something happened to node `node` (from a renderer):
+    /// the element's `emit` with the matching `UI::Event`. False if the
+    /// node isn't shown any more.
+    pub fn ui_event(&mut self, node: u64, event: ui::UiEvent) -> Result<bool, Error> {
+        let Some(el) = self.vm.ui.element(node) else { return Ok(false) };
+        let vm = &mut self.vm;
+        let (name, fields) = match event {
+            ui::UiEvent::Click { x, y, button } => {
+                let b = Value::sym(vm.intern(&button));
+                ("click", vec![Value::float(x), Value::float(y), b])
+            }
+            ui::UiEvent::PointerMove { x, y } => ("pointer_move", vec![Value::float(x), Value::float(y)]),
+            ui::UiEvent::Scroll { dx, dy } => ("scroll", vec![Value::float(dx), Value::float(dy)]),
+            ui::UiEvent::Key { key, mods } => {
+                let k = Value::sym(vm.intern(&key));
+                let m: Vec<Value> = mods.iter().map(|m| Value::sym(vm.intern(m))).collect();
+                let m = vm.array(m);
+                ("key", vec![k, m])
+            }
+            ui::UiEvent::Text(t) => ("text", vec![vm.str(t)]),
+            ui::UiEvent::Submit => ("submit", vec![]),
+            ui::UiEvent::Focus(f) => ("focus", vec![Value::bool(f)]),
+        };
+        let name = Value::sym(vm.intern(name));
+        let fields = vm.array(fields);
+        let m = vm.intern("__ui_host_event");
+        let r = vm.call_method(&el, m, vec![name, fields], None).map_err(|u| vm.materialize(u));
+        r.map_err(|u| self.unwind_error(u))?;
+        Ok(true)
+    }
+
+    fn unwind_error(&mut self, u: vm::Unwind) -> Error {
+        match u {
+            vm::Unwind::Error(e) => Error::Runtime { class: self.vm.class_name(&e), message: self.vm.exc_message(&e) },
+            _ => Error::Runtime { class: "LocalJumpError".into(), message: "unexpected jump out of an event handler".into() },
+        }
+    }
+
     pub fn take_output(&mut self) -> String {
         self.vm
             .capture

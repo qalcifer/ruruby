@@ -147,6 +147,20 @@ module UI {
       handlers.size
     }
 
+    # an event from a renderer (Interpreter::ui_event): (name, fields)
+    fn __ui_host_event(name, f) {
+      event = case name {
+        when :click { Event::Click(x: f[0], y: f[1], button: f[2]) }
+        when :pointer_move { Event::PointerMove(x: f[0], y: f[1]) }
+        when :scroll { Event::Scroll(dx: f[0], dy: f[1]) }
+        when :key { Event::Key(key: f[0], mods: f[1]) }
+        when :text { Event::Text(f[0]) }
+        when :submit { Event::Submit }
+        when :focus { Event::Focus(f[0]) }
+      }
+      emit(event)
+    }
+
     # the built-in reaction to an event (none)
     fn __ui_default(_event) = none
 
