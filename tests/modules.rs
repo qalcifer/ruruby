@@ -214,11 +214,74 @@ fn use_failures() {
     for (src, expected) in [
         ("use person\n", "use: expected `::`"),
         ("use person::\n", "use: expected a constant, { } or * after `::`"),
-        ("use person::{}\n", "use: expected a constant name in { }"),
+        ("use person::{}\n", "use: expected a constant name (or a module's function) in { }"),
+        ("use person::shout\n", "a function is imported from a module: file::Module::shout"),
+        ("use person::Person::{}\n", "use: expected a constant name"),
         ("if true {\n  use person::Person\n}\n", "use is only allowed among a file's top-level statements"),
     ] {
         let dir = project("syntax-errors", &[("person.rb", PERSON), ("main.rb", src)]);
         let err = run(&dir).unwrap_err();
         assert!(err.contains(expected), "{src:?}: {err}");
+    }
+}
+
+const UNITS: &str = "
+module Units {
+  CM = 2.54
+  fn to_cm(i) = round2(i * CM)
+  fn to_in(c) = round2(c / CM)
+  fn self.twice(x) = x * 2
+  private fn round2(x) = x.round(2)
+  private
+  fn hidden(x) = x
+}
+module Text { fn shout(s) = s.upcase + \"!\" }
+";
+
+/// `use file::Module::func` imports a module's function as a bare name, for
+/// the whole file (methods and blocks too); `::*` brings its functions with
+/// its constants. Imports are per file, like Rust's.
+#[test]
+fn use_imports_module_functions() {
+    let dir = project(
+        "fns",
+        &[
+            ("units.rb", UNITS),
+            ("other.rb", "use units::Text::shout\nclass Loud { fn say(s) = shout(s) }\n"),
+            (
+                "main.rb",
+                r##"
+use units::Units::{to_cm, CM}
+use units::Text::*
+use other::Loud
+class Ruler {
+  fn mark(i) = "#{to_cm(i)} cm"
+}
+p to_cm(10), CM, shout("hi"), Ruler.new.mark(1), [1, 2].map(|i| to_cm(i)), Loud.new.say("x")
+p catch_panic { to_in(1) }.err.class, catch_panic { Units }.err.class
+"##,
+            ),
+        ],
+    );
+    assert_eq!(
+        run(&dir).unwrap(),
+        "25.4\n2.54\n\"HI!\"\n\"2.54 cm\"\n[2.54, 5.08]\n\"X!\"\nNoMethodError\nNameError\n"
+    );
+}
+
+#[test]
+fn use_function_errors() {
+    let cases = [
+        ("use units::Units::nope", "line 1: use units::Units::nope: units.rb doesn't define Units::nope (a public fn of the module)"),
+        ("use units::Units::round2", "doesn't define Units::round2"),
+        ("use units::Units::hidden", "doesn't define Units::hidden"),
+        ("use units::Units::to_cm::X", "expected"),
+        ("use units::Text::shout\nfn shout(s) = s", "use units::Text::shout: shout is also defined in this file"),
+        ("use units::Text::shout\nuse units::Units::{shout}", "shout is already imported from units::Text"),
+    ];
+    for (i, (main, want)) in cases.iter().enumerate() {
+        let dir = project(&format!("fnerr{i}"), &[("units.rb", UNITS), ("main.rb", main)]);
+        let err = run(&dir).unwrap_err();
+        assert!(err.contains(want), "{main}:\n  {err}\n  wanted: {want}");
     }
 }

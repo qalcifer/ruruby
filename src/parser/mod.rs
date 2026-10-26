@@ -537,6 +537,13 @@ impl Parser {
             self.advance();
             path.push(seg);
             if !self.eat(&Tok::Colon2) {
+                if path.len() > 1 {
+                    let f = path.last().unwrap();
+                    return Err(self.err(&format!(
+                        "use: expected `::` after the file {} (a function is imported from a module: file::Module::{f})",
+                        path.join("/")
+                    )));
+                }
                 return Err(self.err("use: expected `::` and what to import (file::Name, file::{A, B} or file::*)"));
             }
             if matches!(self.peek(), Tok::Ident(_)) {
@@ -549,10 +556,15 @@ impl Parser {
                 self.advance();
                 inner.push(c);
             }
+            // a function of a module: `use file::Module::func`
             let items = match self.peek().clone() {
                 Tok::Const(c) => {
                     self.advance();
                     Some(vec![c])
+                }
+                Tok::Ident(f) if !inner.is_empty() => {
+                    self.advance();
+                    Some(vec![f])
                 }
                 Tok::Star => {
                     self.advance();
@@ -563,8 +575,10 @@ impl Parser {
                     let mut items = Vec::new();
                     loop {
                         self.skip_nl();
-                        let Tok::Const(c) = self.peek().clone() else {
-                            return Err(self.err("use: expected a constant name in { }"));
+                        let c = match self.peek().clone() {
+                            Tok::Const(c) => c,
+                            Tok::Ident(f) if !inner.is_empty() => f,
+                            _ => return Err(self.err("use: expected a constant name (or a module's function) in { }")),
                         };
                         self.advance();
                         items.push(c);
@@ -575,6 +589,9 @@ impl Parser {
                     }
                     self.expect(&Tok::RBrace)?;
                     Some(items)
+                }
+                Tok::Ident(_) => {
+                    return Err(self.err("use: functions are imported from a module: file::Module::func"));
                 }
                 _ => return Err(self.err("use: expected a constant, { } or * after `::`")),
             };

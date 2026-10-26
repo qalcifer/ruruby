@@ -55,13 +55,23 @@ pub struct Codegen<'a> {
     scopes: Vec<Scope>,
     /// The source file (for `require_relative`).
     file: &'a str,
+    /// lang-fork: functions this file imports with `use file::Module::f`;
+    /// a call `f(...)` without a receiver goes to the module, which `use`
+    /// stores in the file's namespace under the (lowercase) name `f`.
+    imported_fns: &'a [String],
 }
 
 pub fn compile(prog: &Program, syms: &mut SymbolTable) -> CResult<Rc<Irep>> {
+    compile_with(prog, syms, &[])
+}
+
+/// [`compile`] for a file that imports the functions `imported_fns`.
+pub fn compile_with(prog: &Program, syms: &mut SymbolTable, imported_fns: &[String]) -> CResult<Rc<Irep>> {
     let mut g = Codegen {
         syms,
         scopes: Vec::new(),
         file: &prog.file,
+        imported_fns,
     };
     g.push_scope(Kind::Top, "<main>", &prog.locals, None);
     let r = g.alloc();
@@ -1008,6 +1018,13 @@ impl Codegen<'_> {
         safe: bool,
         dst: Reg,
     ) -> CResult<()> {
+        let module;
+        let recv = if recv.is_none() && self.imported_fns.iter().any(|f| f == name) {
+            module = Node::Const(name.to_string());
+            Some(&module)
+        } else {
+            recv
+        };
         if recv.is_none() && name == "raise" {
             return Err("`raise` was removed: return Err(...) for expected failures, panic(...) for bugs".into());
         }

@@ -14,6 +14,14 @@ module Shapes {
 
 module Units {
   CM_PER_INCH = 2.54
+
+  fn to_cm(inches) = round2(inches * CM_PER_INCH)
+  fn to_inches(cm) = round2(cm / CM_PER_INCH)
+  private fn round2(x) = x.round(2)
+}
+
+module Text {
+  fn shout(s) = s.upcase + "!"
 }
 
 SECRET = "only for this file"

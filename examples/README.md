@@ -18,7 +18,7 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
 | [04_closures.rb](04_closures.rb) | closures `\|x\| ...`, capturing, closures as a call's last argument, blocks, `yield`, `&f`, `&:sym` |
 | [05_classes.rb](05_classes.rb) | classes, `initialize`, attributes, inheritance and `super`, class methods, operators, `impl Comparable`, `private fn`, reopening classes |
 | [06_interfaces.rb](06_interfaces.rb) | `interface` with required and default methods, `impl I for C` and `impl I` in a class, built-in classes, super-interfaces, inheritance ("class wins"), `abstract class`, contract errors, `impl I by @field`, `Comparable`/`Enumerable`, modules as namespaces with their own functions |
-| [07_use/](07_use/main.rb) | files as modules: `use file::Name`, `use file::Module::{A, B}`, `use file::*`, nested directories |
+| [07_use/](07_use/main.rb) | files as modules: `use file::Name`, `use file::Module::{A, B}`, `use file::*`, a module's functions (`use file::Module::func`), nested directories |
 | [08_errors.rb](08_errors.rb) | `Ok`/`Err`, `?`, matching on results, `fetch` and `Integer()` returning results, `none` with `?`, panics and `catch_panic` |
 | [09_pattern_matching.rb](09_pattern_matching.rb) | `case`/`in`: types, alternatives, arrays with splats, hashes, guards, binding with `=>`, `in` as a test |
 | [10_collections.rb](10_collections.rb) | Array, Hash and Range methods |
@@ -40,6 +40,7 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
   `if list.any?(|x| x > 1) { ... }`.
 - **Files are modules**: `use path::to::file::Name`. Paths start at the main
   script's directory; every `use` is checked before the program runs.
+  `use file::Module::func` imports a module's function: `func(x)` in that file.
 - **Errors**: a failure the caller should handle is `Err(...)` (and success
   `Ok(...)`); `value?` returns an `Err` (or `none`) from the function.
   A bug is a `panic`, which ends the program.

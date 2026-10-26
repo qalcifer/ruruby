@@ -30,8 +30,8 @@ pub fn compile_program(vm: &mut Vm, prog: &Program) -> Result<Rc<Irep>, String> 
         };
         vm.module_root = Some(dir.filter(|d| !d.as_os_str().is_empty()).unwrap_or_else(|| PathBuf::from(".")));
     }
-    prepare_uses(vm, prog, &mut Vec::new())?;
-    crate::codegen::compile(prog, &mut vm.syms)
+    let fns = prepare_uses(vm, prog, &mut Vec::new())?;
+    crate::codegen::compile_with(prog, &mut vm.syms, &fns)
 }
 
 /// A `use` statement: file path, modules inside it, imported names
@@ -61,21 +61,33 @@ pub enum Export {
     Value,
     /// Only known when it runs (`X = make()`, a name the file imports).
     Unknown,
+    /// A module's public function (`fn f` in `module M { }`).
+    Fn,
 }
 
 impl Exports {
-    fn of(body: &Node) -> Exports {
+    /// What `body` defines; `module`: a module's body, whose public `fn`s
+    /// are its functions.
+    fn of(body: &Node, module: bool) -> Exports {
         let mut out = Exports::default();
+        let mut public = true;
         for n in top_level(body) {
             match n {
-                Node::Class { path, body, .. } => {
+                Node::Class { path, body, is_module, interface, .. } => {
                     if let Node::Const(c) = &**path {
                         // a reopened class or module adds to what it had
                         let entry = out.names.entry(c.clone()).or_insert_with(|| Export::Scope(Exports::default()));
                         if let Export::Scope(e) = entry {
-                            e.names.extend(Exports::of(body).names);
+                            e.names.extend(Exports::of(body, *is_module && !*interface).names);
                         }
                     }
+                }
+                Node::Def { recv, name, .. } if module && public && recv.as_deref().is_none_or(|r| matches!(r, Node::SelfRef)) => {
+                    out.names.insert(name.clone(), Export::Fn);
+                }
+                // `private` / `public` on a line of their own
+                Node::Call { recv: None, name, args, .. } if args.is_empty() && (name == "private" || name == "public") => {
+                    public = name == "public";
                 }
                 Node::CAsgn(target, value) => {
                     if let Node::Const(c) = &**target {
@@ -108,6 +120,7 @@ impl Exports {
                 None => return Err(format!("doesn't define {name}")),
                 Some(Export::Value) => return Err(format!("defines {name} as a value, not a module or class")),
                 Some(Export::Unknown) => return Ok(None),
+                Some(Export::Fn) => return Err(format!("defines {name} as a function, not a module or class")),
                 Some(Export::Scope(e)) => cur = e,
             }
         }
@@ -124,8 +137,17 @@ fn top_level(body: &Node) -> impl Iterator<Item = &Node> {
 
 /// Compiles the files `prog` uses into `vm.units`; `stack` holds the files
 /// being prepared (for cycles). Errors start with the line in the file
-/// being compiled, or `models/user.rb:3:` for a file it uses.
-fn prepare_uses(vm: &mut Vm, prog: &Program, stack: &mut Vec<String>) -> Result<(), String> {
+/// being compiled, or `models/user.rb:3:` for a file it uses. Returns the
+/// module functions `prog` imports (for the code generator).
+fn prepare_uses(vm: &mut Vm, prog: &Program, stack: &mut Vec<String>) -> Result<Vec<String>, String> {
+    let mut fns: Vec<String> = Vec::new();
+    // the file's own top-level `fn`s, which an imported function can't share a name with
+    let own: Vec<&str> = top_level(&prog.body)
+        .filter_map(|n| match n {
+            Node::Def { recv: None, name, .. } => Some(name.as_str()),
+            _ => None,
+        })
+        .collect();
     let current = stack.last().cloned();
     let at = |line: u32| match &current {
         Some(k) => format!("{k}.rb:{line}:"),
@@ -166,9 +188,9 @@ fn prepare_uses(vm: &mut Vm, prog: &Program, stack: &mut Vec<String>) -> Result<
             stack.push(key.clone());
             let r = prepare_uses(vm, &used, stack);
             stack.pop();
-            r?;
-            let irep = crate::codegen::compile(&used, &mut vm.syms).map_err(|e| format!("{key}.rb: {e}"))?;
-            vm.units.insert(key.clone(), Unit { irep, exports: Exports::of(&used.body), module: None });
+            let used_fns = r?;
+            let irep = crate::codegen::compile_with(&used, &mut vm.syms, &used_fns).map_err(|e| format!("{key}.rb: {e}"))?;
+            vm.units.insert(key.clone(), Unit { irep, exports: Exports::of(&used.body, false), module: None });
         }
         let unit = &vm.units[&key];
         let scope = unit.exports.find(inner).map_err(|e| format!("{} {shown}: {key}.rb {e}", at(line)))?;
@@ -176,8 +198,27 @@ fn prepare_uses(vm: &mut Vm, prog: &Program, stack: &mut Vec<String>) -> Result<
             && let Some(missing) = items.iter().find(|i| !scope.names.contains_key(*i))
         {
             let name = inner.iter().chain([missing]).cloned().collect::<Vec<_>>().join("::");
-            return Err(format!("{} {shown}: {key}.rb doesn't define {name}", at(line)));
+            let what = if missing.starts_with(char::is_lowercase) { " (a public fn of the module)" } else { "" };
+            return Err(format!("{} {shown}: {key}.rb doesn't define {name}{what}", at(line)));
+        }
+        let new: Vec<String> = match (items, scope) {
+            (Some(items), _) => items.iter().filter(|i| i.starts_with(|c: char| !c.is_uppercase())).cloned().collect(),
+            (None, Some(scope)) => {
+                let mut v: Vec<String> =
+                    scope.names.iter().filter(|(_, e)| matches!(e, Export::Fn)).map(|(n, _)| n.clone()).collect();
+                v.sort();
+                v
+            }
+            (None, None) => vec![],
+        };
+        for f in new {
+            if own.contains(&f.as_str()) {
+                return Err(format!("{} {shown}: {f} is also defined in this file", at(line)));
+            }
+            if !fns.contains(&f) {
+                fns.push(f);
+            }
         }
     }
-    Ok(())
+    Ok(fns)
 }

@@ -3542,6 +3542,15 @@ impl Vm {
                 }
             }
         }
+        // a module's public functions, imported as the module under their name
+        let fns: Vec<Sym> = match self.heap[module].meta.get() {
+            Some(meta) => {
+                let t = &self.heap[meta].methods;
+                t.borrow().keys().copied().filter(|k| t.vis(*k) == Vis::Public).collect()
+            }
+            None => vec![],
+        };
+        let mv = Value::from(module);
         let imports: Vec<(Sym, Value)> = match &decl.items {
             Some(items) => {
                 let consts = self.heap[module].consts.borrow();
@@ -3549,6 +3558,7 @@ impl Vm {
                 for s in items {
                     match consts.get(s) {
                         Some(x) => v.push((*s, *x)),
+                        None if fns.contains(s) => v.push((*s, mv)),
                         None => {
                             drop(consts);
                             let (file, name) = (decl.path.clone(), self.sym_name(*s).to_string());
@@ -3558,7 +3568,11 @@ impl Vm {
                 }
                 v
             }
-            None => self.heap[module].consts.borrow().iter().map(|(k, v)| (*k, *v)).collect(),
+            None => {
+                let mut v: Vec<(Sym, Value)> = self.heap[module].consts.borrow().iter().map(|(k, v)| (*k, *v)).collect();
+                v.extend(fns.iter().map(|s| (*s, mv)));
+                v
+            }
         };
         for (s, v) in imports {
             self.heap[f.target].consts.borrow_mut().insert(s, v);
