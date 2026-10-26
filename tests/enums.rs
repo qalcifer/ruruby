@@ -23,7 +23,7 @@ const SHAPE: &str = r##"
         in Empty { 0 }
       }
       fn grow() = case self {
-        in Circle(r) { Shape::Circle(r + 1) }
+        in Circle(r) { Circle(r + 1) }      # bare: the enum's own constructor
         else { self }
       }
     }
@@ -178,9 +178,12 @@ fn errors() {
         ("Shape::Rect(1, 2)", "Shape::Rect takes its fields by name"),
         ("Shape::Empty.class.new", "Shape::Empty is a value without fields: use Shape::Empty itself"),
         ("enum Shape { X }", "enum Shape is already defined"),
+        ("class Point {}\nenum Point { A }", "Point is already a class"),
+        ("class Point2 { fn x = 1 }\nenum Point2 { A }", "Point2 is already a class"),
         ("enum Twice { A, A }", "enum Twice: variant A is defined twice"),
         ("enum Twice { A(x, x) }", "enum Twice: A has the field x twice"),
         ("Shape::Circle(1).instance_variable_set(:@r, 2)", "can't modify frozen"),
+        ("Shape::Empty.Circle(1)", "private method 'Circle' called"),
     ];
     for (src, want) in cases {
         let err = run_capture(&format!("{SHAPE}{src}")).unwrap_err().to_string();

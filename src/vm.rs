@@ -3238,6 +3238,8 @@ impl Vm {
                     unreachable!()
                 };
                 let target = cls;
+                let k = &self.heap[cls].bodies;
+                k.set(k.get() + 1);
                 let mut body = self.body_frame(f.irep.reps[idx as usize].clone(), Value::from(cls), target);
                 body.ret = a;
                 return Ok(Flow::Call(body));
@@ -3246,6 +3248,8 @@ impl Vm {
                 let V::Class(m) = self.kind(self.reg(f, a)) else {
                     unreachable!()
                 };
+                let k = &self.heap[m].bodies;
+                k.set(k.get() + 1);
                 let target = self.singleton_class(&Value::from(m))?;
                 let mut body = self.body_frame(f.irep.reps[idx as usize].clone(), Value::from(m), target);
                 body.ret = a;

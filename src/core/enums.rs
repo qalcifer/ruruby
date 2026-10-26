@@ -166,7 +166,11 @@ pub fn init_enums(vm: &mut Vm) {
             return Err(vm.type_err(format!("line {line}: enum {n} is already defined")));
         }
         let k = &vm.heap[e];
-        if !k.methods.borrow().is_empty() || !k.consts.borrow().is_empty() || k.superclass != Some(vm.c.object) {
+        if k.bodies.get() > 1
+            || !k.methods.borrow().is_empty()
+            || !k.consts.borrow().is_empty()
+            || k.superclass != Some(vm.c.object)
+        {
             return Err(vm.type_err(format!("line {line}: {n} is already a class")));
         }
         *vm.heap[e].enum_variants.borrow_mut() = Some(vec![]);
@@ -322,6 +326,8 @@ pub fn init_enums(vm: &mut Vm) {
             vm.store_const(&e, name, Value::from(c));
             let meta = vm.singleton_class(s)?;
             vm.heap[meta].methods.insert(name, Method::Variant(c));
+            // `Circle(2)` inside the enum's own methods, where self is a value
+            vm.heap[e].methods.insert_vis(name, Method::Variant(c), Vis::Private);
         }
         Ok(Value::NIL)
     });

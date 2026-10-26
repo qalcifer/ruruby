@@ -194,6 +194,9 @@ pub struct RClass {
     pub is_abstract: Cell<bool>,
     /// Its abstract methods (`fn speak()` without a body).
     pub abstract_reqs: RefCell<Vec<Required>>,
+    /// How many times a `class`/`module` body has run for it (an `enum`
+    /// must be new: its body is the first).
+    pub bodies: Cell<u32>,
     /// lang-fork: on an `enum`, its variants' names in order.
     pub enum_variants: RefCell<Option<Vec<Sym>>>,
     /// lang-fork: on an enum variant's class.
@@ -254,6 +257,7 @@ impl RClass {
             interface: Default::default(),
             is_abstract: Default::default(),
             abstract_reqs: Default::default(),
+            bodies: Default::default(),
             enum_variants: Default::default(),
             variant: Default::default(),
         }
