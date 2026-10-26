@@ -128,8 +128,11 @@ module UI {
     # the handler gets the Event
     fn on(event, &handler) {
       name = __ui_event(event)
-      @__handlers = {} unless @__handlers
-      @__handlers[name] = (@__handlers[name] || []) + [handler]
+      # bookkeeping, not a dependency of the effect building the tree
+      untracked {
+        @__handlers = {} unless @__handlers
+        @__handlers[name] = (@__handlers[name] || []) + [handler]
+      }
       self
     }
 

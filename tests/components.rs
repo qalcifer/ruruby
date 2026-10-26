@@ -229,3 +229,50 @@ fn events() {
     let err = run_capture("use ui::{Button}\ncomponent C { Button { on_click { } } }").unwrap_err().to_string();
     assert!(err.contains("`on_click { }`: handlers are `on(:click) { |e| ... }`"), "{err}");
 }
+
+/// A component with handlers inside a `for` (registering a handler isn't a
+/// dependency of the effect building the part); a parent passes literals
+/// and closures to a child's props, `mut` or not.
+#[test]
+fn nested_components_in_parts() {
+    let out = run(r##"
+        use ui::{Column, Row, Text, Button}
+        class Todo { prop title }
+        component TodoRow {
+          prop todo
+          prop label
+          prop on_delete
+          Row {
+            Text(text: "#{label}: #{todo.title}")
+            Button(id: :x, text: "x") { on(:click) { on_delete.call(todo) } }
+          }
+        }
+        component App {
+          prop mut todos = [Todo::new(title: "a"), Todo::new(title: "b")]
+          Column {
+            for t in todos {
+              TodoRow(todo: t, label: "todo", on_delete: |gone| { todos = todos.reject(|x| x.equal?(gone)) })
+            }
+          }
+        }
+        app = App::new
+        puts app.host_dump
+        app.find(:x).emit(:click)
+        puts app.host_dump
+        p Reactive::stats
+    "##);
+    assert_eq!(out.lines().collect::<Vec<_>>(), [
+        "Column(spacing: 0, padding: 0)",
+        "  Row(spacing: 0, padding: 0)",
+        r#"    Text(text: "todo: a", color: :black)"#,
+        r#"    Button(id: :x, text: "x", enabled: true)"#,
+        "  Row(spacing: 0, padding: 0)",
+        r#"    Text(text: "todo: b", color: :black)"#,
+        r#"    Button(id: :x, text: "x", enabled: true)"#,
+        "Column(spacing: 0, padding: 0)",
+        "  Row(spacing: 0, padding: 0)",
+        r#"    Text(text: "todo: b", color: :black)"#,
+        r#"    Button(id: :x, text: "x", enabled: true)"#,
+        "[4, 6]",
+    ]);
+}

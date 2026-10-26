@@ -2558,7 +2558,9 @@ impl Parser {
                             v,
                             Node::Int(_) | Node::Float(_) | Node::Str(_) | Node::Sym(_) | Node::True | Node::False | Node::Nil
                         );
-                        out.push(if literal { ast::call(Some(el()), &format!("{k}="), vec![v]) } else { bind(el(), &k, v) });
+                        // a parent sets its child's props, `mut` or not (they're its inputs)
+                        let set = ast::call(Some(el()), "send", vec![Node::Sym(format!("{k}=")), v.clone()]);
+                        out.push(if literal { set } else { bind(el(), &k, v) });
                     }
                 }
                 // `text <=> draft`: the element follows draft, draft follows the element
