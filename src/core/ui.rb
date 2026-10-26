@@ -8,7 +8,7 @@
 #     prop mut count = 0
 #     Column(spacing: 8) {
 #       Text(text: "Count: #{count}")          # a binding: follows count
-#       Button(text: "+1") { on_click { count += 1 } }
+#       Button(text: "+1") { on(:click) { count += 1 } }
 #     }
 #   }
 #
@@ -16,8 +16,24 @@
 # `dump` shows it and `emit` plays events.
 
 module UI {
+  # What happens to an element, given to its handlers: `on(:click) { |e| e.x }`
+  # (or `on(Event::Click)`). The renderer (Rust) makes them.
+  enum Event {
+    Click { x, y, button }
+    PointerMove { x, y }
+    Scroll { dx, dy }
+    Key { key, mods }
+    Text(text)
+    Submit
+    Focus(focused)
+  }
+
   class Element {
     prop mut id = none
+
+    # the events an element of this type emits (a subclass adds its own)
+    EVENTS = [:Click, :PointerMove, :Scroll, :Key, :Focus]
+    fn self.events() = self::EVENTS
 
     # the elements under this one: an `if`/`for` part counts as what it holds
     fn children() = __ui_raw.flat_map(|c| if c.is_a?(Fragment) { c.children } else { [c] })
@@ -33,18 +49,58 @@ module UI {
     }
     fn __ui_set_parent(p) = @__parent = p
 
-    # `on_click { }` in a tree; `on(:click) { }` in code
+    # `on(:click) { |e| ... }`, `on(:pointer_move)`, `on(Event::Click)`:
+    # the handler gets the Event
     fn on(event, &handler) {
+      name = __ui_event(event)
       @__handlers = {} unless @__handlers
-      @__handlers[event] = (@__handlers[event] || []) + [handler]
+      @__handlers[name] = (@__handlers[name] || []) + [handler]
       self
     }
 
-    # what a renderer does on a click: the handlers run in one batch
-    fn emit(event, *args) {
-      handlers = (@__handlers || {})[event] || []
-      batch { handlers.each { |h| h.call(*args) } }
+    # What a renderer does when something happens: the element's own
+    # behaviour (a TextInput takes the text), then the handlers, in one
+    # batch. `emit(:click)` makes a plain Event::Click.
+    fn emit(event) {
+      event = __ui_plain_event(__ui_event(event)) unless event.is_a?(Event)
+      name = __ui_event(event)
+      handlers = (@__handlers || {})[name] || []
+      batch {
+        __ui_default(event)
+        handlers.each { |h| h.call(event) }
+      }
       handlers.size
+    }
+
+    # the built-in reaction to an event (none)
+    fn __ui_default(_event) = none
+
+    # the variant an event, a variant or a name stands for, if this element emits it
+    fn __ui_event(event) {
+      name = if event.is_a?(Event) {
+        event.variant
+      } else if event.is_a?(Class) && event < Event {
+        event.name.split("::").last.to_sym
+      } else if event.is_a?(Symbol) {
+        s = event.to_s
+        if s[0] == s[0].upcase { event } else { s.split("_").map(&:capitalize).join.to_sym }
+      } else {
+        panic("on/emit: #{event.inspect} isn't an event: write on(:click) or on(Event::Click)")
+      }
+      unless self.class.events.include?(name) {
+        panic("#{kind} doesn't emit #{name} (it emits #{self.class.events.join(", ")})")
+      }
+      name
+    }
+
+    fn __ui_plain_event(name) = case name {
+      when :Click { Event::Click(x: 0, y: 0, button: :left) }
+      when :PointerMove { Event::PointerMove(x: 0, y: 0) }
+      when :Scroll { Event::Scroll(dx: 0, dy: 0) }
+      when :Key { Event::Key(key: :none, mods: []) }
+      when :Text { Event::Text("") }
+      when :Submit { Event::Submit }
+      when :Focus { Event::Focus(true) }
     }
 
     # the first element (this one, or below) with the id
@@ -104,9 +160,18 @@ module UI {
   class TextInput < Element {
     prop mut text: String = ""
     prop mut placeholder: String = ""
+    EVENTS = Element::EVENTS + [:Text, :Submit]
+    fn __ui_default(event) = case event {
+      in Event::Text(t) { self.text = t }
+      else { none }
+    }
   }
   class CheckBox < Element {
     prop mut checked = false
     prop mut text: String = ""
+    fn __ui_default(event) = case event {
+      in Event::Click { self.checked = !checked }
+      else { none }
+    }
   }
 }

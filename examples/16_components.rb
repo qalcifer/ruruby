@@ -32,7 +32,7 @@ component TodoApp {
     Row {
       TextInput(id: :input, text <=> draft, placeholder: "What needs doing?")
       Button(id: :add, text: "Add", enabled: !draft.empty?) {
-        on_click {                           # a handler; props are written bare
+        on(:click) {                           # a handler; props are written bare
           todos = todos + [Todo::new(title: draft)]
           draft = ""
         }

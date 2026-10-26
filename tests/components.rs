@@ -21,8 +21,8 @@ const COUNTER: &str = r##"
       Column(spacing: 8) {
         Text(id: :label, text: label)
         Row {
-          Button(id: :minus, text: "-1", enabled: count > 0) { on_click { count -= 1 } }
-          Button(id: :plus, text: "+1") { on_click { count += 1 } }
+          Button(id: :minus, text: "-1", enabled: count > 0) { on(:click) { count -= 1 } }
+          Button(id: :plus, text: "+1") { on(:click) { count += 1 } }
         }
         TextInput(id: :input, text <=> draft, placeholder: "type")
         Text(id: :echo, text: "draft: #{draft}")
@@ -94,7 +94,7 @@ const TODOS: &str = r##"
         Row {
           TextInput(id: :input, text <=> draft)
           Button(id: :add, text: "Add", enabled: !draft.empty?) {
-            on_click {
+            on(:click) {
               todos = todos + [Todo::new(title: draft)]
               draft = ""
             }
@@ -177,4 +177,55 @@ fn errors() {
         let err = run_capture(&format!("{base}{src}")).map(|o| format!("no error: {o}")).unwrap_or_else(|e| e.to_string());
         assert!(err.contains(want), "{src}:\n  {err}\n  wanted: {want}");
     }
+}
+
+/// Handlers are `on(:click)` / `on(Event::Click)` and get the Event; an
+/// element only takes the events it emits; emit plays them (a TextInput
+/// takes the text of an Event::Text, a CheckBox toggles on a click).
+#[test]
+fn events() {
+    let out = run(r##"
+        use ui::{Column, Text, Button, TextInput, CheckBox, Event}
+        component Form {
+          prop mut name = ""
+          prop mut agreed = false
+          prop mut log = []
+          Column {
+            TextInput(id: :name, text <=> name) {
+              on(:submit) { log = log + ["submit #{name}"] }
+              on(Event::Text) { |e| log = log + ["typed #{e.text}"] }
+            }
+            CheckBox(id: :agree, checked <=> agreed)
+            Button(id: :ok, text: "OK", enabled: agreed) {
+              on(:click) { |e| log = log + ["click #{e.x},#{e.y} #{e.button}"] }
+              on(:pointer_move) { |e| log = log + ["move #{e.x}"] }
+            }
+          }
+        }
+        f = Form::new
+        f.find(:name).emit(Event::Text("Ann"))
+        f.find(:name).emit(:submit)
+        f.find(:agree).emit(:click)
+        p f.find(:ok).emit(Event::Click(x: 3, y: 4, button: :left)), f.find(:ok).emit(:scroll)
+        f.find(:ok).emit(Event::PointerMove(x: 7, y: 1))
+        p f.name, f.agreed, f.find(:ok).enabled, f.log
+        p catch_panic { f.find(:ok).on(:submit) { } }.err.message
+        p catch_panic { f.find(:ok).emit(Event::Submit) }.err.message
+        p catch_panic { f.find(:ok).on(5) { } }.err.message
+        p UI::TextInput::events
+    "##);
+    assert_eq!(out.lines().collect::<Vec<_>>(), [
+        "1",
+        "0",
+        r#""Ann""#,
+        "true",
+        "true",
+        r#"["typed Ann", "submit Ann", "click 3,4 left", "move 7"]"#,
+        r#""Button doesn't emit Submit (it emits Click, PointerMove, Scroll, Key, Focus)""#,
+        r#""Button doesn't emit Submit (it emits Click, PointerMove, Scroll, Key, Focus)""#,
+        r#""on/emit: 5 isn't an event: write on(:click) or on(Event::Click)""#,
+        "[:Click, :PointerMove, :Scroll, :Key, :Focus, :Text, :Submit]",
+    ]);
+    let err = run_capture("use ui::{Button}\ncomponent C { Button { on_click { } } }").unwrap_err().to_string();
+    assert!(err.contains("`on_click { }`: handlers are `on(:click) { |e| ... }`"), "{err}");
 }

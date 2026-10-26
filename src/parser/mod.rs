@@ -2598,18 +2598,15 @@ impl Parser {
     fn tree_stmt(&mut self, st: Node, parent: Node, locals: &mut Vec<String>, in_element: bool) -> PResult<Vec<Node>> {
         match st {
             st if is_element(&st) => self.element(st, parent, locals),
-            // `on_click { |args| ... }`: a handler
+            // `on(:click) { |e| ... }` / `on(Event::Click) { }`: the element's handler
             Node::Call { recv: None, name: h, args, block: Some(hb), block_arg: None, .. }
-                if in_element && h.starts_with("on_") && args.is_empty() =>
+                if in_element && h == "on" && args.len() == 1 =>
             {
-                Ok(vec![Node::Call {
-                    recv: Some(b(parent)),
-                    name: "on".into(),
-                    args: vec![Node::Sym(h["on_".len()..].to_string())],
-                    block: Some(hb),
-                    block_arg: None,
-                    safe: false,
-                }])
+                Ok(vec![Node::Call { recv: Some(b(parent)), name: "on".into(), args, block: Some(hb), block_arg: None, safe: false }])
+            }
+            Node::Call { recv: None, name: h, args, block: Some(_), .. } if in_element && h.starts_with("on_") && args.is_empty() => {
+                let event = &h["on_".len()..];
+                Err(format!("syntax error: `{h} {{ }}`: handlers are `on(:{event}) {{ |e| ... }}`"))
             }
             Node::If(cond, then, otherwise) => {
                 let (g, mut out) = self.fragment(parent, locals);
