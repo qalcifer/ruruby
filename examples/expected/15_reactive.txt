@@ -12,5 +12,5 @@ count is 1
 count 1, step was 2
 count 2, step was 2
 #<Effect stopped>
-[3, 4]
+[3, 5]
 "reactive cycle: a computation ran 100 times for one change (does a binding feed its own input?)"

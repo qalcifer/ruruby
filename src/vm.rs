@@ -2014,7 +2014,7 @@ impl Vm {
     }
 
     pub fn ivar_get(&self, obj: &Value, iv: Sym) -> Value {
-        if self.rx.tracking.get() {
+        if self.rx.rt.tracking() {
             self.track_read(obj, iv);
         }
         self.ivar_lookup(obj, iv).unwrap_or(Value::NIL)
@@ -2029,7 +2029,7 @@ impl Vm {
             && !self.heap[o].frozen.get()
         {
             self.heap[o].observed.set(true);
-            self.rx.track((o.id(), iv));
+            self.rx.rt.track_key(crate::reactive::key(o.id(), iv));
         }
     }
 
@@ -2190,7 +2190,7 @@ impl Vm {
         if old.is_some_and(|old| self.heap.identical(&old, &v)) {
             return Ok(());
         }
-        if self.rx.changed((o.id(), iv)) {
+        if self.rx.rt.write_key(crate::reactive::key(o.id(), iv)) {
             crate::core::reactive::flush(self)?;
         }
         Ok(())

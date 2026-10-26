@@ -130,5 +130,23 @@ fn gc_and_unobserved_objects() {
         while i < 1000 { plain.count += 1; i += 1 }
         p plain.count, Reactive::stats
     "##));
-    assert_eq!(out, "\"n=9\"\n1000\n[1, 1]\n");
+    assert_eq!(out, "\"n=9\"\n1000\n[1, 2]\n");
+}
+
+/// Bindings and what reads their target run in dependency order, whatever
+/// the order they were made in: an effect made before the binding it reads
+/// runs once per change, after it (ruruby-reactive's push-pull update).
+#[test]
+fn glitch_free_order() {
+    let out = run(&format!("{MODEL}{}", r##"
+        class Box { prop mut n = 1; prop mut double = 0; prop mut label = "" }
+        b = Box::new
+        effect { puts "effect: #{b.n} #{b.double} #{b.label}" }
+        bind(b, :label) { "#{b.n}x2=#{b.double}" }
+        bind(b, :double) { b.n * 2 }
+        b.n = 5
+        b.n = 6
+    "##));
+    let after: Vec<&str> = out.lines().skip_while(|l| !l.starts_with("effect: 5")).collect();
+    assert_eq!(after, ["effect: 5 10 5x2=10", "effect: 6 12 6x2=12"], "{out}");
 }
