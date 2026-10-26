@@ -298,7 +298,8 @@ pub fn init(vm: &mut Vm) {
     vm.def(&e, "uniq", |vm, s, _, b| {
         let items = to_vec(vm, s)?;
         let Some(b) = b else {
-            return Ok({ let u = uniq(vm, items); vm.array(u) });
+            let u = uniq(vm, items)?;
+            return Ok(vm.array(u));
         };
         let mut keys: Vec<Value> = Vec::new();
         let mut out = Vec::new();

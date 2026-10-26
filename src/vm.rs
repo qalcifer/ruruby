@@ -706,6 +706,16 @@ impl Vm {
     }
 
     #[inline(never)]
+    /// `a.eql?(b)` the way Hash keys compare: a value whose class defines
+    /// its own `eql?`/`hash` is asked.
+    pub fn key_eql(&mut self, a: &Value, b: &Value) -> Result<bool, Unwind> {
+        if self.custom_key(a) {
+            let r = self.call_method(a, self.s.eql, vec![*b], None)?;
+            return Ok(r.truthy());
+        }
+        Ok(crate::value::eql(&self.heap, a, b))
+    }
+
     fn custom_object_key(&self, k: &Value) -> bool {
         let cls = self.dispatch_class(k);
         [self.s.hash, self.s.eql].into_iter().any(|m| match self.find_method(&cls, m) {

@@ -326,16 +326,23 @@ pub fn init(vm: &mut Vm) {
     });
     vm.def(&c, "&", |vm, s, a, _| {
         let other = vm.heap[this_ary(vm, &arg(a, 0))?].borrow().clone();
-        let v: Vec<Value> = items(vm, s)?
-            .into_iter()
-            .filter(|x| other.iter().any(|y| eql(&vm.heap, x, y)))
-            .collect();
-        Ok(vm.array(uniq(vm, v)))
+        let mut v: Vec<Value> = Vec::new();
+        for x in items(vm, s)? {
+            for y in &other {
+                if vm.key_eql(&x, y)? {
+                    v.push(x);
+                    break;
+                }
+            }
+        }
+        let u = uniq(vm, v)?;
+        Ok(vm.array(u))
     });
     vm.def(&c, "|", |vm, s, a, _| {
         let mut v = items(vm, s)?;
         v.extend(vm.heap[this_ary(vm, &arg(a, 0))?].borrow().iter().cloned());
-        Ok(vm.array(uniq(vm, v)))
+        let u = uniq(vm, v)?;
+        Ok(vm.array(u))
     });
     vm.def(&c, "compact", |vm, s, _, _| {
         Ok(vm.array(
@@ -563,14 +570,17 @@ fn join_rec(vm: &mut Vm, s: &Value, sep: &str, seen: &mut Vec<u64>) -> Result<St
     Ok(parts.join(sep))
 }
 
-pub fn uniq(vm: &Vm, v: Vec<Value>) -> Vec<Value> {
+pub fn uniq(vm: &mut Vm, v: Vec<Value>) -> Result<Vec<Value>, Unwind> {
     let mut out: Vec<Value> = Vec::new();
-    for x in v {
-        if !out.iter().any(|y| eql(&vm.heap, &x, y)) {
-            out.push(x);
+    'next: for x in v {
+        for y in &out {
+            if vm.key_eql(&x, y)? {
+                continue 'next;
+            }
         }
+        out.push(x);
     }
-    out
+    Ok(out)
 }
 
 fn flatten(vm: &Vm, v: &[Value], depth: i64, out: &mut Vec<Value>, seen: &mut Vec<u64>) -> bool {

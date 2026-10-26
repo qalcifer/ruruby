@@ -177,3 +177,18 @@ fn eql_callbacks_that_change_the_hash() {
          \"hash must return an Integer, not String\"\n1\n"
     );
 }
+
+/// uniq, & and | compare like Hash keys: an object's own eql?/hash count.
+#[test]
+fn uniq_uses_custom_eql() {
+    let out = run(r##"
+        class K {
+          attr_reader :v
+          fn init(@v) {}
+          fn eql?(o) = o.is_a?(K) && v == o.v
+          fn hash = v.hash
+        }
+        p [K::new(1), K::new(1), K::new(2)].uniq.size, ([K::new(1)] & [K::new(1)]).size, ([K::new(1)] | [K::new(1)]).size
+    "##);
+    assert_eq!(out, "2\n1\n1\n");
+}
