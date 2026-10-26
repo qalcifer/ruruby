@@ -156,3 +156,18 @@ fn todo_example() {
     assert!(texts.iter().any(|t| t.contains("1 of 2 left")), "{texts:?}");
     assert!(app.error.is_none(), "{:?}", app.error);
 }
+
+/// --screenshot's PNG writer: a valid file of the right size.
+#[test]
+fn png_writer() {
+    let img = egui::ColorImage::new([3, 2], vec![egui::Color32::RED; 6]);
+    let path = std::env::temp_dir().join(format!("ruruby-png-{}.png", std::process::id()));
+    ruruby_egui::write_png(path.to_str().unwrap(), &img).unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n");
+    assert_eq!(&bytes[12..16], b"IHDR");
+    assert_eq!(u32::from_be_bytes(bytes[16..20].try_into().unwrap()), 3);
+    assert_eq!(u32::from_be_bytes(bytes[20..24].try_into().unwrap()), 2);
+    assert!(bytes.ends_with(&[0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82]), "IEND with its CRC");
+}
