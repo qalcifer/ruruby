@@ -630,7 +630,7 @@ impl Lexer {
         {
             s.push(self.bump()); // `a!==b`
         }
-        let after_dot = matches!(self.last_tok(), Some(Tok::Dot | Tok::AndDot));
+        let after_dot = matches!(self.last_tok(), Some(Tok::Dot | Tok::AndDot | Tok::Colon2));
         let after_def = matches!(self.last_tok(), Some(Tok::Kw(Kw::Def | Kw::Fn)));
         if self.peek() == ':'
             && self.peek_at(1) != ':'

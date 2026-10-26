@@ -75,8 +75,8 @@ class Err < Result {
   fn to_s = inspect
 }
 
-fn Ok(value) = Ok.new(value)
-fn Err(error) = Err.new(error)
+fn Ok(value) = Ok::new(value)
+fn Err(error) = Err::new(error)
 
 # Lookups that can miss and conversions that can fail give a Result instead
 # of panicking (a default or a block can't miss: Ok of it).

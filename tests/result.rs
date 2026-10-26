@@ -131,7 +131,7 @@ fn fallible_core_methods() {
     let out = run(r##"
         h = {a: 1, b: none}
         p h.fetch(:a), h.fetch(:b), h.fetch(:zz), h.fetch(:zz, 0), h.fetch(:zz) { |k| k.to_s }
-        d = Hash.new(5)
+        d = Hash::new(5)
         p d.fetch(:x), d[:x]
         a = [10, 20, 30]
         p a.fetch(0), a.fetch(-1), a.fetch(3), a.fetch(-4), a.fetch(9, :d), a.fetch(9) { |i| i * 2 }
@@ -291,7 +291,7 @@ fn panics_and_catch_panic() {
         p catch_panic { deep(500) }.err.message
         fn runaway(n) = runaway(n + 1)
         p catch_panic { runaway(0) }.err.class
-        p catch_panic { 1 + "x" }.err.class, catch_panic { Integer.nope }.err.class, catch_panic { [].fetch(1).unwrap }.err.message
+        p catch_panic { 1 + "x" }.err.class, catch_panic { Integer::nope }.err.class, catch_panic { [].fetch(1).unwrap }.err.message
     "##);
     assert_eq!(out.lines().collect::<Vec<_>>(), [
         r#""explicit panic""#,

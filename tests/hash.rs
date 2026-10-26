@@ -16,10 +16,10 @@ fn index_finds_what_a_scan_finds() {
     // with 100 filler keys too (indexed); `bad` lists probes they disagree on
     let out = run(r#"
         class Obj {  }
-        o = Obj.new
+        o = Obj::new
         keys = [1, -1, 0, 2**50, -(2**60), 1.5, 0.0, none, true, false, :sym, "str",
                 "", [1, [2, "x"]], [], 1..3, o, {a: 1}]
-        probes = keys + [1.0, -0.0, 2.0**50, "st" + "r", [1, [2, "x"]], (1..3), Obj.new,
+        probes = keys + [1.0, -0.0, 2.0**50, "st" + "r", [1, [2, "x"]], (1..3), Obj::new,
                          [1.0, [2, "x"]], {a: 1}, :other, "other", 2, 2**50 + 1]
         smalls = [{}, {}, {}]   # 6 keys each: scanned
         keys.each_with_index { |k, i| smalls[i / 6][k] = i }
@@ -132,20 +132,20 @@ const POINT: &str = r#"
 fn keys_with_their_own_hash_and_eql() {
     let out = run(&(POINT.to_owned()
         + r#"
-        small = {Pt.new(1, 2) => :a, "s" => 1}
-        small[Pt.new(1, 2)] = :b
-        p small[Pt.new(1, 2)], small.key?(Pt.new(2, 1)), small.size, small["s"]
+        small = {Pt::new(1, 2) => :a, "s" => 1}
+        small[Pt::new(1, 2)] = :b
+        p small[Pt::new(1, 2)], small.key?(Pt::new(2, 1)), small.size, small["s"]
         big = {}
-        100.times { |i| big[Pt.new(i, -i)] = i }
-        p big[Pt.new(42, -42)], big.fetch(Pt.new(3, -3)), big[Pt.new(42, 42)]
-        p big.delete(Pt.new(7, -7)), big.key?(Pt.new(7, -7)), big.size
-        big[Pt.new(42, -42)] = :x
-        p big.size, big[Pt.new(42, -42)], big.values_at(Pt.new(0, 0), Pt.new(9, -9))
-        p [Pt.new(1, 1), Pt.new(1, 1), Pt.new(2, 2)].tally.values
-        k = Pt.new(5, 5)
+        100.times { |i| big[Pt::new(i, -i)] = i }
+        p big[Pt::new(42, -42)], big.fetch(Pt::new(3, -3)), big[Pt::new(42, 42)]
+        p big.delete(Pt::new(7, -7)), big.key?(Pt::new(7, -7)), big.size
+        big[Pt::new(42, -42)] = :x
+        p big.size, big[Pt::new(42, -42)], big.values_at(Pt::new(0, 0), Pt::new(9, -9))
+        p [Pt::new(1, 1), Pt::new(1, 1), Pt::new(2, 2)].tally.values
+        k = Pt::new(5, 5)
         m = {k => 1}
         k.instance_variable_set(:@x, 6)
-        p m[Pt.new(6, 5)], m.rehash[Pt.new(6, 5)]
+        p m[Pt::new(6, 5)], m.rehash[Pt::new(6, 5)]
     "#));
     assert_eq!(
         out,
@@ -163,12 +163,12 @@ fn eql_callbacks_that_change_the_hash() {
           fn hash = 0
         }
         h = {"a" => 1, "b" => 2, "c" => 3}
-        r = catch_panic { h[Evil.new(h)] }.err.message
+        r = catch_panic { h[Evil::new(h)] }.err.message
         p r, h.keys, h.keys.all? { |k| h.key?(k) }
         class Bad { fn hash = "x" }
-        p(catch_panic { {Bad.new => 1} }.err.message)
+        p(catch_panic { {Bad::new => 1} }.err.message)
         class Same { fn eql?(o) = panic("not called for the same object") }
-        s = Same.new
+        s = Same::new
         p({s => 1}[s])
     "#);
     assert_eq!(

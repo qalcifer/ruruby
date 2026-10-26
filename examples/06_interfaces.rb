@@ -29,9 +29,9 @@ class Rect {
   }
 }
 
-shapes = [Circle.new(1), Rect.new(2, 3)]
+shapes = [Circle::new(1), Rect::new(2, 3)]
 shapes.each { |s| puts s.describe }
-p Rect.new(1, 1).is_a?(Shape), Rect.implements?(Shape), shapes.sum(&:area)
+p Rect::new(1, 1).is_a?(Shape), Rect::implements?(Shape), shapes.sum(&:area)
 
 # Built-in classes can implement your interfaces too
 impl Shape for Integer {
@@ -53,7 +53,7 @@ class Cube {
     fn volume() = @side ** 3
   }
 }
-p Cube.new(2).describe, Cube.new(2).is_a?(Shape)
+p Cube::new(2).describe, Cube::new(2).is_a?(Shape)
 
 # Subclasses inherit their parent's interfaces. A method a class has (its
 # own or inherited) beats an interface default: "class wins"
@@ -65,7 +65,7 @@ class Badge < Labeled {
   fn area() = 1
   impl Shape {}
 }
-p Square.new(3).describe, Badge.new.describe   # Badge keeps Labeled's name
+p Square::new(3).describe, Badge::new.describe   # Badge keeps Labeled's name
 
 # An abstract class is a base to finish: no `new`; a `fn` without a body is
 # an abstract method, and its impl blocks may leave required methods to the
@@ -81,8 +81,8 @@ class Button < Widget {
   fn draw() = "button #{@text}"
   fn area() = 4
 }
-p Button.new("ok").render, Button.new("ok").describe, Widget.abstract?
-p catch_panic { Widget.new("x") }.err.message
+p Button::new("ok").render, Button::new("ok").describe, Widget::abstract?
+p catch_panic { Widget::new("x") }.err.message
 
 # The contract is checked when the impl block ends, so a mistake stops the
 # program at once, with the reason:
@@ -102,7 +102,7 @@ class Jobs {
   fn init() = @list = []
   impl Queue by @list
 }
-jobs = Jobs.new
+jobs = Jobs::new
 jobs.push(:build)
 jobs.push(:test)
 p jobs.shift, jobs.size, jobs.empty
@@ -118,11 +118,11 @@ class NumberBag {
     }
   }
 }
-bag = NumberBag.new(5, 3, 8)
+bag = NumberBag::new(5, 3, 8)
 p bag.sort, bag.map(|n| n * 2), bag.min, bag.include?(8), bag.select(|n| n > 4)
 
 # Modules group constants, functions and classes under a name, like a
-# Rust `mod`: a module's `fn`s are called on it (`Geometry.circle_area`)
+# Rust `mod`: a module's `fn`s are called on it (`Geometry::circle_area`)
 module Geometry {
   PI = 3.14159
 
@@ -134,4 +134,4 @@ module Geometry {
     fn area = @side * @side
   }
 }
-p Geometry::PI, Geometry.circle_area(2), Geometry::Square.new(3).area
+p Geometry::PI, Geometry::circle_area(2), Geometry::Square::new(3).area

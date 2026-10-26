@@ -30,12 +30,12 @@ fn deep_ruby_recursion_needs_no_native_stack() {
             fn twice = yield
             class Num {
               fn init(n) = @n = n
-              fn +(o) = if @n == 0 { o } else { Num.new(@n - 1) + (o + 1) }
+              fn +(o) = if @n == 0 { o } else { Num::new(@n - 1) + (o + 1) }
             }
             # each/map/times are written in Ruby (prelude.rb), so recursing
             # through them needs no native stack either
             fn via_each(n) = if n == 0 { 0 } else { [n].map { |k| 1 + via_each(k - 1) }.first }
-            p down(9_000), via_yield(3_000), Num.new(4_000) + 0, via_each(2_000)
+            p down(9_000), via_yield(3_000), Num::new(4_000) + 0, via_each(2_000)
         "#)
     });
     assert_eq!(out, "9000\n3000\n4000\n2000\n");
@@ -105,7 +105,7 @@ fn control_flow_across_frames() {
           define_method(:stop) { |x| [1, 2, 3].each { |y| return y * x if y == 2 }; :never }
         }
         v = class E { 42 }
-        p C.new.hi(1), Ghost.new.zap(1, 2), D.new.stop(5), v
+        p C.new.hi(1), Ghost::new.zap(1, 2), D.new.stop(5), v
         # a lambda's break and return stay inside it
         l = || { [1, 2].each { |x| return x + 100 }; :no }
         m = lambda { break 7 }

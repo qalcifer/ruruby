@@ -50,9 +50,9 @@ fn implementing_interfaces() {
             fn describe() = "cube: #{super}"
           }
         }
-        p Circle.new(1).describe, Square.new(2).describe, 4.describe, Cube.new(1).describe
-        p Square.new(1).is_a?(Shape), Cube.new(1).is_a?(Shape), Cube.implements?(Shape), Circle.implements?(Solid)
-        p Shape.interface?, Circle.interface?, Cube.ancestors.take(3), [Circle.new(1), 2].sum(&:area)
+        p Circle::new(1).describe, Square::new(2).describe, 4.describe, Cube::new(1).describe
+        p Square::new(1).is_a?(Shape), Cube::new(1).is_a?(Shape), Cube::implements?(Shape), Circle::implements?(Solid)
+        p Shape::interface?, Circle::interface?, Cube::ancestors.take(3), [Circle::new(1), 2].sum(&:area)
     "##));
     assert_eq!(out.lines().collect::<Vec<_>>(), [
         r#""Circle: area 3""#,
@@ -105,8 +105,8 @@ fn meeting_requirements() {
           impl Shape {}
           impl Labeled {}
         }
-        p Person.new("ann").greet, Tile.new.describe, Num.parse("5").n, Parse::LIMIT, Num.new(1).twice.size
-        p Both.new.describe, Both.implements?(Labeled)
+        p Person::new("ann").greet, Tile::new.describe, Num::parse("5").n, Parse::LIMIT, Num::new(1).twice.size
+        p Both::new.describe, Both::implements?(Labeled)
     "##));
     assert_eq!(out.lines().collect::<Vec<_>>(), [
         r#""hi ann""#,
@@ -147,8 +147,8 @@ fn inheritance() {
           fn area() = 2
           impl Shape, Named {}
         }
-        p Square.new(2).describe, Square.implements?(Shape), Square.ancestors.take(4)
-        p Big.new(1, 1).describe, Tile.new.describe, Tile.ancestors.take(4), Both.new.name
+        p Square::new(2).describe, Square::implements?(Shape), Square::ancestors.take(4)
+        p Big::new(1, 1).describe, Tile::new.describe, Tile::ancestors.take(4), Both::new.name
     "##));
     assert_eq!(out.lines().collect::<Vec<_>>(), [
         r#""Square: area 5""#,
@@ -185,10 +185,10 @@ fn abstract_classes() {
           fn self.kind() = :container
         }
         class Grid < Panel { fn draw() = "grid" }
-        b = Button.new("ok")
-        p b.render, b.describe, Grid.new("g").describe, Grid.kind, b.is_a?(Widget), b.is_a?(Shape)
-        p Widget.abstract?, Panel.abstract?, Button.abstract?, Grid.implements?(Shape)
-        p catch_panic { Widget.new("x") }.err.message, catch_panic { Panel.new("x") }.err.message
+        b = Button::new("ok")
+        p b.render, b.describe, Grid::new("g").describe, Grid::kind, b.is_a?(Widget), b.is_a?(Shape)
+        p Widget::abstract?, Panel::abstract?, Button::abstract?, Grid::implements?(Shape)
+        p catch_panic { Widget::new("x") }.err.message, catch_panic { Panel::new("x") }.err.message
     "##));
     assert_eq!(out.lines().collect::<Vec<_>>(), [
         r#""[button ok]""#,
@@ -257,7 +257,7 @@ fn delegation() {
             fn size() = @items.size * 10
           }
         }
-        h = History.new
+        h = History::new
         p h.top_or(:none), h.empty
         h.push(1)
         h.push(2)

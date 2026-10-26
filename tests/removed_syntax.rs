@@ -81,7 +81,7 @@ fn look_alikes_still_work() {
         loop { n += 1; break unless n < 3 }
         p x, y, z, n, (1; 2), [1].map { |v| v }
         # `raise` is only removed as a function: a method of that name is fine
-        obj = Object.new
+        obj = Object::new
         fn obj.raise(x) = "custom #{x}"
         p obj.raise(1)
         # `end` and `begin` stay method names (Range#end)
@@ -96,9 +96,9 @@ fn look_alikes_still_work() {
         p i
         # modules are namespaces: no include/extend/prepend methods, but
         # Array#prepend and String#prepend are unrelated and stay
-        p [2].prepend(1), "b".prepend("a"), Module.respond_to?(:include), 1.respond_to?(:extend)
-        m = Module.new
-        p catch_panic { Class.new { include m } }.err.class
+        p [2].prepend(1), "b".prepend("a"), Module::respond_to?(:include), 1.respond_to?(:extend)
+        m = Module::new
+        p catch_panic { Class::new { include m } }.err.class
     "#);
     assert_eq!(
         out,

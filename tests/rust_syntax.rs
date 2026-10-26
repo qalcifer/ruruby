@@ -132,7 +132,7 @@ fn braces_for_every_construct() {
         class Dog {
           class << self { fn create(n) = new(n) }
         }
-        puts Dog.create("rex"), Animal.new("a"), Greeting.hello("you"), Greeting::VERSION
+        puts Dog::create("rex"), Animal::new("a"), Greeting::hello("you"), Greeting::VERSION
         list = [1, 5, 9]
         if (list.any? { |v| v > 8 }) { p :parens }
         while list.size > 2 { list.pop }
@@ -256,18 +256,18 @@ fn modules_hold_functions() {
           fn to_f(c) = round1(c * SCALE + 32)
           fn self.to_c(f) = round1((f - 32) / SCALE)   # same thing, spelled out
           private fn round1(x) = x.round(1)
-          module Format { fn show(c) = "#{c}°C = #{Temp.to_f(c)}°F" }
+          module Format { fn show(c) = "#{c}°C = #{Temp::to_f(c)}°F" }
           class Reading {
             fn init(c) = @c = c
             fn hot? = @c * SCALE > 50
           }
         }
         module Temp { fn freezing = to_f(0) }    # reopened
-        p Temp.to_f(100), Temp.to_c(212.0), Temp.freezing, Temp::Format.show(10)
-        p Temp::Reading.new(30).hot?, Temp.singleton_methods.sort, Temp.instance_methods
-        p catch_panic { Temp.round1(1.25) }.err.message
+        p Temp::to_f(100), Temp::to_c(212.0), Temp::freezing, Temp::Format::show(10)
+        p Temp::Reading::new(30).hot?, Temp::singleton_methods.sort, Temp::instance_methods
+        p catch_panic { Temp::round1(1.25) }.err.message
         interface Hello { fn hi() = "hi" }
-        p Hello.instance_methods, Hello.singleton_methods
+        p Hello::instance_methods, Hello::singleton_methods
     "##);
     assert_eq!(out.lines().collect::<Vec<_>>(), [
         "212.0",
@@ -312,4 +312,24 @@ fn field_parameters() {
     assert!(err("fn f(@a, @a) = 1").contains("duplicate parameter `@a`"));
     assert!(err("interface I { fn f(@a) = 1 }").contains("interfaces have no state"));
     assert!(err("[1].each { |@a| a }").contains("unexpected token in parameter list"));
+}
+
+/// `Type::func(...)` is the style for constructors, class methods and module
+/// functions; `Type.func` still works, and classes in variables use `.`.
+/// After `::` a keyword is a method name (`P::class`).
+#[test]
+fn path_calls() {
+    let out = run(r##"
+        class P {
+          fn init(@a = 1) {}
+          attr_reader :a
+          fn self.make(x) = yield(x)
+          fn self.end = :end
+        }
+        module M { fn f(x) = x + 1 }
+        cls = P
+        p P::new(2).a, P.new(3).a, cls.new.a, P::make(4) { |x| x * 2 }, P::make(5, &|x| -x)
+        p M::f(1), M.f(1), P::class, P::end, P::name, Hash::new(0)[:k], P::new::a
+    "##);
+    assert_eq!(out, "2\n3\n1\n8\n-5\n2\n2\nClass\n:end\n\"P\"\n0\n1\n");
 }

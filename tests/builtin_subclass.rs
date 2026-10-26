@@ -25,7 +25,7 @@ fn instance_variables_on_builtin_values() {
         GC.stress = false
         3000.times { |i| x = [i]; x.instance_variable_set(:@i, i) }
         GC.start
-        fresh = Array.new(3000) { [] }
+        fresh = Array::new(3000) { [] }
         p fresh.all? { |x| x.instance_variables.empty? }, 1.instance_variables
     "##);
     assert_eq!(out, "[1, 2]\n\"tag\"\n[:@h]\ntrue\n[1, 2]\n[]\ntrue\n[]\n");
@@ -45,14 +45,14 @@ fn instances_of_builtin_subclasses() {
         }
         e = Entries[[1, :a], [2, :b]]
         p e.class, e.keys, e.to_s
-        h = Class.new(Hash) { attr_accessor :foo }.new(0)
+        h = Class::new(Hash) { attr_accessor :foo }.new(0)
         h.foo = 5
         h[:x] = 1
         p h.foo, h[:x], h[:nope], h.class.superclass
-        s = Class.new(String) { fn shout = upcase + "!" }.new("hi")
+        s = Class::new(String) { fn shout = upcase + "!" }.new("hi")
         p s.shout, s.class.superclass, (s + "x").class
-        c = Class.new(Array) { fn init(n) = super(n) { |i| i * i } }
-        p c.new(4), Class.new(Hash)[a: 1].class.superclass
+        c = Class::new(Array) { fn init(n) = super(n) { |i| i * i } }
+        p c.new(4), Class::new(Hash)[a: 1].class.superclass
     "##);
     assert_eq!(
         out,
@@ -64,10 +64,10 @@ fn instances_of_builtin_subclasses() {
 #[test]
 fn new_and_brackets_on_the_builtin_classes() {
     let out = run(r##"
-        p Array.new(3, 0), Array.new([1, 2]), Array.new(2) { _1 + 1 }, Array[1, :b]
-        p Hash.new(5)[:z], Hash[1, 2, 3, 4], Hash[[[1, 2], [3]]], Hash[{a: 1}], String.new("q")
+        p Array::new(3, 0), Array::new([1, 2]), Array::new(2) { _1 + 1 }, Array[1, :b]
+        p Hash::new(5)[:z], Hash[1, 2, 3, 4], Hash[[[1, 2], [3]]], Hash[{a: 1}], String::new("q")
         p catch_panic { Hash[1, 2, 3] }.err.message
-        p catch_panic { Array.new(-1) }.err.message
+        p catch_panic { Array::new(-1) }.err.message
     "##);
     assert_eq!(
         out,
@@ -84,13 +84,13 @@ fn copies_keep_class_and_ivars() {
         e.instance_variable_set(:@t, 1)
         d = e.dup
         p d.class, d.hi, d.instance_variable_get(:@t), d.reverse!.class, d, e, e.clone.class
-        c = Class.new(Hash) { attr_accessor :foo }
+        c = Class::new(Hash) { attr_accessor :foo }
         h = c.new(0)
         h.foo = :iv
         h[:a] = 1
         m = h.merge({b: 2})
         p m.class == c, m.foo, m, m[:zz], {}.merge(h).class, h.clone.foo
-        s = Class.new(String).new("x")
+        s = Class::new(String).new("x")
         p s.dup.class == s.class, [1].dup.class, "y".dup.class
     "##);
     assert_eq!(

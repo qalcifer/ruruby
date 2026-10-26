@@ -118,9 +118,9 @@ fn classes_and_singletons() {
             fn total = @@total
           }
         }
-        Counter.label = "c"
-        2.times { Counter.create }
-        p Counter.total, Counter.label
+        Counter::label = "c"
+        2.times { Counter::create }
+        p Counter::total, Counter::label
         module Outer {
           LIMIT = 3
           class Inner {
@@ -128,12 +128,12 @@ fn classes_and_singletons() {
           }
         }
         class Outer::Other {  }
-        p Outer::Inner.new.limit, Outer::Other.name, ::Outer::LIMIT
-        o = Object.new
+        p Outer::Inner::new.limit, Outer::Other::name, ::Outer::LIMIT
+        o = Object::new
         fn o.hi = "hi from o"
         p o.hi, o.singleton_methods
-        Named = Class.new(StandardError) { fn extra = 1 }
-        p Named.name, Named.new.extra, Named.ancestors.include?(StandardError)
+        Named = Class::new(StandardError) { fn extra = 1 }
+        p Named::name, Named::new.extra, Named::ancestors.include?(StandardError)
         class String {
           alias shout upcase
         }
@@ -158,7 +158,7 @@ fn control_flow() {
           [1, 2].each { |x| return x * 10 }
         }
         p f
-        p(catch_panic { Proc.new { break }.call }.err.class)
+        p(catch_panic { Proc::new { break }.call }.err.class)
         p defined?(foo), defined?(p), defined?(String), defined?(@x), defined?(r), defined?(none)
         p none&.length, "ab"&.length
         n = 2
@@ -329,7 +329,7 @@ fn immediate_operands() {
           fn +(o) = "#{@n + o}m"
         }
         big = 9223372036854775807
-        p 1 + 1, 5 - -2, 1.5 + 1, big + 1, -big - 3, "a" + "b", [1, 2] - [1], Meters.new(2) + 3
+        p 1 + 1, 5 - -2, 1.5 + 1, big + 1, -big - 3, "a" + "b", [1, 2] - [1], Meters::new(2) + 3
     "##;
     assert_eq!(
         run(src),
@@ -391,7 +391,7 @@ fn adding_an_immediate_to_a_local() {
         fn f(x) = [x + 1, x - 2, 10 - 3, x + 1 + 1]
         p f(1), f(2**62), f(2.5)
         class Tag { fn +(o) = "tag+#{o}"; fn -(o) = "tag-#{o}" }
-        t = Tag.new
+        t = Tag::new
         p t + 1, t - 1
         m = 140737488355327
         p m + 1, -m - 2

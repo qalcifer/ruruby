@@ -161,11 +161,11 @@ fn classes_modules_super() {
             super + " (child)"
           }
         }
-        c = Child.build("x")
+        c = Child::build("x")
         puts c.describe
         puts c.label
         c.name = "y"
-        p c.name, c.is_a?(Named), Child.ancestors
+        p c.name, c.is_a?(Named), Child::ancestors
         p c
     "##;
     assert_eq!(
@@ -202,10 +202,10 @@ fn user_defined_enumerable_and_comparable() {
             }
           }
         }
-        vs = [Version.new(1, 2), Version.new(0, 9), Version.new(1, 10)]
+        vs = [Version::new(1, 2), Version::new(0, 9), Version::new(1, 10)]
         puts vs.max, vs.min, vs.sort.join(" ")
-        p Version.new(1, 0) == Version.new(1, 0)
-        shelf = Shelf.new([3, 1, 2])
+        p Version::new(1, 0) == Version::new(1, 0)
+        shelf = Shelf::new([3, 1, 2])
         p shelf.sort, shelf.map { |x| x * 2 }, shelf.include?(2), shelf.min_by { |x| -x }
     "##;
     assert_eq!(
@@ -241,7 +241,7 @@ fn errors_are_results_and_panics() {
 #[test]
 fn hashes_and_enumerable() {
     let src = r##"
-        h = Hash.new(0)
+        h = Hash::new(0)
         "a b a c b a".split.each { |w| h[w] += 1 }
         p h, h.sort_by { |k, v| -v }.first, h.select { |k, v| v > 1 }.keys
         p (1..10).select(&:even?).sum, [3, 1, 2].sort.reverse, [1, 2, 3].inject { |a, b| a * b }

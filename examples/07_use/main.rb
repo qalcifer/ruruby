@@ -13,11 +13,11 @@ use shapes::Units::*                    # everything in Units: constants and fns
 use shapes::Text::shout                 # one function of a module
 use models::user::User                  # models/user.rb
 
-p Circle.new(2).area, Square.new(3).area, CM_PER_INCH
+p Circle::new(2).area, Square::new(3).area, CM_PER_INCH
 p to_cm(10), to_inches(2.54), shout("hi")   # imported functions, called bare
-p Circle.name                           # the file is part of the full name
+p Circle::name                           # the file is part of the full name
 
-ada = User.new("Ada", "ada@example.org")
+ada = User::new("Ada", "ada@example.org")
 p ada.to_s, ada.admin?
 
 # only what was named came in: neither the Shapes module nor SECRET

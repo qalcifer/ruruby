@@ -125,8 +125,8 @@ fn natives_that_define_methods_follow_the_scope() {
     // on another class or from a method they define public ones
     let out = run(r##"
         fn err = catch_panic { yield }.unwrap_or(:private)
-        other = Class.new
-        c = Class.new {
+        other = Class::new
+        c = Class::new {
           private
           attr_accessor :a
           [1].each { define_method(:d) { :d } }
@@ -135,7 +135,7 @@ fn natives_that_define_methods_follow_the_scope() {
         }
         c.make
         p err { c.new.a }, err { c.new.d }, other.new.pub, c.new.from_cm
-        e = Class.new
+        e = Class::new
         e.class_eval { private; attr_reader :r; define_method(:m) { :m } }
         p err { e.new.r }, err { e.new.m }, e.new.send(:m)
     "##);
@@ -158,7 +158,7 @@ fn aliases_and_builtin_private_methods() {
         }
         a = A.new
         p err { a.priv2 }, err { a.priv3 }, a.pub2, a.send(:priv2)
-        p err { Object.new.init }, err { Object.new.respond_to_missing?(:x, false) }
+        p err { Object::new.init }, err { Object::new.respond_to_missing?(:x, false) }
     "##);
     assert_eq!(out, ":private\n:private\n:pub\n:priv\n:private\n:private\n");
 }
@@ -226,10 +226,10 @@ fn blocks_share_the_scope_visibility() {
     // a `private` in a block reaches the scope it was written in; blocks
     // run by class_eval & co. are scopes of their own, starting public
     let out = run(r##"
-        a = Class.new { (|| { private }).call; fn m = 1 }
-        b = Class.new { private; [1].each { [2].each { fn n = 1 } }; fn o = 1 }
-        c = Class.new { private; class_eval { fn q = 1; [1].each { fn r = 1 } }; fn s = 1 }
-        d = Class.new { class_eval { private }; fn t = 1 }
+        a = Class::new { (|| { private }).call; fn m = 1 }
+        b = Class::new { private; [1].each { [2].each { fn n = 1 } }; fn o = 1 }
+        c = Class::new { private; class_eval { fn q = 1; [1].each { fn r = 1 } }; fn s = 1 }
+        d = Class::new { class_eval { private }; fn t = 1 }
         p a.private_method_defined?(:m), b.private_instance_methods(false).sort
         p c.public_instance_methods(false).sort, c.private_method_defined?(:s)
         p d.public_method_defined?(:t)
@@ -242,14 +242,14 @@ fn blocks_without_upvars_still_share_visibility() {
     // a block that reads no outer local skips the frame's env, unless the
     // frame's code sets a default visibility
     let out = run(r##"
-        c = Class.new {
+        c = Class::new {
           blk = proc { attr_reader :late }
           private
           blk.call
           [1].each { fn in_block = 1 }
         }
         p c.private_method_defined?(:late), c.private_method_defined?(:in_block)
-        d = Class.new { [1].each { define_method(:pub) { 1 } } }
+        d = Class::new { [1].each { define_method(:pub) { 1 } } }
         p d.public_method_defined?(:pub)
     "##);
     assert_eq!(out, "true\ntrue\ntrue\n");

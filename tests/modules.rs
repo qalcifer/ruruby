@@ -49,10 +49,10 @@ fn use_imports_named_constants() {
 use person::Person
 use models::user::User
 use shapes::{Circle, Square}
-puts Person.new("Ann"), User.new("Bob"), User.superclass, Circle.new.area + Square.new.area
-p User.new("x").admin?, shout("hi"), $runs
+puts Person::new("Ann"), User::new("Bob"), User::superclass, Circle::new.area + Square::new.area
+p User::new("x").admin?, shout("hi"), $runs
 p catch_panic { HELPER }.err.message
-p Person.name, User.name
+p Person::name, User::name
 "#,
             ),
         ],
@@ -70,7 +70,7 @@ fn use_glob_and_namespaces_stay_apart() {
         &[
             ("a.rb", "class Thing { fn who = :a }\nLIMIT = 1\n"),
             ("b.rb", "class Thing { fn who = :b }\n"),
-            ("main.rb", "use a::*\np Thing.new.who, LIMIT\nuse b::Thing\np Thing.new.who\n"),
+            ("main.rb", "use a::*\np Thing::new.who, LIMIT\nuse b::Thing\np Thing::new.who\n"),
         ],
     );
     assert_eq!(run(&dir).unwrap(), ":a\n1\n:b\n");
@@ -131,8 +131,8 @@ use geometry::Shapes::{Square, Triangle}
 use geometry::Units::Imperial::*
 use geometry::Shapes::Circle::KIND
 use geometry::{Units}
-p Circle.new(2).area, Square.new(3).area, Triangle.new.area, INCH, KIND, Units::CM
-p Circle.name, defined?(Shapes)
+p Circle::new(2).area, Square::new(3).area, Triangle::new.area, INCH, KIND, Units::CM
+p Circle::name, defined?(Shapes)
 ",
             ),
         ],
@@ -168,7 +168,7 @@ fn use_graphs_and_namespaces() {
             ("reexport.rb", "use base::Base\n"),
             (
                 "consts.rb",
-                "LIMIT = 10\nclass Box {\n  fn self.limit = LIMIT\n  fn inner = Helper.new.name\n  class Helper { fn name = :helper }\n}\n",
+                "LIMIT = 10\nclass Box {\n  fn self.limit = LIMIT\n  fn inner = Helper::new.name\n  class Helper { fn name = :helper }\n}\n",
             ),
             ("lib/req.rb", "use base::Base\nREQ_BASE = Base\n"),
             (
@@ -177,11 +177,11 @@ fn use_graphs_and_namespaces() {
 use left::Left
 use right::Right
 use reexport::Base
-p $loads, Left.superclass.equal?(Right.superclass), Left.superclass.equal?(Base), Base.new.kind
+p $loads, Left::superclass.equal?(Right::superclass), Left::superclass.equal?(Base), Base::new.kind
 class Base { fn extra = :reopened }
-p Left.new.extra
+p Left::new.extra
 use consts::Box
-p Box.limit, Box.new.inner, defined?(LIMIT)
+p Box::limit, Box::new.inner, defined?(LIMIT)
 require_relative "lib/req"
 p REQ_BASE.equal?(Base)
 "#,
@@ -257,7 +257,7 @@ use other::Loud
 class Ruler {
   fn mark(i) = "#{to_cm(i)} cm"
 }
-p to_cm(10), CM, shout("hi"), Ruler.new.mark(1), [1, 2].map(|i| to_cm(i)), Loud.new.say("x")
+p to_cm(10), CM, shout("hi"), Ruler::new.mark(1), [1, 2].map(|i| to_cm(i)), Loud::new.say("x")
 p catch_panic { to_in(1) }.err.class, catch_panic { Units }.err.class
 "##,
             ),

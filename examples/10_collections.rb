@@ -33,7 +33,7 @@ p stock.transform_values(|n| n * 10), stock.filter_map(|name, n| if n.zero? { na
 stock.delete(:pears)
 p stock, stock.invert, stock.any?(|_, n| n > 5)
 
-counts = Hash.new(0)                         # a default for missing keys
+counts = Hash::new(0)                         # a default for missing keys
 "the cat saw the dog".split.each { |w| counts[w] += 1 }
 p counts, counts.max_by(|_, n| n)
 

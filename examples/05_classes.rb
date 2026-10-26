@@ -32,9 +32,12 @@ class Cat < Animal {
   fn speak = super + " (meow)"   # the parent's speak, extended
 }
 
-animals = [Dog.new("Rex", 5, "beagle"), Cat.new("Tom", 3), Dog.new("Fido", 7)]
+# `Type::func(...)` calls a class's own functions (constructors, class methods),
+# like Rust; `value.method` calls on values. (`Dog.new` works too: a class is
+# a value, `cls = Dog; cls.new(...)`.)
+animals = [Dog::new("Rex", 5, "beagle"), Cat::new("Tom", 3), Dog::new("Fido", 7)]
 animals.each { |a| puts a }
-p Dog.kingdom, Dog.superclass, Dog.new("x", 1).is_a?(Animal), Cat.ancestors.first(2)
+p Dog::kingdom, Dog::superclass, Dog::new("x", 1).is_a?(Animal), Cat::ancestors.first(2)
 
 # Operators are methods; implementing the Comparable interface (its one
 # required method is <=>) gives <, >, between?, clamp... (see 06_interfaces.rb)
@@ -47,11 +50,11 @@ class Version {
     fn <=>(other) = [major, minor] <=> [other.major, other.minor]
   }
   fn to_s = "#{major}.#{minor}"
-  fn +(other) = Version.new(major + other.major, minor + other.minor)
+  fn +(other) = Version::new(major + other.major, minor + other.minor)
 }
 
-v1 = Version.new(1, 2)
-v2 = Version.new(1, 10)
+v1 = Version::new(1, 2)
+v2 = Version::new(1, 10)
 p v1 < v2, [v2, v1].max.to_s, v1.between?(v1, v2), (v1 + v2).to_s
 
 # Visibility: private methods are called without a receiver
@@ -71,7 +74,7 @@ class Account {
   }
 }
 
-acct = Account.new.deposit(50).deposit(25)
+acct = Account::new.deposit(50).deposit(25)
 p acct.balance, acct.respond_to?(:check)
 p catch_panic { acct.deposit(-1) }.err.message
 
@@ -79,10 +82,10 @@ p catch_panic { acct.deposit(-1) }.err.message
 class Account {
   fn empty? = balance == 0
 }
-p acct.empty?, Account.new.empty?
+p acct.empty?, Account::new.empty?
 
 # Objects can get methods of their own
-special = Object.new
+special = Object::new
 fn special.greet = "only me"
 p special.greet
 
@@ -91,6 +94,6 @@ class Point {
   attr_accessor :x, :y
   fn init(@x, @y) {}
 }
-pt = Point.new(1, 2)
+pt = Point::new(1, 2)
 pt.x = 10
 p [pt.x, pt.y]

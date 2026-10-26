@@ -22,7 +22,7 @@ fn none_value() {
         y = 3
         y &&= none
         p x, y, none&.length, "ab"&.length, none.to_a.empty?
-        h = Hash.new
+        h = Hash::new
         p h[:missing], [][3], [none].first, "#{none}|", [none].to_s, {none => 1}
         fn f(a = none, b: none) = [a, b]
         p f, f(1, b: 2), defined?(none), none.frozen?, none.object_id == none.object_id

@@ -21,7 +21,7 @@ class Temp {
   fn init(@deg) {}
   fn to_s = "#{@deg}°C"
 }
-puts "It is #{Temp.new(21)} with #{3 + 4} clouds and #{none.inspect} wind"
+puts "It is #{Temp::new(21)} with #{3 + 4} clouds and #{none.inspect} wind"
 
 # Multi-line strings: heredocs (<<~ strips the indentation)
 text = <<~TEXT

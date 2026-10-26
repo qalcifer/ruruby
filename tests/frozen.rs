@@ -51,12 +51,12 @@ fn frozen_objects_and_classes() {
         o = P.new.freeze
         p fz { o.a = 1 }, fz { o.set }, fz { o.instance_variable_set(:@c, 1) }, fz { fn o.s = 1 }
         p fz { o.instance_eval { @z = 1 } }, (class << o { self }).frozen?
-        c = Class.new.freeze
+        c = Class::new.freeze
         p fz { c.class_eval { fn x = 1 } }.start_with?("can't modify frozen class"), fz { c.define_method(:y) { 1 } } != :changed
         class F { @@v = 1; freeze }
         class G < F { fn set = (@@v = 2) }
         p fz { class F { fn z = 1 } }, fz { class F { K = 1 } }, fz { F.attr_reader :q }, fz { G.new.set }
-        m = Module.new.freeze
+        m = Module::new.freeze
         p fz { m.module_eval { fn w = 1 } }.start_with?("can't modify frozen module")
         p defined?(1).frozen?, defined?(String).frozen?
     "##));

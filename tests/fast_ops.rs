@@ -11,25 +11,25 @@ fn get_idx_and_size() {
         a = [10, 20, 30]
         p a[0], a[-1], a[3], a[-4], a[1.9], a[0..1]
         h = {a: 1, "s" => 2}
-        p h[:a], h["s"], h[:zz], Hash.new(7)[:x], Hash.new { |hh, k| k.to_s }[:y]
+        p h[:a], h["s"], h[:zz], Hash::new(7)[:x], Hash::new { |hh, k| k.to_s }[:y]
         class Key {
           fn init(n) = @n = n
           fn hash = 1
           fn eql?(o) = true
         }
-        p({Key.new(1) => :found}[Key.new(2)])
+        p({Key::new(1) => :found}[Key::new(2)])
         class Sub < Array {
           fn [](i) = :sub
           fn size = :subsize
         }
-        s = Sub.new
+        s = Sub::new
         p s[0], s.size
         b = [1, 2]
         fn b.[](i) = :singleton
         fn b.length = :len
         p b[0], b.length, [1, 2][0]
         p "héllo".size, [1, 2, 3].size, {a: 1}.length, (1..4).size
-        o = Object.new
+        o = Object::new
         fn o.size = 42
         p o.size
         class Array {
@@ -86,7 +86,7 @@ fn set_idx_and_shl() {
           fn []=(i, v) = super(i, v.to_s)
           fn <<(v) = super(v * 2)
         }
-        s2 = Sub.new
+        s2 = Sub::new
         s2[0] = 1
         s2 << 3
         p s2
@@ -142,12 +142,12 @@ fn interpolation_and_string_keys() {
         class Foo { fn to_s = "foo!" }
         class Bad { fn to_s = 42 }
         x = 5
-        p "a#{x}b#{none}c#{true}#{1.5}#{:sym}#{"str"}#{Foo.new}#{[1, "x"]}#{{a: 1}}"
+        p "a#{x}b#{none}c#{true}#{1.5}#{:sym}#{"str"}#{Foo::new}#{[1, "x"]}#{{a: 1}}"
         p "#{x}", "#{x}#{x}", "lit", :"dyn#{x}", "#{1 << 60}", "#{2**70}", "#{-0.0}#{1e20}"
         s = "q"
         s = "#{s}#{s}!"
-        p s, Bad.new.to_s.class
-        p "#{Bad.new}".start_with?("#<Bad")
+        p s, Bad::new.to_s.class
+        p "#{Bad::new}".start_with?("#<Bad")
         class Integer { alias_method :__to_s, :to_s; fn to_s(*) = "int" }
         p "#{7}"
         class Integer { alias_method :to_s, :__to_s }
@@ -204,7 +204,7 @@ fn operands_in_place() {
             2.5
           }
         }
-        c = Counter.new
+        c = Counter::new
         n = 0
         n += 1 while n < c.size
         p n, c.calls
@@ -220,7 +220,7 @@ fn operands_in_place() {
             out
           }
         }
-        g = Grow.new
+        g = Grow::new
         g.push(:a)
         p g.walk
         s = "abc"

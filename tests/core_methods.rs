@@ -18,7 +18,7 @@ fn hash_methods() {
         p g.select! { |k, v| v > 1 }.size, g.select! { true }, g.reject! { |k, v| v == 2 }.keys
         p g.keep_if { false }, g.delete(:zz) { |k| "no #{k}" }, g.delete(:zz)
         r = {x: 1}
-        p r.replace({y: 2}), Hash.new { |hh, k| k }.default_proc.class, {}.default_proc
+        p r.replace({y: 2}), Hash::new { |hh, k| k }.default_proc.class, {}.default_proc
         p({a: 1, b: 2}.select(|(k, v)| v == 1), {a: 1}.reject { |k, v| v == 1 })
         big = {}
         20.times { |i| big[i] = i }
@@ -112,15 +112,15 @@ fn array_methods() {
 #[test]
 fn errors_ranges_and_numbers() {
     let out = run(r##"
-        e = NameError.new("a", :foo)
+        e = NameError::new("a", :foo)
         p e.message, e.name
         p catch_panic { class X { alias foo bar } }.err.name
         p catch_panic { NoSuchConst }.err.name
         e = catch_panic { nosuch(3, 1, 4) }.err
         p e.name, e.args, e.instance_variables
-        p NoMethodError.new("t", :t, [1, 2]).args
-        p Range.new(1, 10, true), Range.new(1, none), Range.new(1, 3) == (1..3)
-        p catch_panic { Range.new(1, "a") }.err.message
+        p NoMethodError::new("t", :t, [1, 2]).args
+        p Range::new(1, 10, true), Range::new(1, none), Range::new(1, 3) == (1..3)
+        p catch_panic { Range::new(1, "a") }.err.message
         p ~0, ~2, 7.quo(2), 5.75.quo(-2), none.__id__ == none.object_id
     "##);
     assert_eq!(

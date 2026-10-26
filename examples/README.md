@@ -47,7 +47,8 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
 - **`none`** is the absent value (falsy, like `false`).
 - **Classes**: the constructor is `fn init(...)`; a parameter written as a field
   is stored in it: `fn init(@name, @age = 0) {}`. Create objects with
-  `Person::new("Ann")`.
+  `Person::new("Ann")`. `Type::func(...)` calls a class's or module's own
+  functions, `value.method` calls on values (`Type.func` works too).
 - **Interfaces** name a contract: `interface Shape { fn area(); fn name() = "s" }`
   (no body: required; a body: a default). `impl Shape for Circle { fn area() = ... }`
   or `impl Shape { ... }` inside the class; checked when the block ends.
@@ -55,7 +56,7 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
   A class's own or inherited method beats an interface default. `abstract class`
   holds bodiless `fn`s and partial impls for its subclasses to finish; it has no `new`.
 - **Modules** are namespaces, like Rust's `mod`: constants, classes and functions;
-  `fn f` in `module M { }` is called as `M.f` (`private fn` keeps it internal).
+  `fn f` in `module M { }` is called as `M::f(...)` (`private fn` keeps it internal).
 
 Removed from Ruby: `def`/`end`, `do ... end`, `->`, `elsif`, `then`, `begin`, `? :`,
 `nil`, `raise`/`rescue`/`ensure`/`retry`, `include`/`extend`/`prepend`/`module_function` (modules are

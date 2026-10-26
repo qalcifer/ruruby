@@ -4,7 +4,7 @@
 # matching, hashes and string formatting.
 
 class Inventory {
-  fn init = @items = Hash.new(0)
+  fn init = @items = Hash::new(0)
 
   fn add(name, count) {
     return Err("count must be positive") unless count > 0
@@ -58,7 +58,7 @@ script = <<~COMMANDS
   report
 COMMANDS
 
-inventory = Inventory.new
+inventory = Inventory::new
 script.lines.each { |line|
   case run(inventory, line.strip) {
     in Ok(text) { puts text }

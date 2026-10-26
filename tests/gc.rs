@@ -20,7 +20,7 @@ fn cyclic_garbage_is_freed() {
         keep = []
         i = 0
         while i < 30_000 {
-          a = Node.new; b = Node.new; a.other = b; b.other = a
+          a = Node::new; b = Node::new; a.other = b; b.other = a
           make_proc
           keep << [i] if i % 1000 == 0
           i += 1
@@ -47,11 +47,11 @@ fn every_kind_of_root_survives_stress() {
           fn cvar = @@cvar
           define_method(:dm) { "define_method #{[1]}" }
         }
-        obj = Object.new
+        obj = Object::new
         fn obj.single = "singleton method"
         counter = 0
         bump = || { counter += 1; "closure #{counter}" }
-        h = Hash.new { |hash, k| hash[k] = "default #{k}" }
+        h = Hash::new { |hash, k| hash[k] = "default #{k}" }
         fn deep(n) = if n == 0 { ["deep"] } else { [deep(n - 1)].flatten }
         fn ensured() {
           $log = "ensure ran"
@@ -61,7 +61,7 @@ fn every_kind_of_root_survives_stress() {
         e = catch_panic { panic "boom #{[1]}" }.err
         v = ensured { [1, 2].each { |x| break "broke #{x}" if x == 2 } }
         at_exit { puts "at_exit #{[1, 2].sum}" }
-        p $global, CONST, Holder.ivar, Holder.new.cvar, Holder.new.dm, obj.single
+        p $global, CONST, Holder::ivar, Holder::new.cvar, Holder::new.dm, obj.single
         p bump.(), bump.(), h[:a], deep(30), r, e.message, v, $log
         p "a" * 3, [1, [2, [3]]].flatten, {a: [1]}.map { |k, v| [k, v] }, (1..4).to_a
         p GC.count > 10
@@ -114,21 +114,21 @@ fn anonymous_classes_are_collected() {
     // classes live in the heap too; unreachable ones are freed, named and
     // referenced ones survive
     let out = run(r#"
-        Kept = Class.new { fn hi = "kept" }
-        held = [Class.new(StandardError) { fn hi = "held" }]
+        Kept = Class::new { fn hi = "kept" }
+        held = [Class::new(StandardError) { fn hi = "held" }]
         i = 0
         while i < 20_000 {
-          c = Class.new { fn x = 1 }
+          c = Class::new { fn x = 1 }
           c.new.x
-          Module.new
+          Module::new
           i += 1
         }
         GC.start
         none
-        p GC.live < 20_000, Kept.new.hi, held[0].new.hi, held[0].ancestors.include?(StandardError)
+        p GC.live < 20_000, Kept::new.hi, held[0].new.hi, held[0].ancestors.include?(StandardError)
         GC.stress = true
-        k = Class.new(Kept) { fn hi = super + "!" }
-        p k.new.hi, Kept.name, k.superclass == Kept
+        k = Class::new(Kept) { fn hi = super + "!" }
+        p k.new.hi, Kept::name, k.superclass == Kept
     "#);
     assert_eq!(out, "true\n\"kept\"\n\"held\"\ntrue\n\"kept!\"\n\"Kept\"\ntrue\n");
 }
