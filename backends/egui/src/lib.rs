@@ -313,6 +313,16 @@ impl eframe::App for UiApp {
     }
 }
 
+/// The image without the empty rows at its bottom (the background color of
+/// its last row), keeping `margin` of them.
+pub fn trim_bottom(image: &egui::ColorImage, margin: usize) -> egui::ColorImage {
+    let [w, h] = image.size;
+    let Some(&bg) = image.pixels.last() else { return image.clone() };
+    let used = (0..h).rev().find(|y| image.pixels[y * w..(y + 1) * w].iter().any(|p| *p != bg)).map_or(0, |y| y + 1);
+    let keep = (used + margin).min(h).max(1);
+    egui::ColorImage::new([w, keep], image.pixels[..w * keep].to_vec())
+}
+
 /// Writes an egui image as a PNG (uncompressed deflate: no dependencies).
 pub fn write_png(path: &str, image: &egui::ColorImage) -> std::io::Result<()> {
     let [w, h] = image.size;

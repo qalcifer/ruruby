@@ -30,8 +30,8 @@ component App {
   Window(title: "Todos", width: 360, height: 420) {
     Column(spacing: 8, padding: 8) {
       Row(spacing: 6) {
-        TextInput(text <=> draft, placeholder: "What needs doing?") { on(:submit) { add } }
-        Button(text: "Add", enabled: !draft.strip.empty?) { on(:click) { add } }
+        TextInput(id: :input, text <=> draft, placeholder: "What needs doing?") { on(:submit) { add } }
+        Button(id: :add, text: "Add", enabled: !draft.strip.empty?) { on(:click) { add } }
       }
       for t in todos {
         TodoRow(todo: t, on_delete: |gone| { todos = todos.reject(|x| x.equal?(gone)) })

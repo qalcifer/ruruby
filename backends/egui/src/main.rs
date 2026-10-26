@@ -33,6 +33,7 @@ impl eframe::App for Shot {
         if self.frame == 8 {
             let done = self.done.clone();
             ctx.request_screenshot(move |image| {
+                let image = ruruby_egui::trim_bottom(&image, 48);
                 match ruruby_egui::write_png(&path, &image) {
                     Ok(()) => eprintln!("saved {path} ({}x{})", image.size[0], image.size[1]),
                     Err(e) => eprintln!("{path}: {e}"),
