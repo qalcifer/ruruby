@@ -35,6 +35,22 @@ pub fn compile_program(vm: &mut Vm, prog: &Program) -> Result<Rc<Irep>, String> 
     crate::codegen::compile_with(prog, &mut vm.syms, &fns)
 }
 
+/// A module made by the core (`use ui::{Column, Text}` imports from the
+/// prelude's `UI`) as a unit `use` can name like a file: already run, its
+/// classes and constants exported.
+pub fn builtin_unit(vm: &mut Vm, key: &str, module: &str) {
+    let s = vm.intern(module);
+    let Some(m) = vm.heap[vm.c.object].consts.borrow().get(&s).copied() else { return };
+    let crate::value::V::Class(m) = vm.kind(m) else { return };
+    let mut exports = Exports::default();
+    for k in vm.heap[m].consts.borrow().keys() {
+        exports.names.insert(vm.sym_name(*k).to_string(), Export::Scope(Exports::default()));
+    }
+    let empty = crate::parser::parse("").expect("empty program");
+    let irep = crate::codegen::compile(&empty, &mut vm.syms).expect("empty program");
+    vm.units.insert(key.to_string(), Unit { irep, exports, module: Some(m), enums: vec![] });
+}
+
 /// The enums a file can name: by name, and the variants it can name bare.
 struct Known {
     enums: HashMap<String, Vec<String>>,

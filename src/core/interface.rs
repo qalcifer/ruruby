@@ -220,6 +220,12 @@ pub fn init(vm: &mut Vm) {
         let Some(cls) = class_of_value(vm, s) else {
             return Ok(*s);
         };
+        // a subclass of a component is one
+        if let Some(sup) = vm.heap[cls].superclass
+            && vm.heap[sup].is_component.get()
+        {
+            vm.heap[cls].is_component.set(true);
+        }
         if vm.heap[cls].is_abstract.get() {
             return Ok(*s);
         }

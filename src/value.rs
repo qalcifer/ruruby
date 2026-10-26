@@ -199,6 +199,9 @@ pub struct RClass {
     pub bodies: Cell<u32>,
     /// lang-fork-ui: the `prop`s the class declares (not inherited ones).
     pub props: RefCell<Vec<PropInfo>>,
+    /// lang-fork-ui: a `component` (or a subclass of one): `new` builds its
+    /// tree after init.
+    pub is_component: Cell<bool>,
     /// lang-fork: on an `enum`, its variants' names in order.
     pub enum_variants: RefCell<Option<Vec<Sym>>>,
     /// lang-fork: on an enum variant's class.
@@ -286,6 +289,7 @@ impl RClass {
             abstract_reqs: Default::default(),
             bodies: Default::default(),
             props: Default::default(),
+            is_component: Default::default(),
             enum_variants: Default::default(),
             variant: Default::default(),
         }

@@ -27,6 +27,7 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
 | [13_enums.rb](13_enums.rb) | `enum`: unit, tuple and struct variants, methods, equality and order, matching, a state machine, `Result` as an enum |
 | [14_props.rb](14_props.rb) | `prop` and `prop mut`, defaults, types, the init props give a class, `set`/`changed`/`get`, props in interfaces |
 | [15_reactive.rb](15_reactive.rb) | `effect { }`, `bind(obj, :prop) { }`, `batch`, `untracked`: code that re-runs when the props it read change |
+| [16_components.rb](16_components.rb) | `component`, element trees (`use ui::{...}`), arguments as bindings, `<=>`, `on_click`, `for`/`if` in trees, nested components |
 
 ## The rules in brief
 
@@ -63,6 +64,9 @@ cargo run --release -- examples/07_use/main.rb     # a program in several files
 - **Reactivity**: `effect { ... }` re-runs when a prop it read changes;
   `bind(label, :text) { "n=#{c.count}" }` keeps a prop up to date; `batch { }`
   groups changes. Dependencies are whatever the block read.
+- **Components**: `component Name { prop ...; Column { Text(text: "n=#{n}") } }`;
+  element arguments are bindings, `text <=> draft` binds both ways, `on_click { }`
+  handles events, `for`/`if` in the tree follow the state.
 - **Enums** are Rust's: `enum Shape { Circle(r), Rect { w, h }, Empty }`; create
   `Shape::Circle(2)`, `Shape::Rect(w: 2, h: 3)`, `Shape::Empty`; take apart with
   `case s { in Shape::Circle(r) { ... } }`, which must handle every variant (or

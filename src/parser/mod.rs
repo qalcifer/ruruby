@@ -56,6 +56,9 @@ pub struct Parser {
     enums: Vec<EnumDecl>,
     cases: Vec<CaseInfo>,
     enum_stack: Vec<String>,
+    /// lang-fork-ui: inside a `component`, its props so far: a bare
+    /// `count = v` / `count += 1` there writes the prop.
+    component_props: Option<Vec<String>>,
 }
 
 /// Deepest nesting accepted, by the parser and by the lexer for `#{}`.
@@ -95,6 +98,7 @@ pub fn parse_file(src: &str, file: &str, line: u32) -> PResult<Program> {
         enums: vec![],
         cases: vec![],
         enum_stack: vec![],
+        component_props: None,
     };
     let body = p.parse_stmts()?;
     if !p.at(&Tok::Eof) {
@@ -843,6 +847,7 @@ impl Parser {
         if !is_assignable(&lhs) {
             return Ok(lhs);
         }
+        let lhs = self.component_prop_target(lhs);
         match self.peek().clone() {
             Tok::Assign => {
                 self.advance();
@@ -869,6 +874,21 @@ impl Parser {
                 })
             }
             _ => Ok(lhs),
+        }
+    }
+
+    /// In a component, a bare name of one of its props as an assignment
+    /// target is the prop (`count += 1` is `self.count = self.count + 1`)
+    /// when it's followed by `=` or `op=`.
+    fn component_prop_target(&self, lhs: Node) -> Node {
+        let is_assign = matches!(self.peek(), Tok::Assign | Tok::OpAssign(_));
+        match lhs {
+            Node::Call { recv: None, name, args, block: None, block_arg: None, safe }
+                if is_assign && args.is_empty() && self.component_props.as_ref().is_some_and(|p| p.contains(&name)) =>
+            {
+                Node::Call { recv: Some(b(Node::SelfRef)), name, args, block: None, block_arg: None, safe }
+            }
+            lhs => lhs,
         }
     }
 
@@ -1711,6 +1731,7 @@ impl Parser {
             }
             Tok::Ident(name) if name == "enum" && matches!(self.peek2(), Tok::Const(_) | Tok::Colon2) => self.parse_enum(),
             Tok::Ident(name) if name == "prop" && matches!(self.peek2(), Tok::Ident(_) | Tok::Label(_)) => self.parse_prop(),
+            Tok::Ident(name) if name == "component" && matches!(self.peek2(), Tok::Const(_)) => self.parse_component(),
             Tok::Ident(name) if name == "abstract" && matches!(self.peek2(), Tok::Kw(Kw::Module | Kw::Interface)) => {
                 Err(self.err("only classes can be abstract (an interface already is)"))
             }
@@ -1750,6 +1771,11 @@ impl Parser {
                 }
                 if self.can_start_command_arg() && matches!(self.peek(), Tok::Str(_)) {
                     return self.parse_call_rest(None, name, false);
+                }
+                // in a component, `Row { ... }` is an element without arguments
+                if self.component_props.is_some() && self.at(&Tok::LBrace) && !self.no_brace {
+                    let block = self.parse_block_opt(true)?;
+                    return Ok(Node::Call { recv: None, name, args: vec![], block, block_arg: None, safe: false });
                 }
                 Ok(Node::Const(name))
             }
@@ -2453,6 +2479,207 @@ impl Parser {
         })
     }
 
+    /// lang-fork-ui: `component Name { props, fns, element tree }` — a class
+    /// inheriting `UI::Component`. Its body's element statements (`Column(...)
+    /// { ... }`: a call of a capitalized name) become a private `__build`
+    /// that `new` runs after `init`: each element is made, added to its
+    /// parent, its arguments bound (`text: expr` re-runs when what expr read
+    /// changes; literals are set once; `text <=> draft` binds both ways), and
+    /// `on_click { }` in its block becomes a handler.
+    #[inline(never)]
+    fn parse_component(&mut self) -> PResult<Node> {
+        let line = self.line();
+        self.advance(); // `component`
+        let path = self.header(|p| p.parse_cpath())?;
+        self.need_brace("component")?;
+        self.push_scope(true);
+        let saved = self.component_props.replace(vec![]);
+        let body = self.parse_brace_body();
+        self.component_props = saved;
+        let body = body?;
+        let locals = self.pop_scope();
+        let mut class_stmts = vec![call(None, "__component", vec![Node::Int(line as i64)])];
+        let mut tree = vec![];
+        let mut build_locals = vec![];
+        for st in stmts_of(body) {
+            if is_element(&st) || is_dynamic(&st) {
+                tree.extend(self.tree_stmt(st, Node::SelfRef, &mut build_locals, false)?);
+            } else {
+                class_stmts.push(st);
+            }
+        }
+        if !tree.is_empty() {
+            let build = Node::Def {
+                recv: None,
+                name: "__build".into(),
+                params: b_params(Params::default()),
+                body: b(Node::Seq(tree)),
+                locals: build_locals,
+            };
+            class_stmts.push(call(None, "private", vec![build]));
+        }
+        Ok(Node::Class {
+            path: b(path),
+            superclass: Some(b(Node::Colon2(b(Node::Const("UI".into())), "Component".into()))),
+            body: b(Node::Seq(class_stmts)),
+            locals,
+            is_module: false,
+            interface: false,
+        })
+    }
+
+    /// The code making element `st` under `parent` (see parse_component).
+    fn element(&mut self, st: Node, parent: Node, locals: &mut Vec<String>) -> PResult<Vec<Node>> {
+        let Node::Call { name, args, block, .. } = st else { unreachable!("checked by is_element") };
+        let e = self.fresh("el");
+        locals.push(e.clone());
+        let el = || Node::LVar(e.clone());
+        let mut out = vec![
+            Node::LAsgn(e.clone(), b(call(None, "__ui_new", vec![Node::Const(name.clone())]))),
+        ];
+        let closure = |body: Node| Some(Box::new(Block { params: Params::default(), body, locals: vec![], for_loop: false }));
+        let bind = |target: Node, prop: &str, body: Node| Node::Call {
+            recv: None,
+            name: "bind".into(),
+            args: vec![target, Node::Sym(prop.to_string())],
+            block: closure(body),
+            block_arg: None,
+            safe: false,
+        };
+        for a in args {
+            match a {
+                Node::Hash(items, _) => {
+                    for item in items {
+                        let ast::HashItem::Pair(Node::Sym(k), v) = item else {
+                            return Err(format!("syntax error: {name}(...): arguments are `prop: value` or `prop <=> target`"));
+                        };
+                        let literal = matches!(
+                            v,
+                            Node::Int(_) | Node::Float(_) | Node::Str(_) | Node::Sym(_) | Node::True | Node::False | Node::Nil
+                        );
+                        out.push(if literal { ast::call(Some(el()), &format!("{k}="), vec![v]) } else { bind(el(), &k, v) });
+                    }
+                }
+                // `text <=> draft`: the element follows draft, draft follows the element
+                Node::Call { recv: Some(lhs), name: op, args: rhs, .. } if op == "<=>" => {
+                    let (Node::Call { recv: None, name: k, args: none, .. }, [target]) = (*lhs, rhs.as_slice()) else {
+                        return Err(format!("syntax error: {name}(...): two-way binding is `prop <=> target`"));
+                    };
+                    if !none.is_empty() {
+                        return Err(format!("syntax error: {name}(...): two-way binding is `prop <=> target`"));
+                    }
+                    let (obj, field) = match target {
+                        Node::Call { recv: None, name: t, args, .. } if args.is_empty() => (Node::SelfRef, t.clone()),
+                        Node::Call { recv: Some(o), name: t, args, .. } if args.is_empty() => ((**o).clone(), t.clone()),
+                        _ => return Err(format!("syntax error: {name}(...): `{k} <=> ...` needs a prop to bind to")),
+                    };
+                    out.push(bind(el(), &k, target.clone()));
+                    out.push(bind(obj, &field, ast::call(Some(el()), &k, vec![])));
+                }
+                _ => return Err(format!("syntax error: {name}(...): arguments are `prop: value` or `prop <=> target`")),
+            }
+        }
+        out.push(call(None, "__ui_ready", vec![el()]));
+        out.push(ast::call(Some(parent), "__ui_add", vec![el()]));
+        if let Some(block) = block {
+            if !block.params.names().is_empty() {
+                return Err(format!("syntax error: {name} {{ }}: an element's block takes no parameters"));
+            }
+            locals.extend(block.locals.iter().cloned());
+            for st in stmts_of(block.body) {
+                out.extend(self.tree_stmt(st, el(), locals, true)?);
+            }
+        }
+        Ok(out)
+    }
+
+    /// A statement of a tree under `parent`: an element, a handler (in an
+    /// element's block), `if`/`for` (a Fragment an effect rebuilds), or code.
+    fn tree_stmt(&mut self, st: Node, parent: Node, locals: &mut Vec<String>, in_element: bool) -> PResult<Vec<Node>> {
+        match st {
+            st if is_element(&st) => self.element(st, parent, locals),
+            // `on_click { |args| ... }`: a handler
+            Node::Call { recv: None, name: h, args, block: Some(hb), block_arg: None, .. }
+                if in_element && h.starts_with("on_") && args.is_empty() =>
+            {
+                Ok(vec![Node::Call {
+                    recv: Some(b(parent)),
+                    name: "on".into(),
+                    args: vec![Node::Sym(h["on_".len()..].to_string())],
+                    block: Some(hb),
+                    block_arg: None,
+                    safe: false,
+                }])
+            }
+            Node::If(cond, then, otherwise) => {
+                let (g, mut out) = self.fragment(parent, locals);
+                let mut inner = vec![];
+                let branch = |p: &mut Self, body: Node, inner: &mut Vec<String>| -> PResult<Node> {
+                    let mut v = vec![];
+                    for st in stmts_of(body) {
+                        v.extend(p.tree_stmt(st, Node::LVar(g.clone()), inner, in_element)?);
+                    }
+                    Ok(Node::Seq(v))
+                };
+                let t = branch(self, *then, &mut inner)?;
+                let e = branch(self, *otherwise, &mut inner)?;
+                let body = Node::Seq(vec![
+                    ast::call(Some(Node::LVar(g.clone())), "__ui_clear", vec![]),
+                    Node::If(cond, b(t), b(e)),
+                ]);
+                out.push(effect_node(body, inner));
+                Ok(out)
+            }
+            // `for item in items { ... }`: one copy per item; `item` is a
+            // parameter, so each copy's bindings see their own item
+            Node::Call { recv: Some(iter), name, args, block: Some(blk), .. }
+                if name == "each" && args.is_empty() && blk.for_loop =>
+            {
+                let Node::Seq(mut parts) = blk.body else { unreachable!("parse_for") };
+                let body = parts.pop().unwrap_or(Node::Nil);
+                let var = match parts.pop() {
+                    Some(Node::LAsgn(v, _)) => v,
+                    _ => return Err("syntax error: `for` in a tree takes one variable: `for item in items { ... }`".into()),
+                };
+                let (g, mut out) = self.fragment(parent, locals);
+                let mut inner = vec![var.clone()];
+                let mut v = vec![];
+                for st in stmts_of(body) {
+                    v.extend(self.tree_stmt(st, Node::LVar(g.clone()), &mut inner, in_element)?);
+                }
+                let each = Node::Call {
+                    recv: Some(iter),
+                    name: "each".into(),
+                    args: vec![],
+                    block: Some(Box::new(Block {
+                        params: Params { required: vec![ParamTarget::Name(var)], ..Default::default() },
+                        body: Node::Seq(v),
+                        locals: inner,
+                        for_loop: false,
+                    })),
+                    block_arg: None,
+                    safe: false,
+                };
+                let body = Node::Seq(vec![ast::call(Some(Node::LVar(g.clone())), "__ui_clear", vec![]), each]);
+                out.push(effect_node(body, vec![]));
+                Ok(out)
+            }
+            st => Ok(vec![st]),
+        }
+    }
+
+    /// A Fragment under `parent`: its local, and the code adding it.
+    fn fragment(&mut self, parent: Node, locals: &mut Vec<String>) -> (String, Vec<Node>) {
+        let g = self.fresh("frag");
+        locals.push(g.clone());
+        let frag = Node::Colon2(b(Node::Const("UI".into())), "Fragment".into());
+        let out = vec![
+            Node::LAsgn(g.clone(), b(call(None, "__ui_new", vec![frag]))),
+            ast::call(Some(parent), "__ui_add", vec![Node::LVar(g.clone())]),
+        ];
+        (g, out)
+    }
+
     /// lang-fork-ui: `prop [mut] name [: Type] [= default] [{ get() ...
     /// set(v) ... changed(old) ... }]` in a class body: `__prop(:name, mut,
     /// Type, default kind, default, line)` (see src/core/props.rs), then the
@@ -2478,6 +2705,9 @@ impl Parser {
         };
         if !is_ident_name(&name) || name.ends_with(['?', '!']) {
             return Err(self.err(&format!("prop: `{name}` can't be a prop name")));
+        }
+        if let Some(props) = self.component_props.as_mut() {
+            props.push(name.clone());
         }
         if self.in_interface {
             let mut reqs = vec![call(
@@ -3122,6 +3352,33 @@ fn any_matches(list: Node, subject: Node, w: String) -> Node {
 }
 
 /// Names bound by destructuring parameters, in order.
+/// An element statement in a component: `Text(...)`, `Column(...) { }`,
+/// `Spacer` isn't one (a constant), `Text(...)` must have parentheses or a block.
+fn is_element(n: &Node) -> bool {
+    matches!(n, Node::Call { recv: None, name, block_arg: None, .. } if name.starts_with(char::is_uppercase))
+}
+
+/// `if` / `for` in a tree.
+fn is_dynamic(n: &Node) -> bool {
+    match n {
+        Node::If(..) => true,
+        Node::Call { recv: Some(_), name, block: Some(blk), .. } => name == "each" && blk.for_loop,
+        _ => false,
+    }
+}
+
+/// `effect { body }`, the block having `locals`.
+fn effect_node(body: Node, locals: Vec<String>) -> Node {
+    Node::Call {
+        recv: None,
+        name: "effect".into(),
+        args: vec![],
+        block: Some(Box::new(Block { params: Params::default(), body, locals, for_loop: false })),
+        block_arg: None,
+        safe: false,
+    }
+}
+
 fn b_params(p: Params) -> Box<Params> {
     Box::new(p)
 }

@@ -18,6 +18,7 @@ pub mod reactive;
 pub mod range;
 pub mod reflect;
 pub mod string;
+pub mod ui;
 
 pub use crate::gc::{ArrayRef, ClassRef, HashRef, StrRef};
 use crate::symbol::Sym;
@@ -43,12 +44,17 @@ pub fn init(vm: &mut Vm) {
     enums::init_enums(vm);
     props::init(vm);
     reactive::init(vm);
+    ui::init(vm);
 }
 
 /// Core methods written in Ruby (`prelude.rb`, then the lang-fork's
 /// `result.rb`), compiled into every VM.
 pub fn load_prelude(vm: &mut Vm) {
-    const PRELUDES: [(&str, &str); 2] = [("prelude.rb", include_str!("prelude.rb")), ("result.rb", include_str!("result.rb"))];
+    const PRELUDES: [(&str, &str); 3] = [
+        ("prelude.rb", include_str!("prelude.rb")),
+        ("result.rb", include_str!("result.rb")),
+        ("ui.rb", include_str!("ui.rb")),
+    ];
     for (name, src) in PRELUDES {
         let prog = crate::parser::parse_file(src, name, 1).unwrap_or_else(|e| panic!("{name} parses: {e}"));
         let irep = crate::codegen::compile(&prog, &mut vm.syms).unwrap_or_else(|e| panic!("{name} compiles: {e}"));
@@ -66,6 +72,7 @@ pub fn load_prelude(vm: &mut Vm) {
     let (ok, err) = (class(vm, "Ok"), class(vm, "Err"));
     let value = vm.intern("@value");
     vm.results = Some((ok, err, value));
+    crate::modules::builtin_unit(vm, "ui", "UI");
 }
 
 /// Argument `i`, or nil when missing.
